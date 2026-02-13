@@ -344,7 +344,7 @@
                 </div>
             </div>
 
-            <!-- Card 4 – Osmo Wizard -->
+            <!-- Card 4 – Creative Wizard -->
             <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
                 <div class="card-face" style="color:#201d1d; background-color:#e4bdf2;">
                     <div class="aspect"></div>
@@ -361,7 +361,7 @@
                                 <p>Early Adopter</p>
                             </div>
                         </div>
-                        <div><div class="card-title">Osmo Wizard.</div></div>
+                        <div><div class="card-title">Creative Wizard.</div></div>
                     </div>
                 </div>
             </div>
@@ -379,7 +379,7 @@
                             <div class="card-tags">
                                 <p>Web Design</p>
                                 <p>Webflow Development</p>
-                                <p>Osmo Supply</p>
+                                <p>Site Operations</p>
                             </div>
                         </div>
                         <div><div class="card-title">Websites.</div></div>
@@ -425,8 +425,8 @@
 
     // ── Register plugins & custom ease ──
     gsap.registerPlugin(Draggable, CustomEase);
-    try { CustomEase.create("osmo", "0.625, 0.05, 0, 1"); } catch (_) {}
-    var mainEase = "osmo";
+    try { CustomEase.create("stackEase", "0.625, 0.05, 0, 1"); } catch (_) {}
+    var mainEase = "stackEase";
 
     // ── DOM references ──
     var stackEl      = document.querySelector("[data-dropping-stack-init]");

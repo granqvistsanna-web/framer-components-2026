@@ -364,7 +364,8 @@ addPropertyControls(RotatingText, {
         step: 1,
         unit: "px",
         displayStepper: true,
-        hidden: (props: any) => !props.highlightEnabled,
+        hidden: (props: { highlightEnabled: boolean }) =>
+            !props.highlightEnabled,
     },
     highlightPaddingY: {
         type: ControlType.Number,
@@ -375,7 +376,8 @@ addPropertyControls(RotatingText, {
         step: 1,
         unit: "px",
         displayStepper: true,
-        hidden: (props: any) => !props.highlightEnabled,
+        hidden: (props: { highlightEnabled: boolean }) =>
+            !props.highlightEnabled,
     },
     highlightRadius: {
         type: ControlType.Number,
@@ -386,13 +388,15 @@ addPropertyControls(RotatingText, {
         step: 1,
         unit: "px",
         displayStepper: true,
-        hidden: (props: any) => !props.highlightEnabled,
+        hidden: (props: { highlightEnabled: boolean }) =>
+            !props.highlightEnabled,
     },
     highlightTextColor: {
         type: ControlType.Color,
         title: "Word Color",
         defaultValue: "#000000",
-        hidden: (props: any) => !props.highlightEnabled,
+        hidden: (props: { highlightEnabled: boolean }) =>
+            !props.highlightEnabled,
     },
 
     // Animation

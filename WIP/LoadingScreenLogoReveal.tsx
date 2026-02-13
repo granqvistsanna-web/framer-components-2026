@@ -25,14 +25,6 @@ function sanitizeSvg(html: string): string {
     return doc.documentElement.outerHTML
 }
 
-// GSAP types
-declare global {
-    interface Window {
-        gsap: any
-        CustomEase: any
-    }
-}
-
 interface Props {
     // Colors
     backgroundColor: string
@@ -188,7 +180,7 @@ export default function LoadingScreenLogoReveal({
     }
 
     useEffect(() => {
-        let loadTimeline: any = null
+        let loadTimeline: GsapTimeline | null = null
         let cancelled = false
         const timeoutIds: ReturnType<typeof setTimeout>[] = []
 

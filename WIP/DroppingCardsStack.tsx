@@ -2,14 +2,6 @@ import * as React from "react"
 import { useEffect, useRef, useId, useMemo, useState } from "react"
 import { addPropertyControls, ControlType } from "framer"
 
-declare global {
-    interface Window {
-        gsap: any
-        Draggable: any
-        CustomEase: any
-    }
-}
-
 interface CardData {
     title: string
     tags: string
@@ -38,6 +30,16 @@ interface Props {
     preview: boolean
 }
 
+type StackAnimState = {
+    opacity?: number
+    zIndex?: number
+    pointerEvents?: "auto" | "none"
+    x?: string
+    y?: string
+    xPercent?: number
+    yPercent?: number
+}
+
 const DEFAULT_CARDS: CardData[] = [
     {
         title: "Branding & Identity.",
@@ -61,7 +63,7 @@ const DEFAULT_CARDS: CardData[] = [
         textColor: "#f4f4f4",
     },
     {
-        title: "Osmo Wizard.",
+        title: "Creative Wizard.",
         tags: "Magic Spells, Legendary Status, Creative Powerhouse, Early Adopter",
         image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a0012a2bbbee1e9a7b23d_service-4.avif",
         bgColor: "#e4bdf2",
@@ -69,7 +71,7 @@ const DEFAULT_CARDS: CardData[] = [
     },
     {
         title: "Websites.",
-        tags: "Web Design, Webflow Development, Osmo Supply",
+        tags: "Web Design, Webflow Development, Site Operations",
         image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a034ccd0b1a0c5b3af037_service-5.avif",
         bgColor: "#10101f",
         textColor: "#f4f4f4",
@@ -206,8 +208,8 @@ export default function DroppingCardsStack({
         if (displayCards.length < 3) return
 
         const state = {
-            draggable: null as any,
-            timelines: [] as any[],
+            draggable: null as DraggableInstance | null,
+            timelines: [] as GsapTimeline[],
             keyDown: null as ((e: KeyboardEvent) => void) | null,
             resize: null as (() => void) | null,
             resizeTimer: 0,
@@ -253,14 +255,14 @@ export default function DroppingCardsStack({
                 if (CustomEasePlugin) {
                     try {
                         CustomEasePlugin.create(
-                            "osmo",
+                            "stackEase",
                             "0.625, 0.05, 0, 1"
                         )
                     } catch (_e) {
                         /* ease may already exist */
                     }
                 }
-                const mainEase = CustomEasePlugin ? "osmo" : "power2.out"
+                const mainEase = CustomEasePlugin ? "stackEase" : "power2.out"
 
                 const list = listRef.current
                 const stackEl = stackRef.current
@@ -348,7 +350,7 @@ export default function DroppingCardsStack({
                         const card = cardAt(depth)
                         const xVal = getUnitValue(offsetX, depth)
                         const yVal = getUnitValue(offsetY, depth)
-                        const s: any = {
+                        const s: StackAnimState = {
                             opacity: 1,
                             zIndex: 999 - depth,
                             pointerEvents:
@@ -501,7 +503,7 @@ export default function DroppingCardsStack({
                             offsetY,
                             depth - 1
                         )
-                        const move: any = {
+                        const move: StackAnimState = {
                             zIndex: 999 - (depth - 1),
                         }
                         if (offsetX.includes("%"))
@@ -530,7 +532,7 @@ export default function DroppingCardsStack({
                         safeVisibleCount - 1
                     )
 
-                    const inSet: any = {
+                    const inSet: StackAnimState = {
                         opacity: 0,
                         zIndex: 999 - safeVisibleCount,
                     }
@@ -542,7 +544,7 @@ export default function DroppingCardsStack({
                     else inSet.y = backY
                     gsap.set(incomingBack, inSet)
 
-                    const inTo: any = { opacity: 1 }
+                    const inTo: StackAnimState = { opacity: 1 }
                     if (offsetX.includes("%"))
                         inTo.xPercent = parseFloat(startX)
                     else inTo.x = startX
@@ -603,7 +605,7 @@ export default function DroppingCardsStack({
                             offsetY,
                             depth + 1
                         )
-                        const move: any = {
+                        const move: StackAnimState = {
                             zIndex: 999 - (depth + 1),
                         }
                         if (offsetX.includes("%"))
@@ -623,7 +625,7 @@ export default function DroppingCardsStack({
                         offsetY,
                         safeVisibleCount
                     )
-                    const hideBack: any = { opacity: 0 }
+                    const hideBack: StackAnimState = { opacity: 0 }
                     if (offsetX.includes("%"))
                         hideBack.xPercent = parseFloat(backX)
                     else hideBack.x = backX
@@ -1137,7 +1139,7 @@ addPropertyControls(DroppingCardsStack, {
                 textColor: "#f4f4f4",
             },
             {
-                title: "Osmo Wizard.",
+                title: "Creative Wizard.",
                 tags: "Magic Spells, Legendary Status, Creative Powerhouse, Early Adopter",
                 image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a0012a2bbbee1e9a7b23d_service-4.avif",
                 bgColor: "#e4bdf2",
@@ -1145,7 +1147,7 @@ addPropertyControls(DroppingCardsStack, {
             },
             {
                 title: "Websites.",
-                tags: "Web Design, Webflow Development, Osmo Supply",
+                tags: "Web Design, Webflow Development, Site Operations",
                 image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a034ccd0b1a0c5b3af037_service-5.avif",
                 bgColor: "#10101f",
                 textColor: "#f4f4f4",

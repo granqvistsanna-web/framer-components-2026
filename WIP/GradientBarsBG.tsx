@@ -31,8 +31,6 @@ interface Gradient_Bars_BGProps {
 }
 
 /**
- * Gradient Bars Background by Hamim Reza Shammo
- *
  * @framerSupportedLayoutWidth fixed
  * @framerSupportedLayoutHeight fixed
  */
@@ -207,17 +205,20 @@ export default function Gradient_Bars_BG(props: Gradient_Bars_BGProps) {
                             return (
                                 <div
                                     key={index}
-                                    style={{
-                                        flex: "1 0 0px",
-                                        height: "100%",
-                                        background: `linear-gradient(in oklch ${gradientDir}, ${gradientString()})`,
-                                        transformOrigin,
-                                        animation,
-                                        boxSizing: "border-box",
-                                        margin: "0 -1px",
-                                        // @ts-ignore
-                                        "--initial-scale": height / 100,
-                                    }}
+                                    style={
+                                        {
+                                            flex: "1 0 0px",
+                                            height: "100%",
+                                            background: `linear-gradient(in oklch ${gradientDir}, ${gradientString()})`,
+                                            transformOrigin,
+                                            animation,
+                                            boxSizing: "border-box",
+                                            margin: "0 -1px",
+                                            "--initial-scale": height / 100,
+                                        } as CSSProperties & {
+                                            "--initial-scale": number
+                                        }
+                                    }
                                 />
                             )
                         })}

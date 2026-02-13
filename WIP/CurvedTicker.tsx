@@ -25,55 +25,65 @@ interface BezierControls {
 
 interface TickerCarouselProps {
     children: React.ReactNode
-    speed: number
-    gap: number
-    curveSettings: CurveSettings
-    bezierControls: BezierControls
-    textColor: string
-    font: any
-    enableBlur: boolean
-    blurWidth: number
-    blurIntensity: number
-    blurColor: string
-    draggable: boolean
-    direction: "left" | "right"
-    enableFade: boolean
-    pauseOnHover: boolean
-    enableScale: boolean
-    scaleMin: number
-    scaleMax: number
-    // 3D depth
-    enable3D: boolean
-    perspectiveDistance: number
-    tiltIntensity: number
-    depthIntensity: number
-    enableDepthBlur: boolean
-    depthBlurMax: number
-    enableDepthOpacity: boolean
-    depthOpacityMin: number
-    enableDepthSort: boolean
+    showAdvanced?: boolean
+    showResponsiveTuning?: boolean
+    showPathAdvanced?: boolean
+    showInteractionAdvanced?: boolean
+    speed?: number
+    gap?: number
+    enableResponsive?: boolean
+    mobileBreakpoint?: number
+    mobileSpeedScale?: number
+    mobileGapScale?: number
+    mobileFadeScale?: number
+    mobileMaskScale?: number
+    mobileRotationScale?: number
+    curveSettings?: CurveSettings
+    bezierControls?: BezierControls
+    enableEdgeMask?: boolean
+    edgeMaskWidth?: number
+    edgeMaskIntensity?: number
+    edgeMaskColor?: string
+    // Legacy aliases (kept for backward compatibility)
+    enableBlur?: boolean
+    blurWidth?: number
+    blurIntensity?: number
+    blurColor?: string
+    draggable?: boolean
+    direction?: "left" | "right"
+    enableFade?: boolean
+    pauseOnHover?: boolean
     // Curve path background
-    showCurvePath: boolean
-    curvePathColor: string
-    curvePathWidth: number
-    curvePathOpacity: number
-    curvePathStyle: "solid" | "dashed" | "dotted"
-    curvePathDashLength: number
-    curvePathRoundCaps: boolean
+    showCurvePath?: boolean
+    curvePathColor?: string
+    curvePathWidth?: number
+    curvePathOpacity?: number
+    curvePathStyle?: "solid" | "dashed" | "dotted"
+    curvePathDashLength?: number
+    curvePathRoundCaps?: boolean
     // Scroll control
-    scrollControl: boolean
-    scrollSensitivity: number
+    scrollControl?: boolean
+    scrollSensitivity?: number
     // Snap after drag
-    snapAfterDrag: boolean
-    snapDamping: number
-    // Variable speed
-    enableVariableSpeed: boolean
-    speedVariation: number
+    snapAfterDrag?: boolean
+    snapDamping?: number
     // Appear effect
-    enableAppear: boolean
-    appearDuration: number
-    appearOnView: boolean
+    enableAppear?: boolean
+    appearDuration?: number
+    appearOnView?: boolean
     style?: CSSProperties
+}
+
+const DEFAULT_CURVE_SETTINGS: CurveSettings = {
+    curveHeight: 100,
+    curveType: "sine",
+    curveFrequency: 1,
+    curveAmplitude: 3,
+}
+
+const DEFAULT_BEZIER_CONTROLS: BezierControls = {
+    bezierP1: 0.25,
+    bezierP2: 0.75,
 }
 
 /**
@@ -84,48 +94,37 @@ interface TickerCarouselProps {
  * @framerSupportedLayoutWidth fixed
  * @framerSupportedLayoutHeight fixed
  */
-export default function CurvedTicker(props: TickerCarouselProps) {
+export default function SCurveTicker(props: TickerCarouselProps) {
     const {
         children,
         speed = 50,
         gap: rawGap = 200,
-        curveSettings = {
-            curveHeight: 100,
-            curveType: "sine",
-            curveFrequency: 1,
-            curveAmplitude: 3,
-        },
-        bezierControls = {
-            bezierP1: 0.25,
-            bezierP2: 0.75,
-        },
-        textColor = "#000000",
-        font,
-        enableBlur = true,
-        blurWidth = 100,
-        blurIntensity = 1,
-        blurColor = "#ffffff",
+        enableResponsive = true,
+        mobileBreakpoint = 768,
+        mobileSpeedScale = 0.85,
+        mobileGapScale = 0.78,
+        mobileFadeScale = 0.8,
+        mobileMaskScale = 0.8,
+        mobileRotationScale = 0.75,
+        curveSettings = DEFAULT_CURVE_SETTINGS,
+        bezierControls = DEFAULT_BEZIER_CONTROLS,
+        enableEdgeMask,
+        edgeMaskWidth,
+        edgeMaskIntensity,
+        edgeMaskColor,
+        // Legacy aliases
+        enableBlur,
+        blurWidth,
+        blurIntensity,
+        blurColor,
         draggable = true,
         direction = "left",
         enableFade = true,
         pauseOnHover = false,
-        enableScale = false,
-        scaleMin = 0.8,
-        scaleMax = 1,
-        // 3D depth
-        enable3D = false,
-        perspectiveDistance = 800,
-        tiltIntensity = 20,
-        depthIntensity = 150,
-        enableDepthBlur = false,
-        depthBlurMax = 3,
-        enableDepthOpacity = false,
-        depthOpacityMin = 0.3,
-        enableDepthSort = false,
         // Curve path background
         showCurvePath = false,
         curvePathColor = "rgba(0,0,0,0.1)",
-        curvePathWidth = 2,
+        curvePathWidth = 8,
         curvePathOpacity = 1,
         curvePathStyle = "solid" as const,
         curvePathDashLength = 8,
@@ -136,17 +135,24 @@ export default function CurvedTicker(props: TickerCarouselProps) {
         // Snap after drag
         snapAfterDrag = false,
         snapDamping = 0.12,
-        // Variable speed
-        enableVariableSpeed = false,
-        speedVariation = 0.5,
         // Appear effect
         enableAppear = true,
         appearDuration = 1.2,
         appearOnView = false,
     } = props
 
+    // Prefer new Edge Mask props; fall back to legacy Blur props if present.
+    const resolvedEdgeMaskEnabled = enableEdgeMask ?? enableBlur ?? true
+    const resolvedEdgeMaskWidth = edgeMaskWidth ?? blurWidth ?? 100
+    const resolvedEdgeMaskIntensity = edgeMaskIntensity ?? blurIntensity ?? 1
+    const resolvedEdgeMaskColor = edgeMaskColor ?? blurColor ?? "#ffffff"
+    const safeAppearDuration = Math.max(
+        0.05,
+        Number.isFinite(appearDuration) ? appearDuration : 1.2
+    )
+
     // Prevent division by zero / infinite loops when gap is 0
-    const gap = Math.max(rawGap, 1)
+    const baseGap = Math.max(rawGap, 1)
 
     const { curveHeight, curveType, curveFrequency, curveAmplitude } =
         curveSettings
@@ -156,6 +162,25 @@ export default function CurvedTicker(props: TickerCarouselProps) {
     const itemsRef = useRef<HTMLDivElement>(null)
     const [containerWidth, setContainerWidth] = useState(800)
     const isStatic = useIsStaticRenderer()
+    const isMobileLayout =
+        enableResponsive && containerWidth <= Math.max(320, mobileBreakpoint)
+    const responsiveScale = isMobileLayout
+        ? Math.max(0.55, containerWidth / Math.max(320, mobileBreakpoint))
+        : 1
+    const gap = Math.max(
+        1,
+        Math.round(
+            baseGap *
+                (isMobileLayout ? mobileGapScale * responsiveScale : 1)
+        )
+    )
+    const effectiveEdgeMaskWidth = Math.max(
+        0,
+        Math.round(
+            resolvedEdgeMaskWidth *
+                (isMobileLayout ? mobileMaskScale * responsiveScale : 1)
+        )
+    )
 
     // All animation state lives in refs — no setState per frame
     const offsetRef = useRef(0)
@@ -175,14 +200,6 @@ export default function CurvedTicker(props: TickerCarouselProps) {
     const appearDoneRef = useRef(!enableAppear)
     // IntersectionObserver: delay appear until component is in viewport
     const inViewRef = useRef(!appearOnView) // true immediately if not using appearOnView
-    // Reset appear animation when enableAppear toggles back on
-    const prevEnableAppearRef = useRef(enableAppear)
-    if (enableAppear && !prevEnableAppearRef.current) {
-        appearElapsedRef.current = 0
-        appearDoneRef.current = false
-        inViewRef.current = !appearOnView
-    }
-    prevEnableAppearRef.current = enableAppear
 
     // For cursor style (only thing that needs re-render on drag)
     const [isDragging, setIsDragging] = useState(false)
@@ -197,6 +214,19 @@ export default function CurvedTicker(props: TickerCarouselProps) {
         mq.addEventListener("change", handler)
         return () => mq.removeEventListener("change", handler)
     }, [])
+
+    // IntersectionObserver for "play in view"
+    useEffect(() => {
+        if (!enableAppear) {
+            appearElapsedRef.current = 0
+            appearDoneRef.current = true
+            inViewRef.current = true
+            return
+        }
+        appearElapsedRef.current = 0
+        appearDoneRef.current = false
+        inViewRef.current = !appearOnView
+    }, [enableAppear, appearOnView])
 
     // IntersectionObserver for "play in view"
     useEffect(() => {
@@ -250,7 +280,6 @@ export default function CurvedTicker(props: TickerCarouselProps) {
         if (!el || !scrollControl || isStatic) return
 
         const onWheel = (e: WheelEvent) => {
-            e.preventDefault()
             // Use whichever axis has more movement
             const delta =
                 Math.abs(e.deltaX) > Math.abs(e.deltaY)
@@ -259,7 +288,7 @@ export default function CurvedTicker(props: TickerCarouselProps) {
             offsetRef.current += delta * scrollSensitivity
         }
 
-        el.addEventListener("wheel", onWheel, { passive: false })
+        el.addEventListener("wheel", onWheel)
         return () => el.removeEventListener("wheel", onWheel)
     }, [scrollControl, scrollSensitivity, isStatic])
 
@@ -347,37 +376,58 @@ export default function CurvedTicker(props: TickerCarouselProps) {
         document.addEventListener("mouseup", onEnd)
         document.addEventListener("touchmove", onTouchMove, { passive: false })
         document.addEventListener("touchend", onEnd)
+        document.addEventListener("touchcancel", onEnd)
 
         return () => {
             document.removeEventListener("mousemove", onMouseMove)
             document.removeEventListener("mouseup", onEnd)
             document.removeEventListener("touchmove", onTouchMove)
             document.removeEventListener("touchend", onEnd)
+            document.removeEventListener("touchcancel", onEnd)
         }
     }, [isDragging, isStatic, handleDragMove, handleDragEnd])
 
-    // Convert blurColor to rgb components for gradient stops
-    // Handles hex (#fff, #ffffff), rgb(), and rgba() formats from Framer
-    const blurRgb = useMemo(() => {
-        const c = blurColor.trim()
-        // Match rgb/rgba format
-        const rgbMatch = c.match(
-            /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/
-        )
-        if (rgbMatch) {
-            return `${rgbMatch[1]},${rgbMatch[2]},${rgbMatch[3]}`
+    // Convert edgeMaskColor to rgb components for gradient stops
+    // Handles hex, rgb/rgba and most CSS colors (via canvas fillStyle normalization).
+    const edgeMaskRgb = useMemo(() => {
+        const parseRgb = (value: string): string | null => {
+            const rgbMatch = value.match(
+                /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/
+            )
+            if (rgbMatch) {
+                return `${rgbMatch[1]},${rgbMatch[2]},${rgbMatch[3]}`
+            }
+
+            const hexMatch = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+            if (!hexMatch) return null
+            const hex = hexMatch[1]
+            const expanded =
+                hex.length === 3
+                    ? hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2]
+                    : hex
+            const r = parseInt(expanded.substring(0, 2), 16)
+            const g = parseInt(expanded.substring(2, 4), 16)
+            const b = parseInt(expanded.substring(4, 6), 16)
+            return `${r},${g},${b}`
         }
-        // Hex format
-        const hex = c.replace("#", "")
-        const expanded =
-            hex.length === 3
-                ? hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2]
-                : hex
-        const r = parseInt(expanded.substring(0, 2), 16)
-        const g = parseInt(expanded.substring(2, 4), 16)
-        const b = parseInt(expanded.substring(4, 6), 16)
-        return `${isNaN(r) ? 255 : r},${isNaN(g) ? 255 : g},${isNaN(b) ? 255 : b}`
-    }, [blurColor])
+
+        const c = resolvedEdgeMaskColor.trim()
+        const direct = parseRgb(c)
+        if (direct) return direct
+
+        if (typeof document !== "undefined") {
+            const ctx = document.createElement("canvas").getContext("2d")
+            if (ctx) {
+                ctx.fillStyle = "#ffffff"
+                ctx.fillStyle = c
+                const normalized = ctx.fillStyle
+                const parsed = parseRgb(normalized)
+                if (parsed) return parsed
+            }
+        }
+
+        return "255,255,255"
+    }, [resolvedEdgeMaskColor])
 
     // Calculate curve Y + rotation for a given display position
     const getCurveYRotation = useCallback(
@@ -469,12 +519,24 @@ export default function CurvedTicker(props: TickerCarouselProps) {
                 }
             }
 
+            const mobileRotation =
+                enableResponsive &&
+                containerW <= Math.max(320, mobileBreakpoint)
+                    ? mobileRotationScale
+                    : 1
+
             return {
                 y,
-                rotation: Math.max(-90, Math.min(90, rotation)),
+                rotation: Math.max(
+                    -90,
+                    Math.min(90, rotation * mobileRotation)
+                ),
             }
         },
         [
+            enableResponsive,
+            mobileBreakpoint,
+            mobileRotationScale,
             curveType,
             curveHeight,
             curveAmplitude,
@@ -488,7 +550,14 @@ export default function CurvedTicker(props: TickerCarouselProps) {
     const getFadeOpacity = useCallback(
         (displayX: number, containerW: number) => {
             if (!enableFade) return 1
-            const fadeDistance = 100
+            const baseFadeDistance = 100
+            const responsiveFade =
+                enableResponsive &&
+                containerW <= Math.max(320, mobileBreakpoint)
+                    ? Math.min(baseFadeDistance, containerW * 0.15) *
+                      mobileFadeScale
+                    : baseFadeDistance
+            const fadeDistance = Math.max(12, responsiveFade)
             if (displayX < fadeDistance) {
                 return Math.max(0, displayX / fadeDistance)
             }
@@ -497,7 +566,7 @@ export default function CurvedTicker(props: TickerCarouselProps) {
             }
             return 1
         },
-        [enableFade]
+        [enableFade, enableResponsive, mobileBreakpoint, mobileFadeScale]
     )
 
     // Simplified looping: totalItemWidth is one full cycle of all children
@@ -536,12 +605,10 @@ export default function CurvedTicker(props: TickerCarouselProps) {
                             display: "flex",
                             alignItems: "center",
                             whiteSpace: "nowrap",
-                            color: textColor,
                             willChange: "transform, opacity",
                             backfaceVisibility: "hidden",
                             contain: "layout style",
                             visibility: "hidden",
-                            ...font,
                         }}
                     >
                         {childrenArray[i]}
@@ -550,7 +617,7 @@ export default function CurvedTicker(props: TickerCarouselProps) {
             }
         }
         return elements
-    }, [childrenArray, numCopies, textColor, font])
+    }, [childrenArray, numCopies])
 
     // Animation loop — directly mutates DOM, no React re-renders
     useAnimationFrame((_time, delta) => {
@@ -566,7 +633,10 @@ export default function CurvedTicker(props: TickerCarouselProps) {
             // Wait for the component to enter the viewport if appearOnView is enabled
             if (!inViewRef.current) return
             appearElapsedRef.current += dt
-            const raw = Math.min(appearElapsedRef.current / appearDuration, 1)
+            const raw = Math.min(
+                appearElapsedRef.current / safeAppearDuration,
+                1
+            )
             // Ease-out cubic for a natural deceleration feel
             traceProgress = 1 - Math.pow(1 - raw, 3)
             if (raw >= 1) appearDoneRef.current = true
@@ -575,7 +645,9 @@ export default function CurvedTicker(props: TickerCarouselProps) {
         const wantsPause = pauseOnHover && isHoveredRef.current
         // During appear, ramp up speed gradually so items don't fly off before being revealed
         const appearSpeedScale = appearing ? traceProgress * traceProgress : 1
-        const targetSpeed = (wantsPause ? 0 : speed) * appearSpeedScale
+        const responsiveSpeed =
+            isMobileLayout ? speed * mobileSpeedScale : speed
+        const targetSpeed = (wantsPause ? 0 : responsiveSpeed) * appearSpeedScale
 
         // Smooth lerp toward target speed — use dt for frame-rate independence
         const lerpFactor = 1 - Math.pow(0.00001, dt) // ~equivalent to 0.08 at 60fps
@@ -617,7 +689,6 @@ export default function CurvedTicker(props: TickerCarouselProps) {
 
         const offset = offsetRef.current
         const cw = containerWidth
-        const maxY = curveHeight * curveAmplitude
 
         // Each DOM element wraps individually using the full rendered period.
         // This way items only wrap when they're off-screen — no simultaneous jumps.
@@ -643,25 +714,8 @@ export default function CurvedTicker(props: TickerCarouselProps) {
 
             el.style.visibility = "visible"
 
-            // Variable speed distortion — shift x based on curve position
-            // to create visual bunching/spreading (simulates acceleration)
-            if (enableVariableSpeed && maxY > 0) {
-                const { y: preY } = getCurveYRotation(x, cw)
-                const normalizedCurveY = preY / maxY
-                x += normalizedCurveY * speedVariation * gap * 0.4
-            }
-
             const { y, rotation } = getCurveYRotation(x, cw)
             const fadeOpacity = getFadeOpacity(x, cw)
-
-            // Depth-based opacity — items at curve extremes more opaque
-            let depthOpacity = 1
-            if (enableDepthOpacity && maxY > 0) {
-                const normalizedY = Math.abs(y) / maxY
-                depthOpacity =
-                    depthOpacityMin +
-                    normalizedY * (1 - depthOpacityMin)
-            }
 
             // Appear reveal — items fade+scale in as the trace sweeps across
             let appearReveal = 1
@@ -682,62 +736,29 @@ export default function CurvedTicker(props: TickerCarouselProps) {
                 appearReveal = 1 - Math.pow(1 - appearReveal, 2)
             }
 
-            const finalOpacity = fadeOpacity * depthOpacity * appearReveal
-
-            // Scale based on curve Y position (depth effect)
-            let scale = 1
-            if (enableScale && maxY > 0) {
-                const normalizedY = Math.abs(y) / maxY
-                scale = scaleMin + normalizedY * (scaleMax - scaleMin)
-            }
-
-            // Z-index by curve position — items at extremes render on top
-            if (enableDepthSort && maxY > 0) {
-                const normalizedY = Math.abs(y) / maxY
-                el.style.zIndex = String(Math.round(normalizedY * 100))
-            } else {
-                el.style.zIndex = ""
-            }
-
-            // 3D perspective: tilt + Z-depth displacement
-            let tiltX = 0
-            let zDepth = 0
-            if (enable3D && maxY > 0) {
-                const normalizedY = y / maxY // -1 to 1
-                tiltX = normalizedY * tiltIntensity
-                // Items at curve extremes come forward; zero-crossings recede
-                zDepth = Math.abs(normalizedY) * depthIntensity
-            }
+            const finalOpacity = fadeOpacity * appearReveal
 
             // Appear: subtle Y drift + scale during reveal
             const appearYOffset = appearing ? (1 - appearReveal) * 20 : 0
-            const appearScale = appearing ? 0.6 + 0.4 * appearReveal : 1
 
             // Round to avoid sub-pixel jitter — keeps compositing clean
             const rx = Math.round(x * 10) / 10
             const ry = Math.round((y + appearYOffset) * 10) / 10
 
-            // Build transform — position + depth + tangent rotation + tilt + scale
+            // Build transform — position + tangent rotation + appear scale
             // Using transform-only positioning (no left/top changes) keeps
             // everything on the GPU compositor — no layout recalc per frame.
-            const parts = [`translate3d(${rx}px, ${ry}px, ${zDepth}px)`]
+            const parts = [`translate3d(${rx}px, ${ry}px, 0)`]
             parts.push("translate(-50%, -50%)")
             if (rotation !== 0)
                 parts.push(`rotateZ(${rotation.toFixed(2)}deg)`)
-            if (tiltX !== 0) parts.push(`rotateX(${tiltX}deg)`)
-            const combinedScale = scale * appearScale
-            if (combinedScale !== 1) parts.push(`scale(${combinedScale})`)
-            el.style.transform = parts.join(" ")
-
-            // Depth-of-field blur: items at zero-crossings (far) blur more
-            if (enable3D && enableDepthBlur && maxY > 0) {
-                const farness = 1 - Math.abs(y) / maxY
-                const blur = farness * depthBlurMax
-                el.style.filter =
-                    blur > 0.1 ? `blur(${blur.toFixed(1)}px)` : ""
-            } else if (el.style.filter) {
-                el.style.filter = ""
+            if (appearing) {
+                const appearScale = 0.6 + 0.4 * appearReveal
+                if (appearScale !== 1) parts.push(`scale(${appearScale})`)
             }
+            el.style.transform = parts.join(" ")
+            if (el.style.filter) el.style.filter = ""
+            if (el.style.zIndex) el.style.zIndex = ""
 
             el.style.opacity = String(finalOpacity)
         }
@@ -761,7 +782,8 @@ export default function CurvedTicker(props: TickerCarouselProps) {
         if (curvePathStyle === "dashed") {
             dashProps.strokeDasharray = `${curvePathDashLength} ${curvePathDashLength}`
         } else if (curvePathStyle === "dotted") {
-            dashProps.strokeDasharray = `${curvePathWidth} ${curvePathWidth * 2.5}`
+            // For dotted style, keep dot size tied to stroke width and expose spacing via control.
+            dashProps.strokeDasharray = `${curvePathWidth} ${curvePathDashLength}`
         }
 
         // SVG positioned at vertical center — y=0 in the path maps to 50%
@@ -825,47 +847,47 @@ export default function CurvedTicker(props: TickerCarouselProps) {
         )
     }
 
-    // Blur gradient elements (shared between static and animated views)
-    const blurLeft = enableBlur && (
+    // Edge-mask gradient elements (shared between static and animated views)
+    const edgeMaskLeft = resolvedEdgeMaskEnabled && (
         <div
             aria-hidden
             style={{
                 position: "absolute",
                 left: 0,
                 top: 0,
-                width: `${blurWidth}px`,
+                width: `${effectiveEdgeMaskWidth}px`,
                 height: "100%",
                 background: `linear-gradient(to right,
-                    rgba(${blurRgb},1) 0%,
-                    rgba(${blurRgb},0.87) 20%,
-                    rgba(${blurRgb},0.67) 40%,
-                    rgba(${blurRgb},0.47) 60%,
-                    rgba(${blurRgb},0.27) 80%,
+                    rgba(${edgeMaskRgb},1) 0%,
+                    rgba(${edgeMaskRgb},0.87) 20%,
+                    rgba(${edgeMaskRgb},0.67) 40%,
+                    rgba(${edgeMaskRgb},0.47) 60%,
+                    rgba(${edgeMaskRgb},0.27) 80%,
                     transparent 100%)`,
-                opacity: blurIntensity,
+                opacity: resolvedEdgeMaskIntensity,
                 zIndex: 110,
                 pointerEvents: "none",
             }}
         />
     )
 
-    const blurRight = enableBlur && (
+    const edgeMaskRight = resolvedEdgeMaskEnabled && (
         <div
             aria-hidden
             style={{
                 position: "absolute",
                 right: 0,
                 top: 0,
-                width: `${blurWidth}px`,
+                width: `${effectiveEdgeMaskWidth}px`,
                 height: "100%",
                 background: `linear-gradient(to left,
-                    rgba(${blurRgb},1) 0%,
-                    rgba(${blurRgb},0.87) 20%,
-                    rgba(${blurRgb},0.67) 40%,
-                    rgba(${blurRgb},0.47) 60%,
-                    rgba(${blurRgb},0.27) 80%,
+                    rgba(${edgeMaskRgb},1) 0%,
+                    rgba(${edgeMaskRgb},0.87) 20%,
+                    rgba(${edgeMaskRgb},0.67) 40%,
+                    rgba(${edgeMaskRgb},0.47) 60%,
+                    rgba(${edgeMaskRgb},0.27) 80%,
                     transparent 100%)`,
-                opacity: blurIntensity,
+                opacity: resolvedEdgeMaskIntensity,
                 zIndex: 110,
                 pointerEvents: "none",
             }}
@@ -873,8 +895,7 @@ export default function CurvedTicker(props: TickerCarouselProps) {
     )
 
     // Static view for Canvas/Export — uses plain divs, no animation
-    if (isStatic) {
-        const maxY = curveHeight * curveAmplitude
+    if (isStatic || reducedMotion) {
         return (
             <div
                 ref={containerRef}
@@ -891,17 +912,13 @@ export default function CurvedTicker(props: TickerCarouselProps) {
                 }}
             >
                 {curvePathElement}
-                {blurLeft}
-                {blurRight}
+                {edgeMaskLeft}
+                {edgeMaskRight}
 
                 <div
                     style={{
                         position: "absolute",
                         inset: 0,
-                        perspective: enable3D
-                            ? `${perspectiveDistance}px`
-                            : undefined,
-                        transformStyle: enable3D ? "preserve-3d" : undefined,
                     }}
                 >
                     {(() => {
@@ -920,20 +937,6 @@ export default function CurvedTicker(props: TickerCarouselProps) {
                                 )
                                     continue
 
-                                // Variable speed distortion (static)
-                                if (enableVariableSpeed && maxY > 0) {
-                                    const { y: preY } = getCurveYRotation(
-                                        baseX,
-                                        containerWidth
-                                    )
-                                    const normalizedCurveY = preY / maxY
-                                    baseX +=
-                                        normalizedCurveY *
-                                        speedVariation *
-                                        gap *
-                                        0.4
-                                }
-
                                 const { y, rotation } = getCurveYRotation(
                                     baseX,
                                     containerWidth
@@ -943,61 +946,9 @@ export default function CurvedTicker(props: TickerCarouselProps) {
                                     containerWidth
                                 )
 
-                                // Depth opacity (static)
-                                let depthOpacity = 1
-                                if (enableDepthOpacity && maxY > 0) {
-                                    const normalizedY = Math.abs(y) / maxY
-                                    depthOpacity =
-                                        depthOpacityMin +
-                                        normalizedY * (1 - depthOpacityMin)
-                                }
-
-                                let scale = 1
-                                if (enableScale && maxY > 0) {
-                                    const normalizedY = Math.abs(y) / maxY
-                                    scale =
-                                        scaleMin +
-                                        normalizedY * (scaleMax - scaleMin)
-                                }
-
-                                // Z-index (static)
-                                let zIndex: number | undefined
-                                if (enableDepthSort && maxY > 0) {
-                                    zIndex = Math.round(
-                                        (Math.abs(y) / maxY) * 100
-                                    )
-                                }
-
-                                // 3D tilt + depth (static)
-                                let tiltX = 0
-                                let zDepth = 0
-                                if (enable3D && maxY > 0) {
-                                    const normalizedY = y / maxY
-                                    tiltX = normalizedY * tiltIntensity
-                                    zDepth =
-                                        Math.abs(normalizedY) * depthIntensity
-                                }
-
-                                // Depth-of-field blur (static)
-                                let depthBlurValue = 0
-                                if (
-                                    enable3D &&
-                                    enableDepthBlur &&
-                                    maxY > 0
-                                ) {
-                                    const farness = 1 - Math.abs(y) / maxY
-                                    depthBlurValue = farness * depthBlurMax
-                                }
-
-                                const parts = [
-                                    `translate3d(-50%, -50%, ${zDepth}px)`,
-                                ]
+                                const parts = ["translate(-50%, -50%)"]
                                 if (rotation !== 0)
                                     parts.push(`rotateZ(${rotation}deg)`)
-                                if (tiltX !== 0)
-                                    parts.push(`rotateX(${tiltX}deg)`)
-                                if (scale !== 1)
-                                    parts.push(`scale(${scale})`)
 
                                 items.push(
                                     <div
@@ -1010,15 +961,7 @@ export default function CurvedTicker(props: TickerCarouselProps) {
                                             display: "flex",
                                             alignItems: "center",
                                             whiteSpace: "nowrap",
-                                            color: textColor,
-                                            opacity:
-                                                fadeOpacity * depthOpacity,
-                                            zIndex,
-                                            filter:
-                                                depthBlurValue > 0.1
-                                                    ? `blur(${depthBlurValue.toFixed(1)}px)`
-                                                    : undefined,
-                                            ...font,
+                                            opacity: fadeOpacity,
                                         }}
                                     >
                                         {childrenArray[i]}
@@ -1058,18 +1001,14 @@ export default function CurvedTicker(props: TickerCarouselProps) {
             onMouseLeave={pauseOnHover ? handleMouseLeave : undefined}
         >
             {curvePathElement}
-            {blurLeft}
-            {blurRight}
+            {edgeMaskLeft}
+            {edgeMaskRight}
 
             <div
                 ref={itemsRef}
                 style={{
                     position: "absolute",
                     inset: 0,
-                    perspective: enable3D
-                        ? `${perspectiveDistance}px`
-                        : undefined,
-                    transformStyle: enable3D ? "preserve-3d" : undefined,
                 }}
             >
                 {itemElements}
@@ -1078,72 +1017,134 @@ export default function CurvedTicker(props: TickerCarouselProps) {
     )
 }
 
-addPropertyControls(CurvedTicker, {
-    // — Content —
+const contentControls: Record<string, any> = {
     children: {
         type: ControlType.Slot,
         title: "Items",
-        description: "Add components to display in the carousel",
     },
-    // — Layout & Motion —
+    showAdvanced: {
+        type: ControlType.Boolean,
+        title: "Advanced",
+        defaultValue: false,
+        enabledTitle: "On",
+        disabledTitle: "Off",
+    },
+}
+
+const motionControls: Record<string, any> = {
     speed: {
         type: ControlType.Number,
         title: "Speed",
-        description: "Controls how fast items move across the screen",
         defaultValue: 50,
-        min: 10,
-        max: 200,
-        step: 10,
+        min: 0,
+        max: 260,
+        step: 2,
     },
     direction: {
         type: ControlType.Enum,
         title: "Direction",
-        description: "Direction of carousel movement",
         options: ["left", "right"],
-        optionTitles: ["←", "→"],
+        optionTitles: ["← Left", "Right →"],
         defaultValue: "left",
         displaySegmentedControl: true,
     },
     gap: {
         type: ControlType.Number,
         title: "Gap",
-        description: "Distance between carousel items",
         defaultValue: 200,
-        min: 1,
-        max: 800,
-        step: 10,
+        min: 20,
+        max: 600,
+        step: 5,
         unit: "px",
     },
-    enableVariableSpeed: {
+    enableResponsive: {
         type: ControlType.Boolean,
-        title: "Variable Speed",
-        description:
-            "Items visually slow at curve peaks and accelerate through troughs",
+        title: "Responsive",
+        defaultValue: true,
+        enabledTitle: "On",
+        disabledTitle: "Off",
+        hidden: ({ showAdvanced }) => !showAdvanced,
+    },
+    mobileBreakpoint: {
+        type: ControlType.Number,
+        title: "Mobile Breakpoint",
+        defaultValue: 768,
+        min: 360,
+        max: 1280,
+        step: 8,
+        unit: "px",
+        hidden: ({ showAdvanced, enableResponsive }) =>
+            !showAdvanced || !enableResponsive,
+    },
+    showResponsiveTuning: {
+        type: ControlType.Boolean,
+        title: "Mobile Fine-Tuning",
         defaultValue: false,
         enabledTitle: "On",
         disabledTitle: "Off",
+        hidden: ({ showAdvanced, enableResponsive }) =>
+            !showAdvanced || !enableResponsive,
     },
-    speedVariation: {
+    mobileSpeedScale: {
         type: ControlType.Number,
-        title: "Speed Variation",
-        description: "How much the visual speed varies along the curve",
-        defaultValue: 0.5,
-        min: 0.1,
-        max: 1,
+        title: "Mobile Speed",
+        defaultValue: 0.85,
+        min: 0.4,
+        max: 1.2,
         step: 0.05,
-        hidden: ({ enableVariableSpeed }) => !enableVariableSpeed,
+        hidden: ({ showAdvanced, enableResponsive, showResponsiveTuning }) =>
+            !showAdvanced || !enableResponsive || !showResponsiveTuning,
     },
+    mobileGapScale: {
+        type: ControlType.Number,
+        title: "Mobile Gap",
+        defaultValue: 0.78,
+        min: 0.4,
+        max: 1.3,
+        step: 0.05,
+        hidden: ({ showAdvanced, enableResponsive, showResponsiveTuning }) =>
+            !showAdvanced || !enableResponsive || !showResponsiveTuning,
+    },
+    mobileFadeScale: {
+        type: ControlType.Number,
+        title: "Mobile Fade",
+        defaultValue: 0.8,
+        min: 0.4,
+        max: 1.5,
+        step: 0.05,
+        hidden: ({ showAdvanced, enableResponsive, showResponsiveTuning }) =>
+            !showAdvanced || !enableResponsive || !showResponsiveTuning,
+    },
+    mobileMaskScale: {
+        type: ControlType.Number,
+        title: "Mobile Mask",
+        defaultValue: 0.8,
+        min: 0.4,
+        max: 1.5,
+        step: 0.05,
+        hidden: ({ showAdvanced, enableResponsive, showResponsiveTuning }) =>
+            !showAdvanced || !enableResponsive || !showResponsiveTuning,
+    },
+    mobileRotationScale: {
+        type: ControlType.Number,
+        title: "Mobile Rotation",
+        defaultValue: 0.75,
+        min: 0.4,
+        max: 1.2,
+        step: 0.05,
+        hidden: ({ showAdvanced, enableResponsive, showResponsiveTuning }) =>
+            !showAdvanced || !enableResponsive || !showResponsiveTuning,
+    },
+}
 
-    // — Curve Shape —
+const curveControls: Record<string, any> = {
     curveSettings: {
         type: ControlType.Object,
         title: "Curve",
-        description: "Configure the S-curve path shape",
         controls: {
             curveType: {
                 type: ControlType.Enum,
                 title: "Type",
-                description: "Mathematical function used for the curve shape",
                 options: ["sine", "quadratic", "cubic", "bezier"],
                 optionTitles: ["Sine", "Quadratic", "Cubic", "Bezier"],
                 defaultValue: "sine",
@@ -1151,7 +1152,6 @@ addPropertyControls(CurvedTicker, {
             curveHeight: {
                 type: ControlType.Number,
                 title: "Height",
-                description: "Maximum vertical displacement of the curve",
                 defaultValue: 100,
                 min: 0,
                 max: 200,
@@ -1161,7 +1161,6 @@ addPropertyControls(CurvedTicker, {
             curveAmplitude: {
                 type: ControlType.Number,
                 title: "Amplitude",
-                description: "Intensity multiplier for the curve effect",
                 defaultValue: 3,
                 min: 0.1,
                 max: 3,
@@ -1170,29 +1169,22 @@ addPropertyControls(CurvedTicker, {
             curveFrequency: {
                 type: ControlType.Number,
                 title: "Frequency",
-                description: "Number of curve cycles across the screen",
                 defaultValue: 1,
                 min: 0.1,
                 max: 3,
                 step: 0.1,
             },
         },
-        defaultValue: {
-            curveHeight: 100,
-            curveType: "sine",
-            curveFrequency: 1,
-            curveAmplitude: 3,
-        },
+        defaultValue: DEFAULT_CURVE_SETTINGS,
+        hidden: ({ showAdvanced }) => !showAdvanced,
     },
     bezierControls: {
         type: ControlType.Object,
         title: "Bezier Controls",
-        description: "Fine-tune bezier curve control points",
         controls: {
             bezierP1: {
                 type: ControlType.Number,
                 title: "Control Point 1",
-                description: "First bezier control point position",
                 defaultValue: 0.25,
                 min: -1,
                 max: 1,
@@ -1201,353 +1193,267 @@ addPropertyControls(CurvedTicker, {
             bezierP2: {
                 type: ControlType.Number,
                 title: "Control Point 2",
-                description: "Second bezier control point position",
                 defaultValue: 0.75,
                 min: -1,
                 max: 1,
                 step: 0.05,
             },
         },
-        defaultValue: {
-            bezierP1: 0.25,
-            bezierP2: 0.75,
-        },
-        hidden: ({ curveSettings }) => curveSettings?.curveType !== "bezier",
+        defaultValue: DEFAULT_BEZIER_CONTROLS,
+        hidden: ({ showAdvanced, curveSettings }) =>
+            !showAdvanced || curveSettings?.curveType !== "bezier",
     },
+}
 
-    // — Curve Path Visualization —
+const curvePathControls: Record<string, any> = {
     showCurvePath: {
         type: ControlType.Boolean,
         title: "Show Path",
-        description: "Draw the curve path as a visible line behind items",
         defaultValue: false,
         enabledTitle: "On",
         disabledTitle: "Off",
+        hidden: ({ showAdvanced }) => !showAdvanced,
     },
     curvePathColor: {
         type: ControlType.Color,
         title: "Path Color",
-        description: "Color of the curve path line",
         defaultValue: "rgba(0,0,0,0.1)",
-        hidden: ({ showCurvePath }) => !showCurvePath,
+        hidden: ({ showAdvanced, showCurvePath }) =>
+            !showAdvanced || !showCurvePath,
     },
     curvePathWidth: {
         type: ControlType.Number,
         title: "Path Width",
-        description: "Stroke width of the curve path",
         defaultValue: 8,
         min: 1,
-        max: 100,
+        max: 200,
         step: 1,
         unit: "px",
-        hidden: ({ showCurvePath }) => !showCurvePath,
+        hidden: ({ showAdvanced, showCurvePath }) =>
+            !showAdvanced || !showCurvePath,
     },
     curvePathOpacity: {
         type: ControlType.Number,
         title: "Path Opacity",
-        description: "Opacity of the curve path",
         defaultValue: 1,
         min: 0,
         max: 1,
         step: 0.05,
-        hidden: ({ showCurvePath }) => !showCurvePath,
+        hidden: ({ showAdvanced, showCurvePath }) =>
+            !showAdvanced || !showCurvePath,
     },
     curvePathStyle: {
         type: ControlType.Enum,
         title: "Path Style",
-        description: "Line style of the curve path",
         options: ["solid", "dashed", "dotted"],
         optionTitles: ["Solid", "Dashed", "Dotted"],
         defaultValue: "solid",
-        hidden: ({ showCurvePath }) => !showCurvePath,
+        hidden: ({ showAdvanced, showCurvePath }) =>
+            !showAdvanced || !showCurvePath,
+    },
+    showPathAdvanced: {
+        type: ControlType.Boolean,
+        title: "Path Fine-Tuning",
+        defaultValue: false,
+        enabledTitle: "On",
+        disabledTitle: "Off",
+        hidden: ({ showAdvanced, showCurvePath }) =>
+            !showAdvanced || !showCurvePath,
     },
     curvePathDashLength: {
         type: ControlType.Number,
-        title: "Dash Length",
-        description: "Length of dashes when using dashed style",
+        title: "Dash/Dot Spacing",
+        description:
+            "Length of dashes and spacing between dots for dashed/dotted styles",
         defaultValue: 8,
         min: 2,
         max: 40,
         step: 1,
         unit: "px",
-        hidden: ({ showCurvePath, curvePathStyle }) =>
-            !showCurvePath || curvePathStyle !== "dashed",
+        hidden: ({
+            showAdvanced,
+            showCurvePath,
+            showPathAdvanced,
+            curvePathStyle,
+        }) =>
+            !showAdvanced ||
+            !showCurvePath ||
+            !showPathAdvanced ||
+            (curvePathStyle !== "dashed" && curvePathStyle !== "dotted"),
     },
     curvePathRoundCaps: {
         type: ControlType.Boolean,
         title: "Round Caps",
-        description: "Use round line caps and joins",
         defaultValue: true,
         enabledTitle: "On",
         disabledTitle: "Off",
-        hidden: ({ showCurvePath }) => !showCurvePath,
+        hidden: ({ showAdvanced, showCurvePath, showPathAdvanced }) =>
+            !showAdvanced || !showCurvePath || !showPathAdvanced,
     },
-    // — Edge Effects —
-    enableBlur: {
+}
+
+const appearanceControls: Record<string, any> = {
+    enableEdgeMask: {
         type: ControlType.Boolean,
-        title: "Edge Blur",
-        description: "Gradient overlay that fades items at the edges",
+        title: "Edge Overlay",
+        description:
+            "Gradient overlay at the edges. Can be combined with Opacity Fade for a stronger stacked edge effect.",
         defaultValue: true,
         enabledTitle: "On",
         disabledTitle: "Off",
+        hidden: ({ showAdvanced }) => !showAdvanced,
     },
-    blurColor: {
+    edgeMaskColor: {
         type: ControlType.Color,
-        title: "Blur Color",
-        description: "Background color for the edge blur gradient",
+        title: "Mask Color",
         defaultValue: "#ffffff",
-        hidden: ({ enableBlur }) => !enableBlur,
+        hidden: ({ showAdvanced, enableEdgeMask, enableBlur }) => {
+            const maskEnabled = enableEdgeMask ?? enableBlur ?? true
+            return !showAdvanced || !maskEnabled
+        },
     },
-    blurWidth: {
+    edgeMaskWidth: {
         type: ControlType.Number,
-        title: "Blur Width",
-        description: "Width of the blur effect on the edges",
+        title: "Mask Width",
         defaultValue: 100,
         min: 0,
         max: 200,
         step: 10,
         unit: "px",
-        hidden: ({ enableBlur }) => !enableBlur,
+        hidden: ({ showAdvanced, enableEdgeMask, enableBlur }) => {
+            const maskEnabled = enableEdgeMask ?? enableBlur ?? true
+            return !showAdvanced || !maskEnabled
+        },
     },
-    blurIntensity: {
+    edgeMaskIntensity: {
         type: ControlType.Number,
-        title: "Blur Intensity",
-        description: "Opacity of the blur effect",
+        title: "Mask Intensity",
         defaultValue: 1,
         min: 0,
         max: 1,
         step: 0.1,
-        hidden: ({ enableBlur }) => !enableBlur,
+        hidden: ({ showAdvanced, enableEdgeMask, enableBlur }) => {
+            const maskEnabled = enableEdgeMask ?? enableBlur ?? true
+            return !showAdvanced || !maskEnabled
+        },
     },
     enableFade: {
         type: ControlType.Boolean,
-        title: "Fade Edges",
-        description: "Fade item opacity in and out at the edges",
+        title: "Opacity Fade",
+        description:
+            "Fades item opacity near the edges. Can be combined with Edge Overlay for a stacked effect.",
         defaultValue: true,
         enabledTitle: "On",
         disabledTitle: "Off",
+        hidden: ({ showAdvanced }) => !showAdvanced,
     },
-    textColor: {
-        type: ControlType.Color,
-        title: "Text Color",
-        description: "Color of text content in the carousel",
-        defaultValue: "#000000",
-    },
-
-    // — Depth Effects —
-    enableScale: {
-        type: ControlType.Boolean,
-        title: "Depth Scale",
-        description:
-            "Scale items based on curve position — larger at peaks, smaller at troughs",
-        defaultValue: false,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-    },
-    scaleMin: {
-        type: ControlType.Number,
-        title: "Scale Min",
-        description: "Smallest scale for items at the curve trough",
-        defaultValue: 0.8,
-        min: 0.1,
-        max: 1,
-        step: 0.05,
-        hidden: ({ enableScale }) => !enableScale,
-    },
-    scaleMax: {
-        type: ControlType.Number,
-        title: "Scale Max",
-        description: "Largest scale for items at the curve peak",
-        defaultValue: 1,
-        min: 0.5,
-        max: 2,
-        step: 0.05,
-        hidden: ({ enableScale }) => !enableScale,
-    },
-    enableDepthOpacity: {
-        type: ControlType.Boolean,
-        title: "Depth Opacity",
-        description:
-            "Items at curve troughs fade out, items at peaks stay fully opaque",
-        defaultValue: false,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-    },
-    depthOpacityMin: {
-        type: ControlType.Number,
-        title: "Min Opacity",
-        description: "Opacity for items at the zero-crossing of the curve",
-        defaultValue: 0.3,
-        min: 0,
-        max: 1,
-        step: 0.05,
-        hidden: ({ enableDepthOpacity }) => !enableDepthOpacity,
-    },
-    enableDepthSort: {
-        type: ControlType.Boolean,
-        title: "Depth Sort",
-        description:
-            "Items at curve peaks render on top of items at zero-crossings",
-        defaultValue: false,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-    },
-
-    // — 3D Perspective —
-    enable3D: {
-        type: ControlType.Boolean,
-        title: "3D Perspective",
-        description:
-            "Add perspective tilt so items rotate in 3D as they follow the curve",
-        defaultValue: false,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-    },
-    perspectiveDistance: {
-        type: ControlType.Number,
-        title: "Perspective",
-        description:
-            "Camera distance — lower values exaggerate the 3D effect",
-        defaultValue: 800,
-        min: 200,
-        max: 2000,
-        step: 50,
-        unit: "px",
-        hidden: ({ enable3D }) => !enable3D,
-    },
-    tiltIntensity: {
-        type: ControlType.Number,
-        title: "Tilt Angle",
-        description: "Maximum rotateX angle at curve peaks",
-        defaultValue: 20,
-        min: 0,
-        max: 60,
-        step: 1,
-        unit: "°",
-        hidden: ({ enable3D }) => !enable3D,
-    },
-    depthIntensity: {
-        type: ControlType.Number,
-        title: "Z Depth",
-        description:
-            "How far items move along the Z-axis — creates real perspective foreshortening",
-        defaultValue: 150,
-        min: 0,
-        max: 400,
-        step: 10,
-        unit: "px",
-        hidden: ({ enable3D }) => !enable3D,
-    },
-    enableDepthBlur: {
-        type: ControlType.Boolean,
-        title: "Depth of Field",
-        description:
-            "Items at zero-crossings (further away) get a subtle blur",
-        defaultValue: false,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-        hidden: ({ enable3D }) => !enable3D,
-    },
-    depthBlurMax: {
-        type: ControlType.Number,
-        title: "Blur Amount",
-        description: "Maximum blur applied to the furthest items",
-        defaultValue: 3,
-        min: 0.5,
-        max: 10,
-        step: 0.5,
-        unit: "px",
-        hidden: ({ enable3D, enableDepthBlur }) =>
-            !enable3D || !enableDepthBlur,
-    },
-
-    // — Interaction —
-    draggable: {
-        type: ControlType.Boolean,
-        title: "Draggable",
-        description: "Allow users to drag the carousel",
-        defaultValue: true,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-    },
-    snapAfterDrag: {
-        type: ControlType.Boolean,
-        title: "Snap After Drag",
-        description:
-            "After releasing a drag, smoothly snap to the nearest item",
-        defaultValue: false,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-        hidden: ({ draggable }) => !draggable,
-    },
-    snapDamping: {
-        type: ControlType.Number,
-        title: "Snap Speed",
-        description:
-            "How fast the snap animation settles (higher = snappier)",
-        defaultValue: 0.12,
-        min: 0.03,
-        max: 0.3,
-        step: 0.01,
-        hidden: ({ draggable, snapAfterDrag }) =>
-            !draggable || !snapAfterDrag,
-    },
-    // — Appear Effect —
     enableAppear: {
         type: ControlType.Boolean,
         title: "Appear Effect",
-        description:
-            "Items trace in along the curve path when the component mounts",
         defaultValue: true,
         enabledTitle: "On",
         disabledTitle: "Off",
+        hidden: ({ showAdvanced }) => !showAdvanced,
     },
     appearDuration: {
         type: ControlType.Number,
         title: "Appear Duration",
-        description: "How long the path trace entrance takes",
         defaultValue: 1.2,
         min: 0.3,
         max: 3,
         step: 0.1,
         unit: "s",
-        hidden: ({ enableAppear }) => !enableAppear,
+        hidden: ({ showAdvanced, enableAppear }) =>
+            !showAdvanced || !enableAppear,
     },
     appearOnView: {
         type: ControlType.Boolean,
         title: "Play in View",
-        description:
-            "Wait until the component scrolls into the viewport before playing the appear animation",
         defaultValue: false,
         enabledTitle: "On",
         disabledTitle: "Off",
-        hidden: ({ enableAppear }) => !enableAppear,
+        hidden: ({ showAdvanced, enableAppear }) =>
+            !showAdvanced || !enableAppear,
+    },
+}
+
+const interactionControls: Record<string, any> = {
+    draggable: {
+        type: ControlType.Boolean,
+        title: "Draggable",
+        defaultValue: true,
+        enabledTitle: "On",
+        disabledTitle: "Off",
+        hidden: ({ showAdvanced }) => !showAdvanced,
+    },
+    snapAfterDrag: {
+        type: ControlType.Boolean,
+        title: "Snap After Drag",
+        defaultValue: false,
+        enabledTitle: "On",
+        disabledTitle: "Off",
+        hidden: ({ showAdvanced, draggable }) =>
+            !showAdvanced || !draggable,
+    },
+    showInteractionAdvanced: {
+        type: ControlType.Boolean,
+        title: "Interaction Fine-Tuning",
+        defaultValue: false,
+        enabledTitle: "On",
+        disabledTitle: "Off",
+        hidden: ({ showAdvanced }) => !showAdvanced,
+    },
+    snapDamping: {
+        type: ControlType.Number,
+        title: "Snap Speed",
+        defaultValue: 0.12,
+        min: 0.03,
+        max: 0.3,
+        step: 0.01,
+        hidden: ({
+            showAdvanced,
+            draggable,
+            snapAfterDrag,
+            showInteractionAdvanced,
+        }) =>
+            !showAdvanced ||
+            !draggable ||
+            !snapAfterDrag ||
+            !showInteractionAdvanced,
     },
     pauseOnHover: {
         type: ControlType.Boolean,
         title: "Pause on Hover",
-        description: "Pause the carousel when the user hovers over it",
         defaultValue: false,
         enabledTitle: "On",
         disabledTitle: "Off",
+        hidden: ({ showAdvanced }) => !showAdvanced,
     },
     scrollControl: {
         type: ControlType.Boolean,
         title: "Scroll Control",
-        description:
-            "Mouse wheel / trackpad scroll drives the ticker offset",
         defaultValue: false,
         enabledTitle: "On",
         disabledTitle: "Off",
+        hidden: ({ showAdvanced }) => !showAdvanced,
     },
     scrollSensitivity: {
         type: ControlType.Number,
         title: "Scroll Speed",
-        description: "Multiplier for how much each scroll tick moves items",
         defaultValue: 1.5,
         min: 0.5,
         max: 5,
         step: 0.25,
-        hidden: ({ scrollControl }) => !scrollControl,
+        hidden: ({ showAdvanced, scrollControl, showInteractionAdvanced }) =>
+            !showAdvanced || !scrollControl || !showInteractionAdvanced,
     },
+}
+
+addPropertyControls(SCurveTicker, {
+    ...contentControls,
+    ...motionControls,
+    ...curveControls,
+    ...curvePathControls,
+    ...appearanceControls,
+    ...interactionControls,
 })

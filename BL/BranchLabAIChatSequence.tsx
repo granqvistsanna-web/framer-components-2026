@@ -2,12 +2,6 @@ import * as React from "react"
 import { useEffect, useId, useRef, useState } from "react"
 import { addPropertyControls, ControlType } from "framer"
 
-declare global {
-    interface Window {
-        gsap: any
-    }
-}
-
 interface ChatMessage {
     role: "user" | "assistant"
     content: string
@@ -82,7 +76,7 @@ function renderBoldText(text: string): React.ReactNode[] {
 }
 
 
-export default function AIChatSequence({
+export default function BranchLabAIChatSequence({
     maxWidth = 680,
     padding = 24,
     mobilePadding = 12,
@@ -191,7 +185,7 @@ export default function AIChatSequence({
 
         const intervalIds: ReturnType<typeof setInterval>[] = []
         const timeoutIds: ReturnType<typeof setTimeout>[] = []
-        let timeline: any = null
+        let timeline: GsapTimeline | null = null
         let cancelled = false
         const containerEl = containerRef.current
 
@@ -865,7 +859,7 @@ export default function AIChatSequence({
     )
 }
 
-addPropertyControls(AIChatSequence, {
+addPropertyControls(BranchLabAIChatSequence, {
     // ─────────────────────────────────────
     // CONTENT
     // ─────────────────────────────────────

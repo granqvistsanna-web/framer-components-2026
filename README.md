@@ -4,25 +4,18 @@ A personal component library for Framer code components.
 
 This repo is organized so each component can be developed, tested, versioned, and reused cleanly.
 
-## Recommended Structure
+## Current Structure
 
 ```text
 framer-components-2026/
-├── components/              # Production Framer components (.tsx)
-│   ├── AIChatSequence.tsx
-│   ├── CurvedTicker.tsx
-│   ├── DroppingCardsStack.tsx
-│   ├── GradientBarsBG.tsx
-│   ├── LoadingScreen.tsx
-│   ├── LoadingScreenLogoReveal.tsx
-│   └── RotatingText.tsx
-├── playground/              # Local visual test files (.html, prototypes)
-├── docs/                    # Notes, changelogs, component specs
+├── BL/                      # Client/BranchLab components (.tsx)
+├── WIP/                     # Components in progress (.tsx)
+├── shipped/                 # Final shipped components (.tsx)
 ├── README.md
 └── .gitignore
 ```
 
-Note: your repo is currently flat (files in root). That is fine to start. You can migrate to this structure gradually.
+`shipped/` is intentionally empty until components are finalized.
 
 ## Naming Conventions
 
@@ -71,17 +64,13 @@ git push -u origin feat/component-name
 
 Then open a Pull Request on GitHub and merge to `main`.
 
-## Optional: Move To Structured Folders
-
-If you want, you can run:
+## Local Validation
 
 ```bash
-mkdir -p components playground docs
-git mv *.tsx components/
-git mv test-*.html playground/
+npm install
+npm run lint
+npm run typecheck
 ```
-
-After that, update any references in docs.
 
 ## Suggested .gitignore
 
