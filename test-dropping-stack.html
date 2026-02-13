@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DroppingCardsStack – Standalone Test</title>
+
+    <!-- GSAP core + plugins from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.1/dist/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.1/dist/Draggable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.1/dist/CustomEase.min.js"></script>
+
+    <style>
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            background: #1a1a1a;
+            font-family: system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+        }
+
+        /* ── Root wrapper ── */
+        .dropping-stack-root {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2em;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        /* ── Collection wrapper (padding drives the stack offsets) ── */
+        .dropping-stack-collection {
+            width: 100%;
+            box-sizing: border-box;
+            padding-right: 7.5em;
+            padding-bottom: 7.5em;
+        }
+
+        /* ── Card list ── */
+        .dropping-stack-list {
+            justify-content: center;
+            align-items: center;
+            display: flex;
+            position: relative;
+        }
+
+        /* ── Individual card wrapper ── */
+        .dropping-stack-item {
+            will-change: transform, opacity;
+            user-select: none;
+            -webkit-user-select: none;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        .dropping-stack-item:first-child {
+            position: relative;
+        }
+        .dropping-stack-item:not(:first-child) {
+            position: absolute;
+        }
+
+        /* ── Card face ── */
+        .card-face {
+            border-radius: 1.25em;
+            width: 100%;
+            max-width: 50em;
+            margin: 0 auto;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card-face .aspect {
+            padding-top: 62.5%;     /* 16:10 ratio */
+        }
+
+        .card-face .content {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            width: 100%;
+            height: 100%;
+            padding: 3em;
+            position: absolute;
+            top: 0;
+            left: 0;
+            box-sizing: border-box;
+        }
+
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .card-image {
+            background-color: rgba(0,0,0,0.1);
+            border-radius: 0.5em;
+            width: 35%;
+            position: relative;
+        }
+        .card-image .aspect {
+            padding-top: 62.5%;
+        }
+        .card-image img {
+            object-fit: cover;
+            border-radius: inherit;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .card-tags {
+            width: 45%;
+        }
+        .card-tags p {
+            margin: 0;
+            padding: 0.15em 0;
+            font-size: 1em;
+            line-height: 1.4;
+        }
+
+        .card-title {
+            letter-spacing: -0.03em;
+            font-size: 4.75em;
+            font-weight: 600;
+            line-height: 0.9;
+            margin: 0;
+        }
+
+        /* ── Controls ── */
+        .controls {
+            display: flex;
+            gap: 0.375em;
+        }
+
+        .control-btn {
+            cursor: pointer;
+            border-radius: 50%;
+            background: none;
+            border: none;
+            padding: 0;
+        }
+        .control-btn.prev {
+            transform: scaleX(-1);
+        }
+
+        .control-circle {
+            border-radius: 50%;
+            flex: none;
+            justify-content: center;
+            align-items: center;
+            width: 3em;
+            height: 3em;
+            display: flex;
+            position: relative;
+            transition: transform 0.3s ease;
+            transform: translateY(0em) rotate(0.001deg);
+        }
+        .control-btn:hover .control-circle {
+            transform: translateY(-0.25em) rotate(0.001deg) !important;
+        }
+
+        .control-circle.prev-circle {
+            color: #201d1d;
+            background-color: rgba(244, 244, 244, 0.2);
+        }
+        .control-circle.next-circle {
+            color: #201d1d;
+            background-color: #f4f4f4;
+        }
+
+        /* ── Responsive: Tablet (< 768px) ── */
+        @media (max-width: 767px) {
+            .dropping-stack-root {
+                font-size: 14px;
+                gap: 1.25em;
+            }
+
+            .dropping-stack-collection {
+                padding-left: 1em;
+                padding-right: 3em;
+                padding-bottom: 3em;
+            }
+
+            .card-face {
+                width: 100%;
+                max-width: 50em;
+            }
+
+            .card-face > .aspect {
+                padding-top: 120%;
+            }
+
+            .card-face .content {
+                padding: 2.25em;
+            }
+
+            .card-top {
+                flex-direction: column;
+                gap: 0.75em;
+            }
+
+            .card-image {
+                width: 50%;
+            }
+
+            .card-tags {
+                width: 100%;
+            }
+
+            .card-title {
+                font-size: 4em;
+            }
+
+            .card-tags p {
+                font-size: 1em;
+            }
+
+            .control-circle {
+                width: 3.5em;
+                height: 3.5em;
+            }
+        }
+
+        /* ── Responsive: Small mobile (< 480px) ── */
+        @media (max-width: 479px) {
+            .dropping-stack-root {
+                font-size: 14px;
+                gap: 1em;
+            }
+
+            .dropping-stack-collection {
+                padding-left: 0.75em;
+                padding-right: 2em;
+                padding-bottom: 2em;
+            }
+
+            .card-face .content {
+                padding: 1.8em;
+            }
+
+            .card-title {
+                font-size: 3.3em;
+            }
+
+            .card-tags p {
+                font-size: 1em;
+            }
+
+            .control-circle {
+                width: 3.5em;
+                height: 3.5em;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ────────────────────────────────────────────
+     HTML structure mirrors the React component
+     ──────────────────────────────────────────── -->
+<div class="dropping-stack-root" data-dropping-stack-init>
+
+    <!-- Collection wrapper -->
+    <div class="dropping-stack-collection" data-dropping-stack-collection>
+
+        <!-- List of cards -->
+        <div class="dropping-stack-list" data-dropping-stack-list>
+
+            <!-- Card 1 – Branding & Identity -->
+            <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
+                <div class="card-face" style="color:#201d1d; background-color:#ffc664;">
+                    <div class="aspect"></div>
+                    <div class="content">
+                        <div class="card-top">
+                            <div class="card-image">
+                                <div class="aspect"></div>
+                                <img src="https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/6969fb1c152133800af9cd81_service-1.avif" alt="" loading="lazy">
+                            </div>
+                            <div class="card-tags">
+                                <p>Brand Strategy</p>
+                                <p>Logo Design</p>
+                                <p>Visual Identity</p>
+                            </div>
+                        </div>
+                        <div><div class="card-title">Branding &amp; Identity.</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 2 – Marketing -->
+            <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
+                <div class="card-face" style="color:#201d1d; background-color:#f4f4f4;">
+                    <div class="aspect"></div>
+                    <div class="content">
+                        <div class="card-top">
+                            <div class="card-image">
+                                <div class="aspect"></div>
+                                <img src="https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a00119a186f6eae03811f_service-2.avif" alt="" loading="lazy">
+                            </div>
+                            <div class="card-tags">
+                                <p>Ads Creation</p>
+                                <p>SEO Setup</p>
+                                <p>Email Marketing</p>
+                                <p>Funnel Strategy</p>
+                                <p>Analytics</p>
+                            </div>
+                        </div>
+                        <div><div class="card-title">Marketing.</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 3 – UX Strategy -->
+            <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
+                <div class="card-face" style="color:#f4f4f4; background-color:#8963eb;">
+                    <div class="aspect"></div>
+                    <div class="content">
+                        <div class="card-top">
+                            <div class="card-image">
+                                <div class="aspect"></div>
+                                <img src="https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a000e473a6fb87e025764_service-3.avif" alt="" loading="lazy">
+                            </div>
+                            <div class="card-tags">
+                                <p>UX audits</p>
+                                <p>Wireframes &amp; Prototypes</p>
+                                <p>User Testing</p>
+                            </div>
+                        </div>
+                        <div><div class="card-title">UX Strategy.</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 4 – Osmo Wizard -->
+            <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
+                <div class="card-face" style="color:#201d1d; background-color:#e4bdf2;">
+                    <div class="aspect"></div>
+                    <div class="content">
+                        <div class="card-top">
+                            <div class="card-image">
+                                <div class="aspect"></div>
+                                <img src="https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a0012a2bbbee1e9a7b23d_service-4.avif" alt="" loading="lazy">
+                            </div>
+                            <div class="card-tags">
+                                <p>Magic Spells</p>
+                                <p>Legendary Status</p>
+                                <p>Creative Powerhouse</p>
+                                <p>Early Adopter</p>
+                            </div>
+                        </div>
+                        <div><div class="card-title">Osmo Wizard.</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 5 – Websites -->
+            <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
+                <div class="card-face" style="color:#f4f4f4; background-color:#10101f;">
+                    <div class="aspect"></div>
+                    <div class="content">
+                        <div class="card-top">
+                            <div class="card-image">
+                                <div class="aspect"></div>
+                                <img src="https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a034ccd0b1a0c5b3af037_service-5.avif" alt="" loading="lazy">
+                            </div>
+                            <div class="card-tags">
+                                <p>Web Design</p>
+                                <p>Webflow Development</p>
+                                <p>Osmo Supply</p>
+                            </div>
+                        </div>
+                        <div><div class="card-title">Websites.</div></div>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /list -->
+    </div><!-- /collection -->
+
+    <!-- Prev / Next controls -->
+    <div class="controls">
+        <div class="control-btn prev" data-dropping-stack-prev>
+            <div class="control-circle prev-circle">
+                <svg xmlns="http://www.w3.org/2000/svg" width="40%" viewBox="0 0 18 18" fill="none">
+                    <path d="M6.74976 14.25L11.9998 9L6.74976 3.75" stroke="currentColor" stroke-width="2.5" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+        </div>
+        <div class="control-btn" data-dropping-stack-next>
+            <div class="control-circle next-circle">
+                <svg xmlns="http://www.w3.org/2000/svg" width="40%" viewBox="0 0 18 18" fill="none">
+                    <path d="M6.74976 14.25L11.9998 9L6.74976 3.75" stroke="currentColor" stroke-width="2.5" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /root -->
+
+
+<!-- ────────────────────────────────────────────
+     JS – direct port of the React useEffect init
+     ──────────────────────────────────────────── -->
+<script>
+(function initDroppingCardsStack() {
+    "use strict";
+
+    // ── Config (mirrors default props) ──
+    var visibleCount = 4;
+    var duration     = 0.75;
+    var dragThreshold = 20;
+
+    // ── Register plugins & custom ease ──
+    gsap.registerPlugin(Draggable, CustomEase);
+    try { CustomEase.create("osmo", "0.625, 0.05, 0, 1"); } catch (_) {}
+    var mainEase = "osmo";
+
+    // ── DOM references ──
+    var stackEl      = document.querySelector("[data-dropping-stack-init]");
+    var collectionEl = document.querySelector("[data-dropping-stack-collection]");
+    var listEl       = document.querySelector("[data-dropping-stack-list]");
+    var prevBtn      = document.querySelector("[data-dropping-stack-prev]");
+    var nextBtn      = document.querySelector("[data-dropping-stack-next]");
+
+    var cardElements = Array.from(listEl.querySelectorAll("[data-card-item]"));
+    var total        = cardElements.length;
+
+    // ── State ──
+    var activeIndex = 0;
+    var isAnimating = false;
+    var isActive    = true;
+    var dragCard    = null;
+    var limitX      = 1;
+    var limitY      = 1;
+    var offsetX     = "0px";
+    var offsetY     = "0px";
+    var currentDraggable = null;
+
+    // ── Helpers ──
+    function mod(n, m) { return ((n % m) + m) % m; }
+    function cardAt(offset) { return cardElements[mod(activeIndex + offset, total)]; }
+
+    function getUnitValue(val, depth) {
+        var num  = parseFloat(val) || 0;
+        var unit = String(val).replace(/[0-9.\-]/g, "") || "px";
+        return num * depth + unit;
+    }
+
+    function updateOffsetsFromPadding() {
+        var styles   = getComputedStyle(collectionEl);
+        var padRight = parseFloat(styles.paddingRight) || 0;
+        var padLeft  = parseFloat(styles.paddingLeft)  || 0;
+        var padBottom= parseFloat(styles.paddingBottom)|| 0;
+        var padTop   = parseFloat(styles.paddingTop)   || 0;
+
+        var steps = Math.max(1, visibleCount - 1);
+        var usePadX = Math.max(padRight, padLeft);
+        var usePadY = Math.max(padBottom, padTop);
+        var signX   = padLeft > padRight ? -1 : 1;
+        var signY   = padTop  > padBottom ? -1 : 1;
+
+        offsetX = (usePadX / steps) * signX + "px";
+        offsetY = (usePadY / steps) * signY + "px";
+    }
+
+    function updateDragLimits() {
+        if (!dragCard) return;
+        var rect = dragCard.getBoundingClientRect();
+        limitX = rect.width  || 1;
+        limitY = rect.height || 1;
+    }
+
+    // ── Apply visual state (positions, z-index, draggable) ──
+    function applyState() {
+        updateOffsetsFromPadding();
+
+        cardElements.forEach(function(card) {
+            gsap.set(card, {
+                opacity: 0, pointerEvents: "none", zIndex: 0,
+                x: 0, y: 0, xPercent: 0, yPercent: 0
+            });
+        });
+
+        for (var depth = 0; depth < visibleCount; depth++) {
+            var card = cardAt(depth);
+            var xVal = getUnitValue(offsetX, depth);
+            var yVal = getUnitValue(offsetY, depth);
+            var s = {
+                opacity: 1,
+                zIndex: 999 - depth,
+                pointerEvents: depth === 0 ? "auto" : "none"
+            };
+            if (offsetX.indexOf("%") !== -1) s.xPercent = parseFloat(xVal);
+            else s.x = xVal;
+            if (offsetY.indexOf("%") !== -1) s.yPercent = parseFloat(yVal);
+            else s.y = yVal;
+            gsap.set(card, s);
+        }
+
+        dragCard = cardAt(0);
+        gsap.set(dragCard, { touchAction: "none" });
+        updateDragLimits();
+
+        if (currentDraggable) { currentDraggable.kill(); currentDraggable = null; }
+
+        var magnetize = function(raw, limit) {
+            var sign = Math.sign(raw) || 1;
+            var abs  = Math.abs(raw);
+            return sign * limit * Math.tanh(abs / limit);
+        };
+
+        currentDraggable = Draggable.create(dragCard, {
+            type: "x,y",
+            inertia: false,
+            onPress: function() {
+                if (isAnimating) return;
+                gsap.killTweensOf(dragCard);
+                gsap.set(dragCard, { zIndex: 2000, opacity: 1 });
+            },
+            onDrag: function() {
+                if (isAnimating) return;
+                var x = magnetize(this.x, limitX);
+                var y = magnetize(this.y, limitY);
+                gsap.set(dragCard, { x: x, y: y, opacity: 1 });
+            },
+            onRelease: function() {
+                if (isAnimating) return;
+                var cx  = gsap.getProperty(dragCard, "x");
+                var cy  = gsap.getProperty(dragCard, "y");
+                var pctX = (Math.abs(cx) / limitX) * 100;
+                var pctY = (Math.abs(cy) / limitY) * 100;
+                if (Math.max(pctX, pctY) >= dragThreshold) {
+                    animateNext(true, cx, cy);
+                    return;
+                }
+                gsap.to(dragCard, {
+                    x: 0, y: 0, opacity: 1,
+                    duration: 1, ease: "elastic.out(1, 0.7)",
+                    onComplete: function() { applyState(); }
+                });
+            }
+        })[0];
+    }
+
+    // ── Animate to next card ──
+    function animateNext(fromDrag, releaseX, releaseY) {
+        if (isAnimating) return;
+        isAnimating = true;
+
+        fromDrag  = fromDrag  || false;
+        releaseX  = releaseX  || 0;
+        releaseY  = releaseY  || 0;
+
+        var outgoing     = cardAt(0);
+        var incomingBack = cardAt(visibleCount);
+
+        var tl = gsap.timeline({
+            defaults: { duration: duration, ease: mainEase },
+            onComplete: function() {
+                activeIndex = mod(activeIndex + 1, total);
+                applyState();
+                isAnimating = false;
+            }
+        });
+
+        gsap.set(outgoing, { zIndex: 2000, opacity: 1 });
+        if (fromDrag) gsap.set(outgoing, { x: releaseX, y: releaseY });
+
+        tl.to(outgoing, { yPercent: 200 }, 0);
+        tl.to(outgoing, { opacity: 0, duration: duration * 0.2, ease: "none" }, duration * 0.4);
+
+        for (var depth = 1; depth < visibleCount; depth++) {
+            var xVal = getUnitValue(offsetX, depth - 1);
+            var yVal = getUnitValue(offsetY, depth - 1);
+            var move = { zIndex: 999 - (depth - 1) };
+            if (offsetX.indexOf("%") !== -1) move.xPercent = parseFloat(xVal);
+            else move.x = xVal;
+            if (offsetY.indexOf("%") !== -1) move.yPercent = parseFloat(yVal);
+            else move.y = yVal;
+            tl.to(cardAt(depth), move, 0);
+        }
+
+        var backX  = getUnitValue(offsetX, visibleCount);
+        var backY  = getUnitValue(offsetY, visibleCount);
+        var startX = getUnitValue(offsetX, visibleCount - 1);
+        var startY = getUnitValue(offsetY, visibleCount - 1);
+
+        var inSet = { opacity: 0, zIndex: 999 - visibleCount };
+        if (offsetX.indexOf("%") !== -1) inSet.xPercent = parseFloat(backX);
+        else inSet.x = backX;
+        if (offsetY.indexOf("%") !== -1) inSet.yPercent = parseFloat(backY);
+        else inSet.y = backY;
+        gsap.set(incomingBack, inSet);
+
+        var inTo = { opacity: 1 };
+        if (offsetX.indexOf("%") !== -1) inTo.xPercent = parseFloat(startX);
+        else inTo.x = startX;
+        if (offsetY.indexOf("%") !== -1) inTo.yPercent = parseFloat(startY);
+        else inTo.y = startY;
+        tl.to(incomingBack, inTo, 0);
+    }
+
+    // ── Animate to previous card ──
+    function animatePrev() {
+        if (isAnimating) return;
+        isAnimating = true;
+
+        var incomingTop = cardAt(-1);
+        var leavingBack = cardAt(visibleCount - 1);
+
+        var tl = gsap.timeline({
+            defaults: { duration: duration, ease: mainEase },
+            onComplete: function() {
+                activeIndex = mod(activeIndex - 1, total);
+                applyState();
+                isAnimating = false;
+            }
+        });
+
+        gsap.set(leavingBack, { zIndex: 1 });
+        gsap.set(incomingTop, { opacity: 0, x: 0, xPercent: 0, yPercent: -200, zIndex: 2000 });
+
+        tl.to(incomingTop, { yPercent: 0 }, 0);
+        tl.to(incomingTop, { opacity: 1, duration: duration * 0.2, ease: "none" }, duration * 0.3);
+
+        for (var depth = 0; depth < visibleCount - 1; depth++) {
+            var xVal = getUnitValue(offsetX, depth + 1);
+            var yVal = getUnitValue(offsetY, depth + 1);
+            var move = { zIndex: 999 - (depth + 1) };
+            if (offsetX.indexOf("%") !== -1) move.xPercent = parseFloat(xVal);
+            else move.x = xVal;
+            if (offsetY.indexOf("%") !== -1) move.yPercent = parseFloat(yVal);
+            else move.y = yVal;
+            tl.to(cardAt(depth), move, 0);
+        }
+
+        var backX = getUnitValue(offsetX, visibleCount);
+        var backY = getUnitValue(offsetY, visibleCount);
+        var hideBack = { opacity: 0 };
+        if (offsetX.indexOf("%") !== -1) hideBack.xPercent = parseFloat(backX);
+        else hideBack.x = backX;
+        if (offsetY.indexOf("%") !== -1) hideBack.yPercent = parseFloat(backY);
+        else hideBack.y = backY;
+        tl.to(leavingBack, hideBack, 0);
+    }
+
+    // ── Button controls ──
+    prevBtn.addEventListener("click", function() { animatePrev(); });
+    nextBtn.addEventListener("click", function() { animateNext(false); });
+
+    // ── Keyboard controls ──
+    var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+            isActive = entry.isIntersecting && entry.intersectionRatio >= 0.6;
+        });
+    }, { threshold: [0, 0.6, 1] });
+    observer.observe(stackEl);
+
+    window.addEventListener("keydown", function(e) {
+        if (!isActive || isAnimating) return;
+        var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
+        if (tag === "input" || tag === "textarea" || tag === "select") return;
+        if (e.target && e.target.isContentEditable) return;
+        if (e.key === "ArrowRight") { e.preventDefault(); animateNext(false); }
+        if (e.key === "ArrowLeft")  { e.preventDefault(); animatePrev(); }
+    });
+
+    // ── Resize handler ──
+    window.addEventListener("resize", function() { applyState(); });
+
+    // ── Kick off ──
+    applyState();
+})();
+</script>
+
+</body>
+</html>

@@ -83,6 +83,9 @@ export default function LoadingScreen({
     useEffect(() => {
         if (!autoPlay) return
 
+        let cancelled = false
+        const timeoutIds: ReturnType<typeof setTimeout>[] = []
+
         const animate = async () => {
             const ease = easingMap[easing] as [number, number, number, number]
 
@@ -102,6 +105,7 @@ export default function LoadingScreen({
                 secondGroupControls.set({ y: "10%" }),
                 thirdGroupControls.set({ y: "10%" }),
             ])
+            if (cancelled) return
 
             // Step 1
             const step1Value = parseInt(`${randomNumbers1}${randomNumbers3}`) / 100
@@ -111,6 +115,7 @@ export default function LoadingScreen({
                 secondGroupControls.start({ y: `${(randomNumbers1 - 1) * -10}%`, transition: { duration, ease } }),
                 thirdGroupControls.start({ y: `${(randomNumbers3 - 1) * -10}%`, transition: { duration, ease } }),
             ])
+            if (cancelled) return
 
             // Step 2
             const step2Value = parseInt(`${randomNumbers2}${randomNumbers4}`) / 100
@@ -119,6 +124,7 @@ export default function LoadingScreen({
                 secondGroupControls.start({ y: `${(randomNumbers2 - 1) * -10}%`, transition: { duration, ease } }),
                 thirdGroupControls.start({ y: `${(randomNumbers4 - 1) * -10}%`, transition: { duration, ease } }),
             ])
+            if (cancelled) return
 
             // Step 3: 100%
             await Promise.all([
@@ -127,26 +133,38 @@ export default function LoadingScreen({
                 secondGroupControls.start({ y: "-90%", transition: { duration, ease } }),
                 thirdGroupControls.start({ y: "-90%", transition: { duration, ease } }),
             ])
+            if (cancelled) return
 
             // Exit animation
             if (!loop && exitAnimation !== "none") {
                 setIsExiting(true)
-                await new Promise((resolve) => setTimeout(resolve, exitDelay * 1000))
+                await new Promise((resolve) => {
+                    const tid = setTimeout(resolve, exitDelay * 1000)
+                    timeoutIds.push(tid)
+                })
+                if (cancelled) return
                 await containerControls.start({
                     ...exitAnimations[exitAnimation],
                     transition: { duration: exitDuration, ease },
                 })
+                if (cancelled) return
                 setIsVisible(false)
                 if (onComplete) onComplete()
             } else if (loop) {
-                setTimeout(() => setKey((k) => k + 1), loopDelay * 1000)
+                const tid = setTimeout(() => setKey((k) => k + 1), loopDelay * 1000)
+                timeoutIds.push(tid)
             } else {
                 if (onComplete) onComplete()
             }
         }
 
         animate()
-    }, [key, autoPlay, duration, easing, loop, loopDelay, exitAnimation, exitDuration, exitDelay])
+
+        return () => {
+            cancelled = true
+            timeoutIds.forEach((id) => clearTimeout(id))
+        }
+    }, [key, autoPlay, duration, easing, loop, loopDelay, exitAnimation, exitDuration, exitDelay, onComplete])
 
     if (!isVisible) return null
 
