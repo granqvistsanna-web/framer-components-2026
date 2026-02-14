@@ -1,858 +1,844 @@
-import * as React from "react"
-import { useEffect, useId, useRef, useState } from "react"
+// Prompt Composer Demo
+// @framerSupportedLayoutWidth any-prefer-fixed
+// @framerSupportedLayoutHeight any-prefer-fixed
 import { addPropertyControls, ControlType } from "framer"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 
-interface ChatMessage {
-    role: "user" | "assistant"
-    content: string
+interface PromptItem {
+    text: string
+    fileIds: string
 }
 
-interface Props {
-    // Layout
+interface ContentGroup {
+    prompts: PromptItem[]
+    helperText: string
+}
+
+interface FileItem {
+    id: string
+    title: string
+    source: string
+    emoji: string
+    image: string
+}
+
+interface FilesGroup {
+    showFiles: boolean
+    maxVisibleFiles: number
+    files: FileItem[]
+}
+
+interface StatesGroup {
+    showFiles: boolean
+    enablePreview: boolean
+    enableAutoPlay: boolean
+    enableLoop: boolean
+}
+
+interface StyleGroup {
+    themeMode: "light" | "dark" | "auto"
+    font: {
+        fontFamily?: string
+        fontSize?: number
+        fontWeight?: number
+        lineHeight?: number
+        letterSpacing?: number | string
+    }
+    textColor: string
+    mutedColor: string
+    backgroundColor: string
+    borderColor: string
+    shadowColor: string
+    searchIconColor: string
+    fileCardBackgroundColor: string
+    fileCardBorderColor: string
+    fileCardShadowColor: string
+    fileThumbBackgroundColor: string
+    fileSourceColor: string
+    sendButtonBackgroundColor: string
+    sendButtonIconColor: string
+}
+
+interface LayoutGroup {
     maxWidth: number
     padding: number
     mobilePadding: number
     mobileBreakpoint: number
+}
 
-    // Typography
-    fontFamily: string
-    fontSize: number
-
-    // Colors
-    textColor: string
-
-    // Content
-    userMessage: string
-    assistantMessage: string
-    showSecondExchange: boolean
-    userMessage2: string
-    assistantMessage2: string
-    placeholder: string
-
-    // Style
-    compact: boolean
-    scrollMode: "none" | "mobile" | "all"
-
-    // Animation
-    autoPlay: boolean
+interface PlaybackGroup {
     preview: boolean
-    topFadeOut: boolean
+    autoPlay: boolean
     loop: boolean
-    loopDelay: number
     startDelay: number
     typingSpeed: number
-    thinkingTime: number
-    secondExchangeDelay: number
-    entranceAnimation: boolean
-    triggerOnView: boolean
-    viewThreshold: number
-
-    onComplete?: () => void
+    deleteSpeed: number
+    holdTime: number
+    betweenPromptsDelay: number
 }
 
-// Helper to render text with **bold** markdown.
-function renderBoldText(text: string): React.ReactNode[] {
-    // Remove a trailing unpaired ** that hasn't been closed yet
-    const cleaned = text.replace(/\*\*[^*]*$/, (match) => {
-        // Only strip if it's an opening ** without a closing **
-        // Count total ** pairs before this point
-        const before = text.slice(0, text.length - match.length)
-        const pairCount = (before.match(/\*\*/g) || []).length
-        // If even number of ** before, this is an unclosed opening marker
-        if (pairCount % 2 === 0) return match.slice(2)
-        return match
-    })
-    const parts = cleaned.split(/(\*\*[^*]+\*\*)/g)
-    return parts.map((part, i) => {
-        if (part.startsWith("**") && part.endsWith("**")) {
-            return (
-                <strong key={i} style={{ fontWeight: 700 }}>
-                    {part.slice(2, -2)}
-                </strong>
-            )
+interface AdvancedGroup {
+    maxVisibleFiles: number
+    files: FileItem[]
+    searchIconSize: number
+    addIconSize: number
+    sendButtonSize: number
+    sendIconSize: number
+    fileThumbSize: number
+    fileCardWidth: number
+    fileEmojiSize: number
+    startDelay: number
+    typingSpeed: number
+    deleteSpeed: number
+    holdTime: number
+    betweenPromptsDelay: number
+    fileRevealDelay: number
+    fileRevealDuration: number
+    fileRevealStagger: number
+    fileRiseOffset: number
+}
+
+interface Props {
+    content?: Partial<ContentGroup>
+    files?: Partial<FilesGroup>
+    styleGroup?: Partial<StyleGroup>
+    layout?: Partial<LayoutGroup>
+    states?: Partial<StatesGroup>
+    advanced?: Partial<AdvancedGroup>
+    playback?: Partial<PlaybackGroup>
+
+    // Legacy flat props fallback
+    prompt1?: string
+    prompt2?: string
+    prompt3?: string
+    helperText?: string
+    showReferenceCard?: boolean
+    referenceImage?: string
+    referenceTitle?: string
+    referenceSource?: string
+
+    maxWidth?: number
+    padding?: number
+    mobilePadding?: number
+    mobileBreakpoint?: number
+    textColor?: string
+    mutedColor?: string
+    backgroundColor?: string
+    borderColor?: string
+    shadowColor?: string
+    preview?: boolean
+    autoPlay?: boolean
+    loop?: boolean
+    startDelay?: number
+    typingSpeed?: number
+    deleteSpeed?: number
+    holdTime?: number
+    betweenPromptsDelay?: number
+}
+
+const DEFAULT_FILES: FileItem[] = [
+    {
+        id: "launch-draft",
+        title: "Product Update Draft",
+        source: "Google Docs",
+        emoji: "📝",
+        image: "",
+    },
+    {
+        id: "options-sheet",
+        title: "Options Matrix",
+        source: "Airtable",
+        emoji: "📊",
+        image: "",
+    },
+    {
+        id: "meeting-notes",
+        title: "Team Notes.md",
+        source: "Notion",
+        emoji: "🗒️",
+        image: "",
+    },
+    {
+        id: "style-guide",
+        title: "Style Guide",
+        source: "Confluence",
+        emoji: "🎯",
+        image: "",
+    },
+]
+
+function parseIdList(raw: string): string[] {
+    return raw
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean)
+}
+
+function resolveImageSrc(value: unknown): string {
+    if (typeof value === "string") return value.trim()
+    if (!value || typeof value !== "object") return ""
+
+    const imageValue = value as { src?: unknown; url?: unknown }
+    if (typeof imageValue.src === "string") return imageValue.src.trim()
+    if (typeof imageValue.url === "string") return imageValue.url.trim()
+    return ""
+}
+
+export default function AIChatSequence(props: Props) {
+    const content = props.content ?? {}
+    const filesGroup = props.files ?? {}
+    const styleGroup = props.styleGroup ?? {}
+    const layout = props.layout ?? {}
+    const states = props.states ?? {}
+    const advanced = props.advanced ?? {}
+    const playback = props.playback ?? {}
+
+    const maxWidth = layout.maxWidth ?? props.maxWidth ?? 1220
+    const padding = layout.padding ?? props.padding ?? 32
+    const mobilePadding = layout.mobilePadding ?? props.mobilePadding ?? 16
+    const mobileBreakpoint = layout.mobileBreakpoint ?? props.mobileBreakpoint ?? 760
+
+    const font = styleGroup.font ?? {}
+    const fontFamily =
+        font.fontFamily ??
+        "'Inter', -apple-system, BlinkMacSystemFont, sans-serif"
+    const rawFontSize = font.fontSize ?? 46
+    const parsedFontSize =
+        typeof rawFontSize === "number" ? rawFontSize : parseFloat(String(rawFontSize))
+    const fontSize = Number.isFinite(parsedFontSize) ? parsedFontSize : 46
+    const fontWeight = font.fontWeight
+    const promptLineHeight = font.lineHeight ?? 1.15
+    const promptLetterSpacing = font.letterSpacing ?? "-0.02em"
+    const themeMode = styleGroup.themeMode ?? "light"
+    const isSystemDark =
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches
+    const isDarkTheme = themeMode === "dark" || (themeMode === "auto" && isSystemDark)
+
+    const textColor =
+        styleGroup.textColor ??
+        props.textColor ??
+        (isDarkTheme ? "#f2f2f2" : "#000000")
+    const mutedColor =
+        styleGroup.mutedColor ??
+        props.mutedColor ??
+        (isDarkTheme ? "#9a9a9a" : "#8a8a8a")
+    const backgroundColor =
+        styleGroup.backgroundColor ??
+        props.backgroundColor ??
+        (isDarkTheme ? "#151515" : "#ffffff")
+    const borderColor =
+        styleGroup.borderColor ??
+        props.borderColor ??
+        (isDarkTheme ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.04)")
+    const shadowColor =
+        styleGroup.shadowColor ??
+        props.shadowColor ??
+        (isDarkTheme ? "rgba(0, 0, 0, 0.35)" : "rgba(0, 0, 0, 0.08)")
+    const searchIconColor =
+        styleGroup.searchIconColor ?? (isDarkTheme ? "#9a9a9a" : "#7d7d7d")
+    const fileCardBackgroundColor =
+        styleGroup.fileCardBackgroundColor ?? (isDarkTheme ? "#1f1f1f" : "#ffffff")
+    const fileCardBorderColor =
+        styleGroup.fileCardBorderColor ??
+        (isDarkTheme ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.1)")
+    const fileCardShadowColor =
+        styleGroup.fileCardShadowColor ??
+        (isDarkTheme ? "rgba(0, 0, 0, 0.28)" : "rgba(0, 0, 0, 0.08)")
+    const fileThumbBackgroundColor =
+        styleGroup.fileThumbBackgroundColor ?? (isDarkTheme ? "#2c2c2c" : "#efefef")
+    const fileSourceColor =
+        styleGroup.fileSourceColor ?? (isDarkTheme ? "#b3b3b3" : "#5f5f5f")
+    const sendButtonBackgroundColor =
+        styleGroup.sendButtonBackgroundColor ?? (isDarkTheme ? "#f2f2f2" : "#000000")
+    const sendButtonIconColor =
+        styleGroup.sendButtonIconColor ?? (isDarkTheme ? "#141414" : "#ffffff")
+
+    const helperText = content.helperText ?? props.helperText ?? "Attach files or links"
+
+    const promptItems = useMemo(() => {
+        const rawPromptItems = content.prompts ?? []
+        const cleanedArray = rawPromptItems
+            .map((item) => ({
+                text: item?.text?.trim() ?? "",
+                fileIds: item?.fileIds?.trim() ?? "",
+            }))
+            .filter((item) => item.text.length > 0)
+
+        if (cleanedArray.length > 0) return cleanedArray
+
+        const fallbackTexts = [
+            props.prompt1 ?? "Draft a sharper intro for this product update",
+            props.prompt2 ?? "Compare these options and recommend one",
+            props.prompt3 ?? "Turn these notes into a one-week action plan",
+        ]
+            .map((text) => text.trim())
+            .filter(Boolean)
+
+        return fallbackTexts.map((text, index) => ({
+            text,
+            fileIds: index === 0 ? "legacy-ref" : "",
+        }))
+    }, [content.prompts, props.prompt1, props.prompt2, props.prompt3])
+
+    const showFiles = states.showFiles ?? filesGroup.showFiles ?? props.showReferenceCard ?? true
+    const maxVisibleFiles = advanced.maxVisibleFiles ?? filesGroup.maxVisibleFiles ?? 3
+
+    const providedFiles = advanced.files ?? filesGroup.files ?? DEFAULT_FILES
+    const safeFileLibrary = useMemo(() => {
+        const legacyRefFile: FileItem = {
+            id: "legacy-ref",
+            title: props.referenceTitle ?? "Project Brief.pdf",
+            source: props.referenceSource ?? "Docs",
+            emoji: "📄",
+            image: props.referenceImage ?? "",
         }
-        return <span key={i}>{part}</span>
-    })
-}
+        const cleaned = providedFiles
+            .map((file) => ({
+                id: file?.id?.trim() ?? "",
+                title: file?.title?.trim() ?? "",
+                source: file?.source?.trim() ?? "",
+                emoji: file?.emoji?.trim() ?? "",
+                image: resolveImageSrc(file?.image),
+            }))
+            .filter((file) => file.id && file.title)
 
+        const hasLegacy = cleaned.some((file) => file.id.toLowerCase() === "legacy-ref")
+        if (!hasLegacy) cleaned.push(legacyRefFile)
+        return cleaned
+    }, [providedFiles, props.referenceTitle, props.referenceSource, props.referenceImage])
 
-export default function AIChatSequence({
-    maxWidth = 680,
-    padding = 24,
-    mobilePadding = 12,
-    mobileBreakpoint = 500,
-    fontFamily = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-    fontSize = 15,
-    textColor = "#1a1a1a",
-    userMessage = "I would like to create an audience for Dermava. Patients who likely suffer from Atopic Dermatitis. How can I most efficiently reach the correct population?",
-    assistantMessage = "To most effectively reach this population, I recommend we start by **developing a DTC audience that over-indexes for atopic dermatitis,** then explore **demographic and geographic** signals associated with disease severity, treatment stage, and patterns of therapy escalation.\n\nThis will only take a few minutes and I'll guide you the whole way.\n\n**Sound like a good place to start?**",
-    showSecondExchange = true,
-    userMessage2 = "Sounds amazing!",
-    assistantMessage2 = "Great! **Let's get started!**",
-    placeholder = "I want to...",
-    compact = false,
-    scrollMode = "none",
-    autoPlay = true,
-    preview = true,
-    topFadeOut = true,
-    loop = false,
-    loopDelay = 2,
-    startDelay = 0.6,
-    typingSpeed = 28,
-    thinkingTime = 1,
-    secondExchangeDelay = 1,
-    entranceAnimation = true,
-    triggerOnView = false,
-    viewThreshold = 0.5,
-    onComplete,
-}: Props) {
-    const [key, setKey] = useState(0)
-    const [phase, setPhase] = useState<
-        | "idle"
-        | "typing"
-        | "sent"
-        | "thinking"
-        | "typing2"
-        | "sent2"
-        | "thinking2"
-        | "complete"
-    >("idle")
-    const [inputValue, setInputValue] = useState("")
-    const [messages, setMessages] = useState<ChatMessage[]>([])
-    const [isInView, setIsInView] = useState(!triggerOnView)
-    const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+    const preview = states.enablePreview ?? playback.preview ?? props.preview ?? true
+    const autoPlay = states.enableAutoPlay ?? playback.autoPlay ?? props.autoPlay ?? true
+    const loop = states.enableLoop ?? playback.loop ?? props.loop ?? false
+    const startDelay = advanced.startDelay ?? playback.startDelay ?? props.startDelay ?? 0.35
+    const typingSpeed = advanced.typingSpeed ?? playback.typingSpeed ?? props.typingSpeed ?? 44
+    const deleteSpeed = advanced.deleteSpeed ?? playback.deleteSpeed ?? props.deleteSpeed ?? 24
+    const holdTime = advanced.holdTime ?? playback.holdTime ?? props.holdTime ?? 1.2
+    const betweenPromptsDelay =
+        advanced.betweenPromptsDelay ??
+        playback.betweenPromptsDelay ??
+        props.betweenPromptsDelay ??
+        0.25
+    const fileRevealDelay = advanced.fileRevealDelay ?? 0.12
+    const fileRevealDuration = advanced.fileRevealDuration ?? 420
+    const fileRevealStagger = advanced.fileRevealStagger ?? 0.06
+    const fileRiseOffset = advanced.fileRiseOffset ?? 8
+    const searchIconSize = advanced.searchIconSize ?? (isMobile ? 28 : 32)
+    const addIconSize = advanced.addIconSize ?? (isMobile ? 22 : 28)
+    const sendButtonSize = advanced.sendButtonSize ?? (isMobile ? 58 : 68)
+    const sendIconSize = advanced.sendIconSize ?? (isMobile ? 28 : 30)
+    const fileThumbSize = advanced.fileThumbSize ?? (isMobile ? 52 : 76)
+    const fileCardWidth = advanced.fileCardWidth ?? (isMobile ? 250 : 350)
+    const fileEmojiSize = advanced.fileEmojiSize ?? (isMobile ? 24 : 30)
+
+    const safeMaxWidth = Math.max(320, maxWidth)
+    const safePadding = Math.max(0, padding)
+    const safeMobilePadding = Math.max(0, mobilePadding)
+    const safeMobileBreakpoint = Math.max(240, mobileBreakpoint)
+    const safeFontSize = Math.max(12, fontSize)
+    const safeMaxVisibleFiles = Math.max(0, Math.round(maxVisibleFiles))
+    const safeStartDelay = Math.max(0, startDelay)
+    const safeTypingSpeed = Math.max(1, typingSpeed)
+    const safeDeleteSpeed = Math.max(1, deleteSpeed)
+    const safeHoldTime = Math.max(0, holdTime)
+    const safeBetweenPromptsDelay = Math.max(0, betweenPromptsDelay)
+    const safeFileRevealDelay = Math.max(0, fileRevealDelay)
+    const safeFileRevealDuration = Math.max(120, Math.round(fileRevealDuration))
+    const safeFileRevealStagger = Math.max(0, fileRevealStagger)
+    const safeFileRiseOffset = Math.max(0, fileRiseOffset)
+    const safeSearchIconSize = Math.max(12, Math.round(searchIconSize))
+    const safeAddIconSize = Math.max(12, Math.round(addIconSize))
+    const safeSendButtonSize = Math.max(24, Math.round(sendButtonSize))
+    const safeSendIconSize = Math.max(12, Math.round(sendIconSize))
+    const safeFileThumbSize = Math.max(20, Math.round(fileThumbSize))
+    const safeFileCardWidth = Math.max(120, Math.round(fileCardWidth))
+    const safeFileEmojiSize = Math.max(10, Math.round(fileEmojiSize))
+
+    const [typedText, setTypedText] = useState("")
+    const [activePromptIndex, setActivePromptIndex] = useState(0)
     const [isMobile, setIsMobile] = useState(false)
+    const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+    const [showAnimatedFiles, setShowAnimatedFiles] = useState(false)
 
     const containerRef = useRef<HTMLDivElement>(null)
-    const messagesRef = useRef<HTMLDivElement>(null)
-    const onCompleteRef = useRef(onComplete)
-    onCompleteRef.current = onComplete
-
-    const canScroll =
-        scrollMode === "all" || (scrollMode === "mobile" && isMobile)
-
-    // Auto-scroll messages to bottom when content changes
-    useEffect(() => {
-        const el = messagesRef.current
-        if (!el) return
-        requestAnimationFrame(() => {
-            el.scrollTop = el.scrollHeight
-        })
-    }, [messages, phase])
-
-    useEffect(() => {
-        const motionQuery = window.matchMedia(
-            "(prefers-reduced-motion: reduce)"
-        )
-        setPrefersReducedMotion(motionQuery.matches)
-        const motionHandler = (e: MediaQueryListEvent) =>
-            setPrefersReducedMotion(e.matches)
-        motionQuery.addEventListener("change", motionHandler)
-
-        return () => motionQuery.removeEventListener("change", motionHandler)
-    }, [])
-
-    // Detect mobile based on component's own width (works inside Framer canvas)
-    useEffect(() => {
-        const el = containerRef.current
-        if (!el) return
-        const ro = new ResizeObserver(([entry]) => {
-            setIsMobile(entry.contentRect.width < mobileBreakpoint)
-        })
-        ro.observe(el)
-        return () => ro.disconnect()
-    }, [mobileBreakpoint])
     const uniqueId = useId().replace(/:/g, "")
 
-    // Intersection Observer
     useEffect(() => {
-        if (!triggerOnView || !containerRef.current) return
-        const observer = new IntersectionObserver(
-            ([entry]) => {
-                if (entry.isIntersecting) {
-                    setIsInView(true)
-                    observer.disconnect()
-                }
-            },
-            { threshold: viewThreshold }
-        )
-        observer.observe(containerRef.current)
-        return () => observer.disconnect()
-    }, [triggerOnView, viewThreshold])
+        if (typeof window === "undefined") return
+        const query = window.matchMedia("(prefers-reduced-motion: reduce)")
+        setPrefersReducedMotion(query.matches)
 
-    useEffect(() => {
-        if (!autoPlay || !preview || !isInView) return
-
-        const intervalIds: ReturnType<typeof setInterval>[] = []
-        const timeoutIds: ReturnType<typeof setTimeout>[] = []
-        let timeline: GsapTimeline | null = null
-        let cancelled = false
-        const containerEl = containerRef.current
-
-        const loadGSAP = async () => {
-            if (!window.gsap) {
-                await new Promise<void>((resolve, reject) => {
-                    const existingScript =
-                        document.querySelector('script[src*="gsap"]')
-                    if (existingScript) {
-                        // Script tag exists but GSAP hasn't initialized yet — wait for it
-                        if (window.gsap) {
-                            resolve()
-                            return
-                        }
-                        existingScript.addEventListener("load", () => resolve())
-                        existingScript.addEventListener("error", () =>
-                            reject(new Error("Failed to load GSAP"))
-                        )
-                        return
-                    }
-                    const script = document.createElement("script")
-                    script.src =
-                        "https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js"
-                    script.onload = () => resolve()
-                    script.onerror = () =>
-                        reject(new Error("Failed to load GSAP"))
-                    document.head.appendChild(script)
-                })
-            }
+        const handleChange = (event: MediaQueryListEvent) => {
+            setPrefersReducedMotion(event.matches)
         }
 
-        loadGSAP().catch(() => {
-            // GSAP failed to load — show final state as fallback
+        if (typeof query.addEventListener === "function") {
+            query.addEventListener("change", handleChange)
+            return () => query.removeEventListener("change", handleChange)
+        }
+
+        query.addListener(handleChange)
+        return () => query.removeListener(handleChange)
+    }, [])
+
+    useEffect(() => {
+        const element = containerRef.current
+        if (!element || typeof ResizeObserver === "undefined") return
+
+        const observer = new ResizeObserver(([entry]) => {
+            setIsMobile(entry.contentRect.width < safeMobileBreakpoint)
+        })
+
+        observer.observe(element)
+        return () => observer.disconnect()
+    }, [safeMobileBreakpoint])
+
+    useEffect(() => {
+        if (!preview || promptItems.length === 0) {
+            setTypedText("")
+            setActivePromptIndex(0)
+            return
+        }
+
+        if (prefersReducedMotion || !autoPlay) {
+            setTypedText(promptItems[0].text)
+            setActivePromptIndex(0)
+            return
+        }
+
+        let cancelled = false
+        let timerId: ReturnType<typeof setTimeout> | null = null
+        let promptIndex = 0
+        let charIndex = 0
+        let phase: "typing" | "holding" | "deleting" | "between" = "typing"
+
+        setTypedText("")
+        setActivePromptIndex(0)
+
+        const scheduleNext = (delayMs: number) => {
+            timerId = setTimeout(step, delayMs)
+        }
+
+        const step = () => {
             if (cancelled) return
-            setPhase("complete")
-            const allMessages: ChatMessage[] = [
-                { role: "user", content: userMessage },
-                { role: "assistant", content: assistantMessage },
-            ]
-            if (showSecondExchange && userMessage2) allMessages.push({ role: "user", content: userMessage2 })
-            if (showSecondExchange && assistantMessage2) allMessages.push({ role: "assistant", content: assistantMessage2 })
-            setMessages(allMessages)
-            if (onCompleteRef.current) onCompleteRef.current()
-        }).then(() => {
-            if (cancelled) return
+            const currentPrompt = promptItems[promptIndex]?.text ?? ""
 
-            const gsap = window.gsap
-            if (!gsap) return
-
-            if (containerEl) gsap.killTweensOf(containerEl)
-
-            setPhase("idle")
-            setInputValue("")
-            setMessages([])
-
-            if (prefersReducedMotion) {
-                setPhase("complete")
-                const allMessages: ChatMessage[] = [
-                    { role: "user", content: userMessage },
-                    { role: "assistant", content: assistantMessage },
-                ]
-                if (showSecondExchange && userMessage2) allMessages.push({ role: "user", content: userMessage2 })
-                if (showSecondExchange && assistantMessage2) allMessages.push({ role: "assistant", content: assistantMessage2 })
-                setMessages(allMessages)
-                if (onCompleteRef.current) onCompleteRef.current()
+            if (phase === "typing") {
+                if (charIndex < currentPrompt.length) {
+                    charIndex += 1
+                    setTypedText(currentPrompt.slice(0, charIndex))
+                    scheduleNext(safeTypingSpeed)
+                    return
+                }
+                phase = "holding"
+                scheduleNext(safeHoldTime * 1000)
                 return
             }
 
-            timeline = gsap.timeline()
-
-            if (containerEl && entranceAnimation) {
-                timeline.fromTo(
-                    containerEl,
-                    { opacity: 0, y: 16 },
-                    { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" },
-                    0
-                )
+            if (phase === "holding") {
+                phase = "deleting"
+                scheduleNext(safeDeleteSpeed)
+                return
             }
 
-            // === EXCHANGE 1 ===
+            if (phase === "deleting") {
+                if (charIndex > 0) {
+                    charIndex -= 1
+                    setTypedText(currentPrompt.slice(0, charIndex))
+                    scheduleNext(safeDeleteSpeed)
+                    return
+                }
 
-            // Phase 1: User typing
-            timeline.call(
-                () => {
-                    if (userMessage.length === 0) {
-                        setPhase("sent")
+                const nextPromptIndex = promptIndex + 1
+                if (nextPromptIndex >= promptItems.length) {
+                    if (!loop) {
+                        setTypedText("")
                         return
                     }
-                    setPhase("typing")
-                    let charIndex = 0
-                    const typeInterval = setInterval(() => {
-                        if (charIndex < userMessage.length) {
-                            setInputValue(
-                                userMessage.slice(0, charIndex + 1)
-                            )
-                            charIndex++
-                        } else {
-                            clearInterval(typeInterval)
-                        }
-                    }, typingSpeed)
-                    intervalIds.push(typeInterval)
-                },
-                [],
-                startDelay
-            )
-
-            // Phase 2a: Clear input (the "send" gesture)
-            const totalTypingTime1 =
-                startDelay + (userMessage.length * typingSpeed) / 1000 + 0.3
-            timeline.call(
-                () => {
-                    setInputValue("")
-                },
-                [],
-                totalTypingTime1
-            )
-
-            // Phase 2b: Message appears, layout shifts
-            timeline.call(
-                () => {
-                    setPhase("sent")
-                    setMessages([{ role: "user", content: userMessage }])
-                },
-                [],
-                totalTypingTime1 + 0.2
-            )
-
-            // Phase 3: Thinking (after layout has mostly settled)
-            timeline.call(
-                () => {
-                    setPhase("thinking")
-                },
-                [],
-                totalTypingTime1 + 0.7
-            )
-
-            // Phase 4: Show full response after thinking
-            const responseStartTime1 = totalTypingTime1 + 0.7 + thinkingTime
-            timeline.call(
-                () => {
-                    setPhase("sent")
-                    setMessages((prev: ChatMessage[]) => [
-                        ...prev,
-                        {
-                            role: "assistant",
-                            content: assistantMessage,
-                        },
-                    ])
-
-                    // If no second exchange, we're done
-                    if (!showSecondExchange || !userMessage2) {
-                        setPhase("complete")
-                        if (onCompleteRef.current) onCompleteRef.current()
-                        if (loop) {
-                            const loopTid = setTimeout(
-                                () => setKey((k: number) => k + 1),
-                                loopDelay * 1000
-                            )
-                            timeoutIds.push(loopTid)
-                        }
-                    }
-                },
-                [],
-                responseStartTime1
-            )
-
-            // === EXCHANGE 2 (if configured) ===
-            if (showSecondExchange && userMessage2) {
-                const exchange2StartTime =
-                    responseStartTime1 + secondExchangeDelay
-
-                // Phase 5: User typing second message
-                timeline.call(
-                    () => {
-                        setPhase("typing2")
-                        let charIndex = 0
-                        const typeInterval = setInterval(() => {
-                            if (charIndex < userMessage2.length) {
-                                setInputValue(
-                                    userMessage2.slice(0, charIndex + 1)
-                                )
-                                charIndex++
-                            } else {
-                                clearInterval(typeInterval)
-                            }
-                        }, typingSpeed)
-                        intervalIds.push(typeInterval)
-                    },
-                    [],
-                    exchange2StartTime
-                )
-
-                // Phase 6a: Clear input
-                const totalTypingTime2 =
-                    exchange2StartTime +
-                    (userMessage2.length * typingSpeed) / 1000 +
-                    0.3
-                timeline.call(
-                    () => {
-                        setInputValue("")
-                    },
-                    [],
-                    totalTypingTime2
-                )
-
-                // Phase 6b: Message appears
-                timeline.call(
-                    () => {
-                        setPhase("sent2")
-                        setMessages((prev: ChatMessage[]) => [
-                            ...prev,
-                            { role: "user", content: userMessage2 },
-                        ])
-                    },
-                    [],
-                    totalTypingTime2 + 0.15
-                )
-
-                // Phase 7: Thinking
-                if (assistantMessage2) {
-                    timeline.call(
-                        () => {
-                            setPhase("thinking2")
-                        },
-                        [],
-                        totalTypingTime2 + 0.5
-                    )
-
-                    // Phase 8: Show full response after thinking
-                    const responseStartTime2 = totalTypingTime2 + 0.5 + thinkingTime
-                    timeline.call(
-                        () => {
-                            setPhase("complete")
-                            setMessages((prev: ChatMessage[]) => [
-                                ...prev,
-                                {
-                                    role: "assistant",
-                                    content: assistantMessage2,
-                                },
-                            ])
-                            if (onCompleteRef.current) onCompleteRef.current()
-
-                            if (loop) {
-                                const loopTid = setTimeout(
-                                    () =>
-                                        setKey(
-                                            (k: number) => k + 1
-                                        ),
-                                    loopDelay * 1000
-                                )
-                                timeoutIds.push(loopTid)
-                            }
-                        },
-                        [],
-                        responseStartTime2
-                    )
+                    promptIndex = 0
                 } else {
-                    // No second AI response, just complete
-                    timeline.call(
-                        () => {
-                            setPhase("complete")
-                            if (onCompleteRef.current) onCompleteRef.current()
-                            if (loop) {
-                                const loopTid = setTimeout(
-                                    () => setKey((k: number) => k + 1),
-                                    loopDelay * 1000
-                                )
-                                timeoutIds.push(loopTid)
-                            }
-                        },
-                        [],
-                        totalTypingTime2 + 0.3
-                    )
+                    promptIndex = nextPromptIndex
                 }
+
+                setActivePromptIndex(promptIndex)
+                phase = "between"
+                scheduleNext(safeBetweenPromptsDelay * 1000)
+                return
             }
-        })
+
+            phase = "typing"
+            charIndex = 0
+            setTypedText("")
+            scheduleNext(safeTypingSpeed)
+        }
+
+        scheduleNext(safeStartDelay * 1000)
 
         return () => {
             cancelled = true
-            intervalIds.forEach((id) => clearInterval(id))
-            timeoutIds.forEach((id) => clearTimeout(id))
-            if (timeline) timeline.kill()
-            if (window.gsap && containerEl) {
-                window.gsap.killTweensOf(containerEl)
-            }
+            if (timerId) clearTimeout(timerId)
         }
     }, [
-        key,
-        autoPlay,
+        promptItems,
         preview,
-        isInView,
-        prefersReducedMotion,
-        userMessage,
-        assistantMessage,
-        showSecondExchange,
-        userMessage2,
-        assistantMessage2,
-        startDelay,
-        typingSpeed,
-        thinkingTime,
-        secondExchangeDelay,
+        autoPlay,
         loop,
-        loopDelay,
-        entranceAnimation,
+        safeStartDelay,
+        safeTypingSpeed,
+        safeDeleteSpeed,
+        safeHoldTime,
+        safeBetweenPromptsDelay,
+        prefersReducedMotion,
+    ])
+
+    const activePrompt = promptItems[activePromptIndex]
+    const fileMap = new Map(
+        safeFileLibrary.map((file) => [file.id.toLowerCase(), file] as const)
+    )
+    const activeFileIds = parseIdList(activePrompt?.fileIds ?? "")
+    const activeFiles = activeFileIds
+        .map((id) => fileMap.get(id.toLowerCase()))
+        .filter((file): file is FileItem => Boolean(file))
+        .slice(0, safeMaxVisibleFiles)
+    const shouldShowFiles = showFiles && activeFiles.length > 0
+    const hasTypingStarted = typedText.length > 0
+    const filesVisible = prefersReducedMotion ? hasTypingStarted : showAnimatedFiles
+
+    useEffect(() => {
+        if (!preview || !shouldShowFiles) {
+            setShowAnimatedFiles(false)
+            return
+        }
+
+        if (!hasTypingStarted) {
+            setShowAnimatedFiles(false)
+            return
+        }
+
+        if (prefersReducedMotion) {
+            setShowAnimatedFiles(true)
+            return
+        }
+
+        const timerId = setTimeout(() => {
+            setShowAnimatedFiles(true)
+        }, safeFileRevealDelay * 1000)
+
+        return () => clearTimeout(timerId)
+    }, [
+        preview,
+        shouldShowFiles,
+        hasTypingStarted,
+        safeFileRevealDelay,
+        prefersReducedMotion,
+        activePromptIndex,
     ])
 
     if (!preview) return null
 
-    const activePadding = isMobile ? mobilePadding : padding
-    const hasInput = inputValue.length > 0
-    const hasSentMessage =
-        messages.length > 0 ||
-        phase === "thinking" ||
-        phase === "thinking2"
-    const isThinking =
-        phase === "thinking" || phase === "thinking2"
-    const isTyping =
-        phase === "typing" || phase === "typing2"
+    const activePadding = isMobile ? safeMobilePadding : safePadding
+    const composerFontSize = safeFontSize
+    const subTextSize = isMobile
+        ? Math.max(14, Math.round(composerFontSize * 0.52))
+        : Math.max(16, Math.round(composerFontSize * 0.36))
+    const cardTitleSize = isMobile
+        ? Math.max(16, Math.round(composerFontSize * 0.5))
+        : Math.max(18, Math.round(composerFontSize * 0.48))
+    const cardSourceSize = isMobile
+        ? Math.max(13, Math.round(composerFontSize * 0.36))
+        : Math.max(14, Math.round(composerFontSize * 0.32))
 
     return (
         <div
             ref={containerRef}
-            key={key}
             role="region"
-            aria-label="AI chat demo"
+            aria-label="AI prompt composer demo"
             style={{
                 width: "100%",
                 height: "100%",
-                backgroundColor: "rgba(255, 255, 255, 0.45)",
-                backdropFilter: "blur(24px)",
-                WebkitBackdropFilter: "blur(24px)",
                 display: "flex",
-                flexDirection: "column",
+                justifyContent: "center",
                 alignItems: "center",
                 padding: `${activePadding}px`,
-                gap: compact ? "8px" : "12px",
                 boxSizing: "border-box",
                 fontFamily,
-                position: "relative",
             }}
         >
-            {/* Messages area */}
             <div
-                ref={messagesRef}
-                className={`${uniqueId}-messages`}
-                role="log"
-                aria-label="Chat messages"
-                aria-live="polite"
                 style={{
-                    flexGrow: 1,
-                    flexShrink: 1,
-                    flexBasis: 0,
                     width: "100%",
-                    maxWidth: `${maxWidth}px`,
-                    overflowX: "hidden",
-                    overflowY: canScroll ? "auto" : "hidden",
-                    scrollbarWidth: "none",
+                    maxWidth: `${safeMaxWidth}px`,
+                    minHeight: isMobile ? "168px" : "250px",
+                    borderRadius: isMobile ? "34px" : "42px",
+                    backgroundColor,
+                    border: `1px solid ${borderColor}`,
+                    boxShadow: `0 16px 44px ${shadowColor}`,
                     display: "flex",
                     flexDirection: "column",
-                    gap: compact ? "12px" : "20px",
-                    paddingTop: topFadeOut ? (compact ? "52px" : "56px") : (compact ? "8px" : "12px"),
-                    paddingBottom: compact ? "60px" : "72px",
-                    maskImage: hasSentMessage && topFadeOut
-                        ? "linear-gradient(to bottom, transparent 0%, black 48px, black 100%)"
-                        : "none",
-                    WebkitMaskImage: hasSentMessage && topFadeOut
-                        ? "linear-gradient(to bottom, transparent 0%, black 48px, black 100%)"
-                        : "none",
-                    transition: prefersReducedMotion
-                        ? "none"
-                        : "flex-grow 0.85s cubic-bezier(0.22, 1, 0.36, 1)",
+                    justifyContent: "flex-start",
+                    padding: isMobile
+                        ? "18px 20px 20px 20px"
+                        : "28px 34px 28px 34px",
+                    boxSizing: "border-box",
+                    overflow: "hidden",
                 }}
             >
-                {messages.map((msg: ChatMessage, i: number) => (
-                    <article
-                        key={i}
-                        aria-label={msg.role === "user" ? "You" : "AI assistant"}
-                        style={{
-                            display: "flex",
-                            justifyContent:
-                                msg.role === "user"
-                                    ? "flex-end"
-                                    : "flex-start",
-                            animation: prefersReducedMotion
-                                ? "none"
-                                : `${uniqueId}-msg-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both`,
-                        }}
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: isMobile ? "flex-start" : "center",
+                        gap: isMobile ? "10px" : "14px",
+                        paddingRight: isMobile ? "58px" : "98px",
+                        minHeight: isMobile
+                            ? `${Math.round(composerFontSize * 2.35)}px`
+                            : `${composerFontSize * 1.25}px`,
+                    }}
+                >
+                    <svg
+                        width={`${safeSearchIconSize}`}
+                        height={`${safeSearchIconSize}`}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                        style={{ color: searchIconColor, flexShrink: 0 }}
                     >
-                        <div
-                            style={{
-                                maxWidth: "85%",
-                                padding: compact ? "8px 12px" : "12px 16px",
-                                borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
-                                backgroundColor: msg.role === "user"
-                                    ? "rgba(255, 255, 255, 0.5)"
-                                    : "rgba(255, 255, 255, 0.45)",
-                                backdropFilter: "blur(16px) saturate(1.4)",
-                                WebkitBackdropFilter: "blur(16px) saturate(1.4)",
-                                color: textColor,
-                                fontSize: `${compact ? fontSize - 1 : fontSize}px`,
-                                lineHeight: compact ? 1.45 : 1.6,
-                                letterSpacing: "-0.01em",
-                                overflowWrap: "break-word",
-                                wordBreak: "break-word",
-                                borderTop: "1px solid rgba(255, 255, 255, 0.8)",
-                                borderLeft: "1px solid rgba(255, 255, 255, 0.6)",
-                                borderRight: "1px solid rgba(255, 255, 255, 0.4)",
-                                borderBottom: "1px solid rgba(255, 255, 255, 0.3)",
-                                boxShadow:
-                                    "0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.5)",
-                                whiteSpace: "pre-wrap",
-                            }}
-                        >
-                            {msg.role === "assistant"
-                                ? renderBoldText(msg.content)
-                                : msg.content}
-                        </div>
-                    </article>
-                ))}
+                        <circle cx="11" cy="11" r="7" />
+                        <line x1="16.65" y1="16.65" x2="21" y2="21" />
+                    </svg>
 
-                {/* Thinking indicator */}
-                {isThinking && (
                     <div
-                        role="status"
-                        aria-label="Assistant is thinking"
                         style={{
-                            display: "flex",
-                            justifyContent: "flex-start",
-                            animation: prefersReducedMotion
-                                ? "none"
-                                : `${uniqueId}-thinking-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both`,
+                            fontSize: `${composerFontSize}px`,
+                            color: typedText ? textColor : mutedColor,
+                            lineHeight: promptLineHeight,
+                            letterSpacing: promptLetterSpacing,
+                            fontWeight,
+                            paddingTop: isMobile ? "2px" : 0,
+                            whiteSpace: isMobile ? "normal" : "nowrap",
+                            display: "block",
+                            overflowWrap: "anywhere",
+                            overflow: isMobile ? "visible" : "hidden",
+                            textOverflow: isMobile ? "clip" : "ellipsis",
+                            userSelect: "none",
+                            minWidth: 0,
                         }}
                     >
-                        <div
-                            aria-hidden="true"
-                            style={{
-                                padding: compact ? "8px 12px" : "12px 16px",
-                                borderRadius: "16px 16px 16px 4px",
-                                backgroundColor: "rgba(255, 255, 255, 0.45)",
-                                backdropFilter: "blur(16px) saturate(1.4)",
-                                WebkitBackdropFilter: "blur(16px) saturate(1.4)",
-                                borderTop: "1px solid rgba(255, 255, 255, 0.8)",
-                                borderLeft: "1px solid rgba(255, 255, 255, 0.6)",
-                                borderRight: "1px solid rgba(255, 255, 255, 0.4)",
-                                borderBottom: "1px solid rgba(255, 255, 255, 0.3)",
-                                boxShadow:
-                                    "0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.5)",
-                                display: "flex",
-                                gap: "5px",
-                                alignItems: "center",
-                            }}
-                        >
-                            {[0, 1, 2].map((dotIndex: number) => (
+                        {typedText || ""}
+                        {!prefersReducedMotion && autoPlay && (
+                            <span
+                                aria-hidden="true"
+                                style={{
+                                    display: "inline-block",
+                                    width: isMobile ? "2px" : "2.5px",
+                                    height: "0.9em",
+                                    marginLeft: "3px",
+                                    backgroundColor: textColor,
+                                    verticalAlign: "-0.12em",
+                                    borderRadius: "2px",
+                                    animation: `${uniqueId}-cursor 0.85s ease-in-out infinite`,
+                                }}
+                            />
+                        )}
+                    </div>
+                </div>
+
+                {shouldShowFiles && (
+                    <div
+                        style={{
+                            marginTop: isMobile ? "14px" : "20px",
+                            display: "flex",
+                            flexWrap: "wrap",
+                            alignItems: "stretch",
+                            gap: isMobile ? "10px" : "14px",
+                            maxWidth: "100%",
+                        }}
+                    >
+                        {activeFiles.map((file, index) => {
+                            const hasImage = file.image.trim().length > 0
+                            const revealDelayMs = Math.round(
+                                index * safeFileRevealStagger * 1000
+                            )
+                            return (
                                 <div
-                                    key={dotIndex}
+                                    key={file.id}
                                     style={{
-                                        width: "6px",
-                                        height: "6px",
-                                        borderRadius: "50%",
-                                        backgroundColor: textColor,
-                                        animation: prefersReducedMotion
-                                            ? "none"
-                                            : `${uniqueId}-dot-pulse 1.4s ease-in-out ${dotIndex * 0.2}s infinite`,
+                                        width: `${safeFileCardWidth}px`,
+                                        maxWidth: "100%",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: isMobile ? "10px" : "14px",
+                                        padding: isMobile ? "8px" : "11px",
+                                        borderRadius: isMobile ? "16px" : "21px",
+                                        backgroundColor: fileCardBackgroundColor,
+                                        border: `1px solid ${fileCardBorderColor}`,
+                                        boxShadow: `0 5px 14px ${fileCardShadowColor}`,
+                                        opacity: filesVisible ? 1 : 0,
+                                        transform: filesVisible
+                                            ? "translateY(0)"
+                                            : `translateY(${safeFileRiseOffset}px)`,
+                                        transition:
+                                            prefersReducedMotion
+                                                ? "none"
+                                                : `opacity ${safeFileRevealDuration}ms cubic-bezier(0.22, 1, 0.36, 1) ${revealDelayMs}ms, transform ${safeFileRevealDuration}ms cubic-bezier(0.22, 1, 0.36, 1) ${revealDelayMs}ms`,
                                     }}
-                                />
-                            ))}
-                        </div>
+                                >
+                                    <div
+                                        style={{
+                                            width: `${safeFileThumbSize}px`,
+                                            height: `${safeFileThumbSize}px`,
+                                            borderRadius: isMobile ? "12px" : "16px",
+                                            overflow: "hidden",
+                                            flexShrink: 0,
+                                            backgroundColor: fileThumbBackgroundColor,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            fontSize: `${safeFileEmojiSize}px`,
+                                        }}
+                                    >
+                                        {hasImage ? (
+                                            <img
+                                                src={file.image}
+                                                alt=""
+                                                style={{
+                                                    width: "100%",
+                                                    height: "100%",
+                                                    objectFit: "cover",
+                                                    display: "block",
+                                                }}
+                                            />
+                                        ) : (
+                                            <span aria-hidden="true">{file.emoji || "📄"}</span>
+                                        )}
+                                    </div>
+                                    <div style={{ minWidth: 0 }}>
+                                        <div
+                                            style={{
+                                                fontSize: `${cardTitleSize}px`,
+                                                lineHeight: 1.1,
+                                                color: textColor,
+                                                whiteSpace: "nowrap",
+                                                overflow: "hidden",
+                                                textOverflow: "ellipsis",
+                                                letterSpacing: "-0.02em",
+                                            }}
+                                        >
+                                            {file.title}
+                                        </div>
+                                        <div
+                                            style={{
+                                                marginTop: isMobile ? "3px" : "5px",
+                                                fontSize: `${cardSourceSize}px`,
+                                                lineHeight: 1.2,
+                                                color: fileSourceColor,
+                                                whiteSpace: "nowrap",
+                                                overflow: "hidden",
+                                                textOverflow: "ellipsis",
+                                            }}
+                                        >
+                                            {file.source}
+                                        </div>
+                                    </div>
+                                </div>
+                            )
+                        })}
                     </div>
                 )}
 
-            </div>
-
-            {/* Input bar (decorative) — pinned to bottom */}
-            <div
-                aria-hidden="true"
-                style={{
-                    width: `calc(100% - ${activePadding * 2}px)`,
-                    maxWidth: `${maxWidth}px`,
-                    position: "absolute",
-                    bottom: `${activePadding}px`,
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    flexShrink: 0,
-                    zIndex: 1,
-                }}
-            >
-                {/* Gradient border wrapper */}
                 <div
                     style={{
-                        position: "relative",
-                        borderRadius: compact ? "22px" : "28px",
-                        padding: "1.5px",
-                        background:
-                            "linear-gradient(135deg, rgba(168, 212, 255, 0.45) 0%, rgba(196, 181, 253, 0.45) 40%, rgba(212, 165, 208, 0.4) 65%, rgba(240, 180, 180, 0.4) 100%)",
-                        boxShadow:
-                            "0 0 12px rgba(196, 181, 253, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04)",
+                        marginTop: shouldShowFiles ? (isMobile ? "10px" : "18px") : "18px",
+                        display: "flex",
+                        alignItems: "flex-end",
+                        justifyContent: "space-between",
+                        gap: isMobile ? "10px" : "16px",
                     }}
                 >
-                    {/* Inner container */}
                     <div
                         style={{
-                            backgroundColor: "rgba(255, 255, 255, 0.7)",
-                            backdropFilter: "blur(20px) saturate(1.3)",
-                            WebkitBackdropFilter: "blur(20px) saturate(1.3)",
-                            borderRadius: compact ? "calc(22px - 1.5px)" : "calc(28px - 1.5px)",
+                            minWidth: 0,
+                            flex: 1,
                             display: "flex",
-                            flexDirection: "column",
-                            overflow: "hidden",
-                            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.6)",
+                            alignItems: "center",
+                            gap: isMobile ? "8px" : "12px",
+                            color: mutedColor,
+                            fontSize: `${subTextSize}px`,
+                            lineHeight: 1.2,
+                            userSelect: "none",
                         }}
                     >
-                        {/* Input row */}
-                        <div
+                        <svg
+                            width={`${safeAddIconSize}`}
+                            height={`${safeAddIconSize}`}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                        >
+                            <line x1="12" y1="5" x2="12" y2="19" />
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        <span
                             style={{
-                                display: "flex",
-                                alignItems: "flex-end",
-                                padding: compact ? "4px 6px 6px 12px" : "6px 8px 8px 16px",
-                                gap: compact ? "8px" : "12px",
-                                minHeight: compact ? "38px" : "44px",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
                             }}
                         >
-                            {/* Plus icon */}
-                            <button
-                                type="button"
-                                aria-label="Add attachment"
-                                tabIndex={-1}
-                                style={{
-                                    width: compact ? "24px" : "28px",
-                                    height: compact ? "24px" : "28px",
-                                    borderRadius: "50%",
-                                    border: "none",
-                                    backgroundColor: "transparent",
-                                    color: "#b0b0b0",
-                                    cursor: "default",
-                                    pointerEvents: "none" as const,
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    flexShrink: 0,
-                                    padding: 0,
-                                    marginBottom: "2px",
-                                }}
-                            >
-                                <svg
-                                    width={compact ? "16" : "18"}
-                                    height={compact ? "16" : "18"}
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    aria-hidden="true"
-                                >
-                                    <line x1="12" y1="5" x2="12" y2="19" />
-                                    <line x1="5" y1="12" x2="19" y2="12" />
-                                </svg>
-                            </button>
-
-                            {/* Placeholder / typed text */}
-                            <div
-                                style={{
-                                    flex: 1,
-                                    fontSize: `${compact ? fontSize - 1 : fontSize}px`,
-                                    color: hasInput ? textColor : "#767676",
-                                    letterSpacing: "-0.01em",
-                                    lineHeight: compact ? 1.45 : 1.6,
-                                    userSelect: "none",
-                                    overflowWrap: "break-word",
-                                    wordBreak: "break-word",
-                                    whiteSpace: "pre-wrap",
-                                    paddingTop: "4px",
-                                    paddingBottom: "4px",
-                                }}
-                            >
-                                {hasInput ? (
-                                    <>
-                                        {inputValue}
-                                        {isTyping && !prefersReducedMotion && (
-                                            <span
-                                                style={{
-                                                    display: "inline-block",
-                                                    width: "2px",
-                                                    height: "1em",
-                                                    backgroundColor: textColor,
-                                                    marginLeft: "1px",
-                                                    verticalAlign: "text-bottom",
-                                                    borderRadius: "1px",
-                                                    animation: `${uniqueId}-cursor-blink 0.8s ease-in-out infinite`,
-                                                }}
-                                            />
-                                        )}
-                                    </>
-                                ) : placeholder}
-                            </div>
-
-                            {/* Circular send button */}
-                            <button
-                                type="button"
-                                aria-label="Send message"
-                                tabIndex={-1}
-                                style={{
-                                    width: "30px",
-                                    height: "30px",
-                                    borderRadius: "100px",
-                                    border: "none",
-                                    background:
-                                        "linear-gradient(263deg, rgba(159, 160, 248, 0.75) 9.16%, rgba(100, 210, 255, 0.75) 89.63%)",
-                                    color: "#000000",
-                                    cursor: "default",
-                                    pointerEvents: "none" as const,
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    flexShrink: 0,
-                                    padding: 0,
-                                    boxShadow:
-                                        "0 2px 8px rgba(168, 180, 248, 0.25)",
-                                    animation: prefersReducedMotion
-                                        ? "none"
-                                        : `${uniqueId}-btn-glow 3s ease-in-out infinite`,
-                                }}
-                            >
-                                <svg
-                                    width="19"
-                                    height="19"
-                                    viewBox="0 0 19 19"
-                                    fill="none"
-                                    aria-hidden="true"
-                                >
-                                    <path
-                                        d="M3.1665 9.5H15.8332M15.8332 9.5L11.0832 4.75M15.8332 9.5L11.0832 14.25"
-                                        stroke="black"
-                                        strokeWidth="1.5"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                    />
-                                </svg>
-                            </button>
-                        </div>
+                            {helperText}
+                        </span>
                     </div>
+
+                    <button
+                        type="button"
+                        tabIndex={-1}
+                        aria-hidden="true"
+                        style={{
+                            width: `${safeSendButtonSize}px`,
+                            height: `${safeSendButtonSize}px`,
+                            borderRadius: "999px",
+                            border: "none",
+                            backgroundColor: sendButtonBackgroundColor,
+                            color: sendButtonIconColor,
+                            pointerEvents: "none",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: 0,
+                            flexShrink: 0,
+                        }}
+                    >
+                        <svg
+                            width={`${safeSendIconSize}`}
+                            height={`${safeSendIconSize}`}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                        >
+                            <line x1="12" y1="19" x2="12" y2="5" />
+                            <polyline points="5 12 12 5 19 12" />
+                        </svg>
+                    </button>
                 </div>
             </div>
 
-
-            {/* Animations */}
             <style>{`
-                .${uniqueId}-messages::-webkit-scrollbar { display: none; }
-                @keyframes ${uniqueId}-dot-pulse {
-                    0%, 80%, 100% { opacity: 0.2; }
-                    40% { opacity: 0.7; }
-                }
-                @keyframes ${uniqueId}-msg-in {
-                    from { opacity: 0; transform: translateY(12px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
-                @keyframes ${uniqueId}-thinking-in {
-                    from { opacity: 0; transform: translateY(8px) scale(0.95); }
-                    to { opacity: 1; transform: translateY(0) scale(1); }
-                }
-                @keyframes ${uniqueId}-cursor-blink {
+                @keyframes ${uniqueId}-cursor {
                     0%, 100% { opacity: 1; }
                     50% { opacity: 0; }
-                }
-                @keyframes ${uniqueId}-btn-glow {
-                    0%, 100% { box-shadow: 0 2px 8px rgba(168, 180, 248, 0.25); }
-                    50% { box-shadow: 0 2px 16px rgba(168, 180, 248, 0.45), 0 0 24px rgba(196, 181, 253, 0.15); }
                 }
             `}</style>
         </div>
@@ -860,259 +846,435 @@ export default function AIChatSequence({
 }
 
 addPropertyControls(AIChatSequence, {
-    // ─────────────────────────────────────
-    // CONTENT
-    // ─────────────────────────────────────
-    userMessage: {
-        type: ControlType.String,
-        title: "User Says",
-        defaultValue:
-            "I would like to create an audience for Dermava. Patients who likely suffer from Atopic Dermatitis. How can I most efficiently reach the correct population?",
-        displayTextArea: true,
-        description: "The first user message in the chat",
+    content: {
+        type: ControlType.Object,
+        title: "Content",
+        controls: {
+            prompts: {
+                type: ControlType.Array,
+                title: "Prompts",
+                control: {
+                    type: ControlType.Object,
+                    controls: {
+                        text: {
+                            type: ControlType.String,
+                            title: "Text",
+                            defaultValue: "Draft a sharper intro for this product update",
+                        },
+                        fileIds: {
+                            type: ControlType.String,
+                            title: "File IDs",
+                            description:
+                                "Comma-separated file IDs from Advanced > File Library (example: launch-draft,style-guide).",
+                            defaultValue: "launch-draft,style-guide",
+                            placeholder: "launch-draft,style-guide",
+                        },
+                    },
+                },
+                defaultValue: [
+                    {
+                        text: "Rewrite this update with a clearer voice",
+                        fileIds: "launch-draft,style-guide",
+                    },
+                    {
+                        text: "Compare these plans and highlight tradeoffs",
+                        fileIds: "options-sheet",
+                    },
+                    {
+                        text: "Turn these notes into a kickoff checklist",
+                        fileIds: "meeting-notes,style-guide",
+                    },
+                ],
+                maxCount: 12,
+            },
+            helperText: {
+                type: ControlType.String,
+                title: "Helper",
+                defaultValue: "Attach files or links",
+            },
+        },
     },
-    assistantMessage: {
-        type: ControlType.String,
-        title: "AI Responds",
-        defaultValue:
-            'To most effectively reach this population, I recommend we start by **developing a DTC audience that over-indexes for atopic dermatitis,** then explore **demographic and geographic** signals associated with disease severity, treatment stage, and patterns of therapy escalation.\n\nThis will only take a few minutes and I\'ll guide you the whole way.\n\n**Sound like a good place to start?**',
-        displayTextArea: true,
-        description: "Wrap text in **double asterisks** for bold",
+    layout: {
+        type: ControlType.Object,
+        title: "Layout",
+        controls: {
+            maxWidth: {
+                type: ControlType.Number,
+                title: "Max Width",
+                defaultValue: 1220,
+                min: 640,
+                max: 1600,
+                step: 10,
+                unit: "px",
+            },
+            padding: {
+                type: ControlType.Number,
+                title: "Padding",
+                defaultValue: 32,
+                min: 0,
+                max: 64,
+                step: 2,
+                unit: "px",
+            },
+        },
     },
-    showSecondExchange: {
-        type: ControlType.Boolean,
-        title: "2nd Exchange",
-        defaultValue: true,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-        description: "Show a follow-up user + AI exchange",
+    styleGroup: {
+        type: ControlType.Object,
+        title: "Style",
+        controls: {
+            themeMode: {
+                type: ControlType.Enum,
+                title: "Theme",
+                options: ["light", "dark", "auto"],
+                optionTitles: ["Light", "Dark", "Auto"],
+                defaultValue: "light",
+                displaySegmentedControl: true,
+            },
+            font: {
+                type: ControlType.Font,
+                title: "Font",
+                controls: "extended",
+                defaultFontType: "sans-serif",
+                defaultValue:
+                    {
+                        fontFamily: "Inter",
+                        fontSize: 46,
+                        fontWeight: 500,
+                        lineHeight: 1.15,
+                        letterSpacing: -0.4,
+                    },
+            },
+            textColor: {
+                type: ControlType.Color,
+                title: "Text",
+                defaultValue: "#000000",
+            },
+            mutedColor: {
+                type: ControlType.Color,
+                title: "Muted",
+                defaultValue: "#8a8a8a",
+            },
+            backgroundColor: {
+                type: ControlType.Color,
+                title: "Background",
+                defaultValue: "#ffffff",
+            },
+            borderColor: {
+                type: ControlType.Color,
+                title: "Border",
+                defaultValue: "rgba(0, 0, 0, 0.04)",
+            },
+            shadowColor: {
+                type: ControlType.Color,
+                title: "Shadow",
+                defaultValue: "rgba(0, 0, 0, 0.08)",
+            },
+            searchIconColor: {
+                type: ControlType.Color,
+                title: "Search Icon",
+                defaultValue: "#7d7d7d",
+            },
+            fileCardBackgroundColor: {
+                type: ControlType.Color,
+                title: "File Card BG",
+                defaultValue: "#ffffff",
+            },
+            fileCardBorderColor: {
+                type: ControlType.Color,
+                title: "File Card Border",
+                defaultValue: "rgba(0, 0, 0, 0.1)",
+            },
+            fileCardShadowColor: {
+                type: ControlType.Color,
+                title: "File Card Shadow",
+                defaultValue: "rgba(0, 0, 0, 0.08)",
+            },
+            fileThumbBackgroundColor: {
+                type: ControlType.Color,
+                title: "File Thumb BG",
+                defaultValue: "#efefef",
+            },
+            fileSourceColor: {
+                type: ControlType.Color,
+                title: "File Source",
+                defaultValue: "#5f5f5f",
+            },
+            sendButtonBackgroundColor: {
+                type: ControlType.Color,
+                title: "Send BG",
+                defaultValue: "#000000",
+            },
+            sendButtonIconColor: {
+                type: ControlType.Color,
+                title: "Send Icon",
+                defaultValue: "#ffffff",
+            },
+        },
     },
-    userMessage2: {
-        type: ControlType.String,
-        title: "User Says (2nd)",
-        defaultValue: "Sounds amazing!",
-        displayTextArea: true,
-        hidden: (props: Props) => !props.showSecondExchange,
+    states: {
+        type: ControlType.Object,
+        title: "States",
+        controls: {
+            showFiles: {
+                type: ControlType.Boolean,
+                title: "Show Files",
+                defaultValue: true,
+                enabledTitle: "On",
+                disabledTitle: "Off",
+            },
+            enablePreview: {
+                type: ControlType.Boolean,
+                title: "Preview",
+                defaultValue: true,
+                enabledTitle: "On",
+                disabledTitle: "Off",
+            },
+            enableAutoPlay: {
+                type: ControlType.Boolean,
+                title: "Auto Play",
+                defaultValue: true,
+                enabledTitle: "On",
+                disabledTitle: "Off",
+            },
+            enableLoop: {
+                type: ControlType.Boolean,
+                title: "Loop",
+                defaultValue: false,
+                enabledTitle: "On",
+                disabledTitle: "Off",
+            },
+        },
     },
-    assistantMessage2: {
-        type: ControlType.String,
-        title: "AI Responds (2nd)",
-        defaultValue: "Great! **Let's get started!**",
-        displayTextArea: true,
-        description: "Wrap text in **double asterisks** for bold",
-        hidden: (props: Props) => !props.showSecondExchange,
-    },
-    placeholder: {
-        type: ControlType.String,
-        title: "Placeholder",
-        defaultValue: "I want to...",
-        placeholder: "I want to...",
-        description: "Input field placeholder text",
-    },
-
-    // ─────────────────────────────────────
-    // STYLE
-    // ─────────────────────────────────────
-    textColor: {
-        type: ControlType.Color,
-        title: "Text Color",
-        defaultValue: "#1a1a1a",
-    },
-    fontFamily: {
-        type: ControlType.String,
-        title: "Font Family",
-        defaultValue:
-            "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-        placeholder: "Inter, Arial, sans-serif",
-    },
-    fontSize: {
-        type: ControlType.Number,
-        title: "Font Size",
-        defaultValue: 15,
-        min: 12,
-        max: 20,
-        step: 1,
-        unit: "px",
-        displayStepper: true,
-    },
-    topFadeOut: {
-        type: ControlType.Boolean,
-        title: "Top Fade",
-        defaultValue: true,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-        description: "Fade out messages at the top edge",
-    },
-    compact: {
-        type: ControlType.Boolean,
-        title: "Compact",
-        defaultValue: false,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-        description: "Tighter spacing to fit more content",
-    },
-    scrollMode: {
-        type: ControlType.Enum,
-        title: "Scroll",
-        defaultValue: "none",
-        options: ["none", "mobile", "all"],
-        optionTitles: ["No Scroll", "Mobile Only", "All Screens"],
-        description: "Enable scrolling inside the messages area",
-    },
-
-    // ─────────────────────────────────────
-    // LAYOUT
-    // ─────────────────────────────────────
-    maxWidth: {
-        type: ControlType.Number,
-        title: "Max Width",
-        defaultValue: 680,
-        min: 400,
-        max: 1000,
-        step: 10,
-        unit: "px",
-    },
-    padding: {
-        type: ControlType.Number,
-        title: "Padding",
-        defaultValue: 24,
-        min: 0,
-        max: 48,
-        step: 4,
-        unit: "px",
-        displayStepper: true,
-    },
-    mobilePadding: {
-        type: ControlType.Number,
-        title: "Mobile Padding",
-        defaultValue: 12,
-        min: 0,
-        max: 48,
-        step: 4,
-        unit: "px",
-        displayStepper: true,
-        description: "Padding when component is narrower than breakpoint",
-    },
-    mobileBreakpoint: {
-        type: ControlType.Number,
-        title: "Mobile Breakpoint",
-        defaultValue: 500,
-        min: 300,
-        max: 900,
-        step: 10,
-        unit: "px",
-        description: "Width below which mobile padding applies",
-    },
-
-    // ─────────────────────────────────────
-    // PLAYBACK
-    // ─────────────────────────────────────
-    autoPlay: {
-        type: ControlType.Boolean,
-        title: "Auto Play",
-        defaultValue: true,
-        enabledTitle: "Yes",
-        disabledTitle: "No",
-    },
-    preview: {
-        type: ControlType.Boolean,
-        title: "Show Preview",
-        defaultValue: true,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-    },
-    entranceAnimation: {
-        type: ControlType.Boolean,
-        title: "Entrance Anim",
-        defaultValue: true,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-        description: "Fade-in when the component first appears",
-    },
-    triggerOnView: {
-        type: ControlType.Boolean,
-        title: "Start on View",
-        defaultValue: false,
-        enabledTitle: "Yes",
-        disabledTitle: "No",
-        description: "Wait until scrolled into view to start",
-    },
-    viewThreshold: {
-        type: ControlType.Number,
-        title: "View Threshold",
-        defaultValue: 0.5,
-        min: 0.1,
-        max: 1,
-        step: 0.1,
-        description: "How much of the component must be visible (0.1 – 1)",
-        hidden: (props: Props) => !props.triggerOnView,
-    },
-    loop: {
-        type: ControlType.Boolean,
-        title: "Loop",
-        defaultValue: false,
-        enabledTitle: "Yes",
-        disabledTitle: "No",
-    },
-    loopDelay: {
-        type: ControlType.Number,
-        title: "Loop Delay",
-        defaultValue: 2,
-        min: 0,
-        max: 10,
-        step: 0.5,
-        unit: "s",
-        displayStepper: true,
-        description: "Pause before restarting the sequence",
-        hidden: (props: Props) => !props.loop,
-    },
-
-    // ─────────────────────────────────────
-    // TIMING
-    // ─────────────────────────────────────
-    startDelay: {
-        type: ControlType.Number,
-        title: "Start Delay",
-        defaultValue: 0.6,
-        min: 0,
-        max: 5,
-        step: 0.1,
-        unit: "s",
-        displayStepper: true,
-        description: "Wait before typing begins",
-    },
-    typingSpeed: {
-        type: ControlType.Number,
-        title: "Typing Speed",
-        defaultValue: 28,
-        min: 10,
-        max: 80,
-        step: 2,
-        unit: "ms",
-        displayStepper: true,
-        description: "Delay between each character (lower = faster)",
-    },
-    thinkingTime: {
-        type: ControlType.Number,
-        title: "Thinking Time",
-        defaultValue: 1,
-        min: 0.3,
-        max: 5,
-        step: 0.1,
-        unit: "s",
-        displayStepper: true,
-        description: "How long the ··· indicator shows",
-    },
-    secondExchangeDelay: {
-        type: ControlType.Number,
-        title: "2nd Delay",
-        defaultValue: 1,
-        min: 0,
-        max: 5,
-        step: 0.1,
-        unit: "s",
-        displayStepper: true,
-        description: "Pause before the second exchange begins",
-        hidden: (props: Props) => !props.showSecondExchange,
+    advanced: {
+        type: ControlType.Object,
+        title: "Advanced",
+        controls: {
+            maxVisibleFiles: {
+                type: ControlType.Number,
+                title: "Max Visible",
+                defaultValue: 3,
+                min: 0,
+                max: 8,
+                step: 1,
+            },
+            files: {
+                type: ControlType.Array,
+                title: "File Library",
+                description:
+                    "Each prompt can reference these files using Content > Prompts > File IDs.",
+                control: {
+                    type: ControlType.Object,
+                    controls: {
+                        id: {
+                            type: ControlType.String,
+                            title: "ID",
+                            description:
+                                "Unique key used in prompt File IDs (letters, numbers, dashes).",
+                            defaultValue: "launch-draft",
+                        },
+                        title: {
+                            type: ControlType.String,
+                            title: "Title",
+                            defaultValue: "Product Update Draft",
+                        },
+                        source: {
+                            type: ControlType.String,
+                            title: "Source",
+                            defaultValue: "Google Docs",
+                        },
+                        emoji: {
+                            type: ControlType.String,
+                            title: "Emoji",
+                            defaultValue: "📝",
+                        },
+                        image: {
+                            type: ControlType.File,
+                            title: "Image",
+                            allowedFileTypes: ["svg", "png", "jpg", "jpeg", "webp", "avif"],
+                            description: "Upload an image or SVG for this file card.",
+                            defaultValue: "",
+                        },
+                    },
+                },
+                defaultValue: [
+                    {
+                        id: "launch-draft",
+                        title: "Product Update Draft",
+                        source: "Google Docs",
+                        emoji: "📝",
+                        image: "",
+                    },
+                    {
+                        id: "options-sheet",
+                        title: "Options Matrix",
+                        source: "Airtable",
+                        emoji: "📊",
+                        image: "",
+                    },
+                    {
+                        id: "meeting-notes",
+                        title: "Team Notes.md",
+                        source: "Notion",
+                        emoji: "🗒️",
+                        image: "",
+                    },
+                    {
+                        id: "style-guide",
+                        title: "Style Guide",
+                        source: "Confluence",
+                        emoji: "🎯",
+                        image: "",
+                    },
+                ],
+                maxCount: 24,
+            },
+            searchIconSize: {
+                type: ControlType.Number,
+                title: "Search Icon",
+                defaultValue: 32,
+                min: 12,
+                max: 80,
+                step: 1,
+                unit: "px",
+            },
+            addIconSize: {
+                type: ControlType.Number,
+                title: "Plus Icon",
+                defaultValue: 28,
+                min: 12,
+                max: 80,
+                step: 1,
+                unit: "px",
+            },
+            sendButtonSize: {
+                type: ControlType.Number,
+                title: "Send Button",
+                defaultValue: 68,
+                min: 24,
+                max: 120,
+                step: 1,
+                unit: "px",
+            },
+            sendIconSize: {
+                type: ControlType.Number,
+                title: "Send Icon",
+                defaultValue: 30,
+                min: 12,
+                max: 80,
+                step: 1,
+                unit: "px",
+            },
+            fileCardWidth: {
+                type: ControlType.Number,
+                title: "File Card W",
+                defaultValue: 350,
+                min: 120,
+                max: 520,
+                step: 1,
+                unit: "px",
+            },
+            fileThumbSize: {
+                type: ControlType.Number,
+                title: "File Thumb",
+                defaultValue: 76,
+                min: 20,
+                max: 140,
+                step: 1,
+                unit: "px",
+            },
+            fileEmojiSize: {
+                type: ControlType.Number,
+                title: "File Emoji",
+                defaultValue: 30,
+                min: 10,
+                max: 80,
+                step: 1,
+                unit: "px",
+            },
+            startDelay: {
+                type: ControlType.Number,
+                title: "Start Delay",
+                defaultValue: 0.35,
+                min: 0,
+                max: 3,
+                step: 0.05,
+                unit: "s",
+            },
+            typingSpeed: {
+                type: ControlType.Number,
+                title: "Type Speed",
+                defaultValue: 44,
+                min: 12,
+                max: 120,
+                step: 1,
+                unit: "ms",
+            },
+            deleteSpeed: {
+                type: ControlType.Number,
+                title: "Delete Speed",
+                defaultValue: 24,
+                min: 8,
+                max: 100,
+                step: 1,
+                unit: "ms",
+            },
+            holdTime: {
+                type: ControlType.Number,
+                title: "Hold",
+                defaultValue: 1.2,
+                min: 0.2,
+                max: 4,
+                step: 0.1,
+                unit: "s",
+            },
+            betweenPromptsDelay: {
+                type: ControlType.Number,
+                title: "Between",
+                defaultValue: 0.25,
+                min: 0,
+                max: 2,
+                step: 0.05,
+                unit: "s",
+            },
+            fileRevealDelay: {
+                type: ControlType.Number,
+                title: "Files Delay",
+                description: "Delay after typing starts before file cards animate in.",
+                defaultValue: 0.12,
+                min: 0,
+                max: 1.5,
+                step: 0.01,
+                unit: "s",
+            },
+            fileRevealDuration: {
+                type: ControlType.Number,
+                title: "Files Duration",
+                defaultValue: 420,
+                min: 120,
+                max: 1200,
+                step: 10,
+                unit: "ms",
+            },
+            fileRevealStagger: {
+                type: ControlType.Number,
+                title: "Files Stagger",
+                defaultValue: 0.06,
+                min: 0,
+                max: 0.4,
+                step: 0.01,
+                unit: "s",
+            },
+            fileRiseOffset: {
+                type: ControlType.Number,
+                title: "Files Rise",
+                defaultValue: 8,
+                min: 0,
+                max: 24,
+                step: 1,
+                unit: "px",
+            },
+        },
     },
 })
+
+AIChatSequence.displayName = "Prompt Composer Demo v1.0"

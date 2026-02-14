@@ -8,7 +8,7 @@ This repo is organized so each component can be developed, tested, versioned, an
 
 ```text
 framer-components-2026/
-├── BL/                      # Client/BranchLab components (.tsx)
+├── BL/                      # Client components (.tsx)
 ├── WIP/                     # Components in progress (.tsx)
 ├── shipped/                 # Final shipped components (.tsx)
 ├── README.md
