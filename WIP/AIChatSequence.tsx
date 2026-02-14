@@ -37,6 +37,8 @@ interface StatesGroup {
 
 interface StyleGroup {
     themeMode: "light" | "dark" | "auto"
+    useCustomColors: boolean
+    useGlassBackground: boolean
     font: {
         fontFamily?: string
         fontSize?: number
@@ -57,6 +59,10 @@ interface StyleGroup {
     fileSourceColor: string
     sendButtonBackgroundColor: string
     sendButtonIconColor: string
+    glassTintColor: string
+    glassBorderColor: string
+    glassBlur: number
+    glassSaturation: number
 }
 
 interface LayoutGroup {
@@ -77,9 +83,43 @@ interface PlaybackGroup {
     betweenPromptsDelay: number
 }
 
+interface AdvancedSizingGroup {
+    searchIconSize: number
+    addIconSize: number
+    sendButtonSize: number
+    sendIconSize: number
+    fileThumbSize: number
+    fileCardWidth: number
+    fileEmojiSize: number
+}
+
+interface AdvancedTimingGroup {
+    startDelay: number
+    typingSpeed: number
+    deleteSpeed: number
+    holdTime: number
+    betweenPromptsDelay: number
+    fileRevealDelay: number
+    fileRevealDuration: number
+    fileRevealStagger: number
+    fileRiseOffset: number
+}
+
+interface AdvancedRadiusGroup {
+    composerRadiusDesktop: number
+    composerRadiusMobile: number
+    fileCardRadiusDesktop: number
+    fileCardRadiusMobile: number
+    fileThumbRadiusDesktop: number
+    fileThumbRadiusMobile: number
+}
+
 interface AdvancedGroup {
     maxVisibleFiles: number
     files: FileItem[]
+    sizing: AdvancedSizingGroup
+    timing: AdvancedTimingGroup
+    radius: AdvancedRadiusGroup
     searchIconSize: number
     addIconSize: number
     sendButtonSize: number
@@ -96,6 +136,12 @@ interface AdvancedGroup {
     fileRevealDuration: number
     fileRevealStagger: number
     fileRiseOffset: number
+    composerRadiusDesktop: number
+    composerRadiusMobile: number
+    fileCardRadiusDesktop: number
+    fileCardRadiusMobile: number
+    fileThumbRadiusDesktop: number
+    fileThumbRadiusMobile: number
 }
 
 interface Props {
@@ -191,7 +237,16 @@ export default function AIChatSequence(props: Props) {
     const layout = props.layout ?? {}
     const states = props.states ?? {}
     const advanced = props.advanced ?? {}
+    const advancedSizing: Partial<AdvancedSizingGroup> = advanced.sizing ?? {}
+    const advancedTiming: Partial<AdvancedTimingGroup> = advanced.timing ?? {}
+    const advancedRadius: Partial<AdvancedRadiusGroup> = advanced.radius ?? {}
     const playback = props.playback ?? {}
+    const [typedText, setTypedText] = useState("")
+    const [activePromptIndex, setActivePromptIndex] = useState(0)
+    const [isMobile, setIsMobile] = useState(false)
+    const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+    const [showAnimatedFiles, setShowAnimatedFiles] = useState(false)
+    const [systemPrefersDark, setSystemPrefersDark] = useState(false)
 
     const maxWidth = layout.maxWidth ?? props.maxWidth ?? 1220
     const padding = layout.padding ?? props.padding ?? 32
@@ -208,52 +263,119 @@ export default function AIChatSequence(props: Props) {
     const fontSize = Number.isFinite(parsedFontSize) ? parsedFontSize : 46
     const fontWeight = font.fontWeight
     const promptLineHeight = font.lineHeight ?? 1.15
-    const promptLetterSpacing = font.letterSpacing ?? "-0.02em"
+    const promptLetterSpacing = font.letterSpacing ?? -0.4
     const themeMode = styleGroup.themeMode ?? "light"
-    const isSystemDark =
-        typeof window !== "undefined" &&
-        typeof window.matchMedia === "function" &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches
-    const isDarkTheme = themeMode === "dark" || (themeMode === "auto" && isSystemDark)
+    const useCustomColors = styleGroup.useCustomColors ?? false
+    const useGlassBackground = styleGroup.useGlassBackground ?? false
+    const isDarkTheme = themeMode === "dark" || (themeMode === "auto" && systemPrefersDark)
 
-    const textColor =
-        styleGroup.textColor ??
-        props.textColor ??
-        (isDarkTheme ? "#f2f2f2" : "#000000")
-    const mutedColor =
-        styleGroup.mutedColor ??
-        props.mutedColor ??
-        (isDarkTheme ? "#9a9a9a" : "#8a8a8a")
-    const backgroundColor =
-        styleGroup.backgroundColor ??
-        props.backgroundColor ??
-        (isDarkTheme ? "#151515" : "#ffffff")
-    const borderColor =
-        styleGroup.borderColor ??
-        props.borderColor ??
-        (isDarkTheme ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.04)")
-    const shadowColor =
-        styleGroup.shadowColor ??
-        props.shadowColor ??
-        (isDarkTheme ? "rgba(0, 0, 0, 0.35)" : "rgba(0, 0, 0, 0.08)")
-    const searchIconColor =
-        styleGroup.searchIconColor ?? (isDarkTheme ? "#9a9a9a" : "#7d7d7d")
-    const fileCardBackgroundColor =
-        styleGroup.fileCardBackgroundColor ?? (isDarkTheme ? "#1f1f1f" : "#ffffff")
-    const fileCardBorderColor =
-        styleGroup.fileCardBorderColor ??
-        (isDarkTheme ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.1)")
-    const fileCardShadowColor =
-        styleGroup.fileCardShadowColor ??
-        (isDarkTheme ? "rgba(0, 0, 0, 0.28)" : "rgba(0, 0, 0, 0.08)")
-    const fileThumbBackgroundColor =
-        styleGroup.fileThumbBackgroundColor ?? (isDarkTheme ? "#2c2c2c" : "#efefef")
-    const fileSourceColor =
-        styleGroup.fileSourceColor ?? (isDarkTheme ? "#b3b3b3" : "#5f5f5f")
-    const sendButtonBackgroundColor =
-        styleGroup.sendButtonBackgroundColor ?? (isDarkTheme ? "#f2f2f2" : "#000000")
-    const sendButtonIconColor =
-        styleGroup.sendButtonIconColor ?? (isDarkTheme ? "#141414" : "#ffffff")
+    const darkDefaults = {
+        text: "#f5f7fa",
+        muted: "#9aa3b2",
+        background: "#111318",
+        border: "rgba(148, 163, 184, 0.22)",
+        shadow: "rgba(2, 6, 23, 0.55)",
+        searchIcon: "#8b95a7",
+        fileCardBackground: "#1a1f29",
+        fileCardBorder: "rgba(148, 163, 184, 0.24)",
+        fileCardShadow: "rgba(2, 6, 23, 0.45)",
+        fileThumbBackground: "#262e3c",
+        fileSource: "#b6c0d0",
+        sendButtonBackground: "#e7edf7",
+        sendButtonIcon: "#0f172a",
+    }
+
+    const textColor = useCustomColors
+        ? styleGroup.textColor ??
+          props.textColor ??
+          (isDarkTheme ? darkDefaults.text : "#000000")
+        : isDarkTheme
+          ? darkDefaults.text
+          : "#000000"
+    const mutedColor = useCustomColors
+        ? styleGroup.mutedColor ??
+          props.mutedColor ??
+          (isDarkTheme ? darkDefaults.muted : "#8a8a8a")
+        : isDarkTheme
+          ? darkDefaults.muted
+          : "#8a8a8a"
+    const backgroundColor = useCustomColors
+        ? styleGroup.backgroundColor ??
+          props.backgroundColor ??
+          (isDarkTheme ? darkDefaults.background : "#ffffff")
+        : isDarkTheme
+          ? darkDefaults.background
+          : "#ffffff"
+    const borderColor = useCustomColors
+        ? styleGroup.borderColor ??
+          props.borderColor ??
+          (isDarkTheme ? darkDefaults.border : "rgba(0, 0, 0, 0.04)")
+        : isDarkTheme
+          ? darkDefaults.border
+          : "rgba(0, 0, 0, 0.04)"
+    const shadowColor = useCustomColors
+        ? styleGroup.shadowColor ??
+          props.shadowColor ??
+          (isDarkTheme ? darkDefaults.shadow : "rgba(0, 0, 0, 0.08)")
+        : isDarkTheme
+          ? darkDefaults.shadow
+          : "rgba(0, 0, 0, 0.08)"
+    const searchIconColor = useCustomColors
+        ? styleGroup.searchIconColor ??
+          (isDarkTheme ? darkDefaults.searchIcon : "#7d7d7d")
+        : isDarkTheme
+          ? darkDefaults.searchIcon
+          : "#7d7d7d"
+    const fileCardBackgroundColor = useCustomColors
+        ? styleGroup.fileCardBackgroundColor ??
+          (isDarkTheme ? darkDefaults.fileCardBackground : "#ffffff")
+        : isDarkTheme
+          ? darkDefaults.fileCardBackground
+          : "#ffffff"
+    const fileCardBorderColor = useCustomColors
+        ? styleGroup.fileCardBorderColor ??
+          (isDarkTheme ? darkDefaults.fileCardBorder : "rgba(0, 0, 0, 0.1)")
+        : isDarkTheme
+          ? darkDefaults.fileCardBorder
+          : "rgba(0, 0, 0, 0.1)"
+    const fileCardShadowColor = useCustomColors
+        ? styleGroup.fileCardShadowColor ??
+          (isDarkTheme ? darkDefaults.fileCardShadow : "rgba(0, 0, 0, 0.08)")
+        : isDarkTheme
+          ? darkDefaults.fileCardShadow
+          : "rgba(0, 0, 0, 0.08)"
+    const fileThumbBackgroundColor = useCustomColors
+        ? styleGroup.fileThumbBackgroundColor ??
+          (isDarkTheme ? darkDefaults.fileThumbBackground : "#efefef")
+        : isDarkTheme
+          ? darkDefaults.fileThumbBackground
+          : "#efefef"
+    const fileSourceColor = useCustomColors
+        ? styleGroup.fileSourceColor ??
+          (isDarkTheme ? darkDefaults.fileSource : "#5f5f5f")
+        : isDarkTheme
+          ? darkDefaults.fileSource
+          : "#5f5f5f"
+    const sendButtonBackgroundColor = useCustomColors
+        ? styleGroup.sendButtonBackgroundColor ??
+          (isDarkTheme ? darkDefaults.sendButtonBackground : "#000000")
+        : isDarkTheme
+          ? darkDefaults.sendButtonBackground
+          : "#000000"
+    const sendButtonIconColor = useCustomColors
+        ? styleGroup.sendButtonIconColor ??
+          (isDarkTheme ? darkDefaults.sendButtonIcon : "#ffffff")
+        : isDarkTheme
+          ? darkDefaults.sendButtonIcon
+          : "#ffffff"
+    const glassTintColor =
+        styleGroup.glassTintColor ??
+        (isDarkTheme ? "rgba(16, 18, 24, 0.52)" : "rgba(255, 255, 255, 0.6)")
+    const glassBorderColor =
+        styleGroup.glassBorderColor ??
+        (isDarkTheme ? "rgba(216, 224, 238, 0.2)" : "rgba(255, 255, 255, 0.7)")
+    const glassBlur = styleGroup.glassBlur ?? 18
+    const glassSaturation = styleGroup.glassSaturation ?? 125
 
     const helperText = content.helperText ?? props.helperText ?? "Attach files or links"
 
@@ -312,26 +434,51 @@ export default function AIChatSequence(props: Props) {
     const preview = states.enablePreview ?? playback.preview ?? props.preview ?? true
     const autoPlay = states.enableAutoPlay ?? playback.autoPlay ?? props.autoPlay ?? true
     const loop = states.enableLoop ?? playback.loop ?? props.loop ?? false
-    const startDelay = advanced.startDelay ?? playback.startDelay ?? props.startDelay ?? 0.35
-    const typingSpeed = advanced.typingSpeed ?? playback.typingSpeed ?? props.typingSpeed ?? 44
-    const deleteSpeed = advanced.deleteSpeed ?? playback.deleteSpeed ?? props.deleteSpeed ?? 24
-    const holdTime = advanced.holdTime ?? playback.holdTime ?? props.holdTime ?? 1.2
+    const startDelay =
+        advancedTiming.startDelay ?? advanced.startDelay ?? playback.startDelay ?? props.startDelay ?? 0.35
+    const typingSpeed =
+        advancedTiming.typingSpeed ?? advanced.typingSpeed ?? playback.typingSpeed ?? props.typingSpeed ?? 44
+    const deleteSpeed =
+        advancedTiming.deleteSpeed ?? advanced.deleteSpeed ?? playback.deleteSpeed ?? props.deleteSpeed ?? 24
+    const holdTime =
+        advancedTiming.holdTime ?? advanced.holdTime ?? playback.holdTime ?? props.holdTime ?? 1.2
     const betweenPromptsDelay =
+        advancedTiming.betweenPromptsDelay ??
         advanced.betweenPromptsDelay ??
         playback.betweenPromptsDelay ??
         props.betweenPromptsDelay ??
         0.25
-    const fileRevealDelay = advanced.fileRevealDelay ?? 0.12
-    const fileRevealDuration = advanced.fileRevealDuration ?? 420
-    const fileRevealStagger = advanced.fileRevealStagger ?? 0.06
-    const fileRiseOffset = advanced.fileRiseOffset ?? 8
-    const searchIconSize = advanced.searchIconSize ?? (isMobile ? 28 : 32)
-    const addIconSize = advanced.addIconSize ?? (isMobile ? 22 : 28)
-    const sendButtonSize = advanced.sendButtonSize ?? (isMobile ? 58 : 68)
-    const sendIconSize = advanced.sendIconSize ?? (isMobile ? 28 : 30)
-    const fileThumbSize = advanced.fileThumbSize ?? (isMobile ? 52 : 76)
-    const fileCardWidth = advanced.fileCardWidth ?? (isMobile ? 250 : 350)
-    const fileEmojiSize = advanced.fileEmojiSize ?? (isMobile ? 24 : 30)
+    const fileRevealDelay = advancedTiming.fileRevealDelay ?? advanced.fileRevealDelay ?? 0.12
+    const fileRevealDuration =
+        advancedTiming.fileRevealDuration ?? advanced.fileRevealDuration ?? 420
+    const fileRevealStagger =
+        advancedTiming.fileRevealStagger ?? advanced.fileRevealStagger ?? 0.06
+    const fileRiseOffset = advancedTiming.fileRiseOffset ?? advanced.fileRiseOffset ?? 8
+    const composerRadiusDesktop =
+        advancedRadius.composerRadiusDesktop ?? advanced.composerRadiusDesktop ?? 42
+    const composerRadiusMobile =
+        advancedRadius.composerRadiusMobile ?? advanced.composerRadiusMobile ?? 34
+    const fileCardRadiusDesktop =
+        advancedRadius.fileCardRadiusDesktop ?? advanced.fileCardRadiusDesktop ?? 21
+    const fileCardRadiusMobile =
+        advancedRadius.fileCardRadiusMobile ?? advanced.fileCardRadiusMobile ?? 16
+    const fileThumbRadiusDesktop =
+        advancedRadius.fileThumbRadiusDesktop ?? advanced.fileThumbRadiusDesktop ?? 16
+    const fileThumbRadiusMobile =
+        advancedRadius.fileThumbRadiusMobile ?? advanced.fileThumbRadiusMobile ?? 12
+    const searchIconSize =
+        advancedSizing.searchIconSize ?? advanced.searchIconSize ?? (isMobile ? 28 : 32)
+    const addIconSize = advancedSizing.addIconSize ?? advanced.addIconSize ?? (isMobile ? 22 : 28)
+    const sendButtonSize =
+        advancedSizing.sendButtonSize ?? advanced.sendButtonSize ?? (isMobile ? 58 : 68)
+    const sendIconSize =
+        advancedSizing.sendIconSize ?? advanced.sendIconSize ?? (isMobile ? 28 : 30)
+    const fileThumbSize =
+        advancedSizing.fileThumbSize ?? advanced.fileThumbSize ?? (isMobile ? 52 : 76)
+    const fileCardWidth =
+        advancedSizing.fileCardWidth ?? advanced.fileCardWidth ?? (isMobile ? 250 : 350)
+    const fileEmojiSize =
+        advancedSizing.fileEmojiSize ?? advanced.fileEmojiSize ?? (isMobile ? 24 : 30)
 
     const safeMaxWidth = Math.max(320, maxWidth)
     const safePadding = Math.max(0, padding)
@@ -351,22 +498,62 @@ export default function AIChatSequence(props: Props) {
     const safeSearchIconSize = Math.max(12, Math.round(searchIconSize))
     const safeAddIconSize = Math.max(12, Math.round(addIconSize))
     const safeSendButtonSize = Math.max(24, Math.round(sendButtonSize))
-    const safeSendIconSize = Math.max(12, Math.round(sendIconSize))
+    const safeSendIconSize = Math.max(
+        10,
+        Math.min(Math.round(safeSendButtonSize * 0.58), Math.round(sendIconSize))
+    )
     const safeFileThumbSize = Math.max(20, Math.round(fileThumbSize))
     const safeFileCardWidth = Math.max(120, Math.round(fileCardWidth))
     const safeFileEmojiSize = Math.max(10, Math.round(fileEmojiSize))
-
-    const [typedText, setTypedText] = useState("")
-    const [activePromptIndex, setActivePromptIndex] = useState(0)
-    const [isMobile, setIsMobile] = useState(false)
-    const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
-    const [showAnimatedFiles, setShowAnimatedFiles] = useState(false)
+    const safeComposerRadiusDesktop = Math.max(12, Math.min(72, Math.round(composerRadiusDesktop)))
+    const safeComposerRadiusMobile = Math.max(10, Math.min(56, Math.round(composerRadiusMobile)))
+    const safeFileCardRadiusDesktop = Math.max(8, Math.min(48, Math.round(fileCardRadiusDesktop)))
+    const safeFileCardRadiusMobile = Math.max(8, Math.min(40, Math.round(fileCardRadiusMobile)))
+    const safeFileThumbRadiusDesktop = Math.max(4, Math.min(32, Math.round(fileThumbRadiusDesktop)))
+    const safeFileThumbRadiusMobile = Math.max(4, Math.min(24, Math.round(fileThumbRadiusMobile)))
+    const safeGlassBlur = Math.max(0, Math.min(40, Math.round(glassBlur)))
+    const safeGlassSaturation = Math.max(60, Math.min(180, Math.round(glassSaturation)))
+    const fileCardScale = Math.max(0.58, Math.min(1, safeFileCardWidth / 350))
+    const baseFileCardGap = isMobile ? 10 : 14
+    const baseFileCardPadding = isMobile ? 8 : 11
+    const effectiveFileCardGap = Math.max(7, Math.round(baseFileCardGap * fileCardScale))
+    const effectiveFileCardPadding = Math.max(
+        6,
+        Math.round(baseFileCardPadding * fileCardScale)
+    )
+    const effectiveFileThumbSize = Math.max(
+        20,
+        Math.min(
+            Math.round(safeFileThumbSize * fileCardScale),
+            Math.round(safeFileCardWidth * 0.28)
+        )
+    )
+    const effectiveFileEmojiSize = Math.max(
+        10,
+        Math.min(Math.round(effectiveFileThumbSize * 0.62), safeFileEmojiSize)
+    )
 
     const containerRef = useRef<HTMLDivElement>(null)
     const uniqueId = useId().replace(/:/g, "")
 
     useEffect(() => {
         if (typeof window === "undefined") return
+
+        const themeQuery = window.matchMedia("(prefers-color-scheme: dark)")
+        setSystemPrefersDark(themeQuery.matches)
+
+        const handleThemeChange = (event: MediaQueryListEvent) => {
+            setSystemPrefersDark(event.matches)
+        }
+
+        const canUseThemeEventListener =
+            typeof themeQuery.addEventListener === "function"
+        if (canUseThemeEventListener) {
+            themeQuery.addEventListener("change", handleThemeChange)
+        } else {
+            themeQuery.addListener(handleThemeChange)
+        }
+
         const query = window.matchMedia("(prefers-reduced-motion: reduce)")
         setPrefersReducedMotion(query.matches)
 
@@ -374,13 +561,29 @@ export default function AIChatSequence(props: Props) {
             setPrefersReducedMotion(event.matches)
         }
 
-        if (typeof query.addEventListener === "function") {
+        const canUseMotionEventListener =
+            typeof query.addEventListener === "function"
+        if (canUseMotionEventListener) {
             query.addEventListener("change", handleChange)
-            return () => query.removeEventListener("change", handleChange)
+            return () => {
+                query.removeEventListener("change", handleChange)
+                if (canUseThemeEventListener) {
+                    themeQuery.removeEventListener("change", handleThemeChange)
+                } else {
+                    themeQuery.removeListener(handleThemeChange)
+                }
+            }
         }
 
         query.addListener(handleChange)
-        return () => query.removeListener(handleChange)
+        return () => {
+            query.removeListener(handleChange)
+            if (canUseThemeEventListener) {
+                themeQuery.removeEventListener("change", handleThemeChange)
+            } else {
+                themeQuery.removeListener(handleThemeChange)
+            }
+        }
     }, [])
 
     useEffect(() => {
@@ -549,6 +752,44 @@ export default function AIChatSequence(props: Props) {
     const cardSourceSize = isMobile
         ? Math.max(13, Math.round(composerFontSize * 0.36))
         : Math.max(14, Math.round(composerFontSize * 0.32))
+    const effectiveCardTitleSize = Math.max(14, Math.round(cardTitleSize * fileCardScale))
+    const effectiveCardSourceSize = Math.max(12, Math.round(cardSourceSize * fileCardScale))
+    const composerBackground = useGlassBackground
+        ? isDarkTheme
+            ? `linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.02) 42%, rgba(0, 0, 0, 0.1) 100%), ${glassTintColor}`
+            : `linear-gradient(145deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.2) 42%, rgba(255, 255, 255, 0.08) 100%), ${glassTintColor}`
+        : backgroundColor
+    const composerBorderColor = useGlassBackground ? glassBorderColor : borderColor
+    const composerShadow = useGlassBackground
+        ? isDarkTheme
+            ? `0 22px 56px ${shadowColor}, inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 -1px 0 rgba(255, 255, 255, 0.07)`
+            : `0 22px 56px ${shadowColor}, inset 0 1px 0 rgba(255, 255, 255, 0.82), inset 0 -1px 0 rgba(255, 255, 255, 0.42)`
+        : `0 16px 44px ${shadowColor}`
+    const effectiveFileCardBackground = useGlassBackground
+        ? isDarkTheme
+            ? "rgba(23, 28, 38, 0.5)"
+            : "rgba(255, 255, 255, 0.5)"
+        : fileCardBackgroundColor
+    const effectiveFileCardBorder = useGlassBackground
+        ? isDarkTheme
+            ? "rgba(226, 236, 250, 0.2)"
+            : "rgba(255, 255, 255, 0.72)"
+        : fileCardBorderColor
+    const effectiveFileCardShadow = useGlassBackground
+        ? isDarkTheme
+            ? "rgba(3, 8, 18, 0.48)"
+            : "rgba(31, 41, 55, 0.14)"
+        : fileCardShadowColor
+    const effectiveFileThumbBackground = useGlassBackground
+        ? isDarkTheme
+            ? "rgba(44, 54, 70, 0.62)"
+            : "rgba(255, 255, 255, 0.65)"
+        : fileThumbBackgroundColor
+    const effectiveSendButtonBackground = useGlassBackground
+        ? isDarkTheme
+            ? "rgba(234, 241, 250, 0.9)"
+            : "rgba(255, 255, 255, 0.84)"
+        : sendButtonBackgroundColor
 
     return (
         <div
@@ -571,10 +812,19 @@ export default function AIChatSequence(props: Props) {
                     width: "100%",
                     maxWidth: `${safeMaxWidth}px`,
                     minHeight: isMobile ? "168px" : "250px",
-                    borderRadius: isMobile ? "34px" : "42px",
-                    backgroundColor,
-                    border: `1px solid ${borderColor}`,
-                    boxShadow: `0 16px 44px ${shadowColor}`,
+                    borderRadius: isMobile
+                        ? `${safeComposerRadiusMobile}px`
+                        : `${safeComposerRadiusDesktop}px`,
+                    background: composerBackground,
+                    border: `1px solid ${composerBorderColor}`,
+                    boxShadow: composerShadow,
+                    backdropFilter: useGlassBackground
+                        ? `blur(${safeGlassBlur}px) saturate(${safeGlassSaturation}%)`
+                        : "none",
+                    WebkitBackdropFilter: useGlassBackground
+                        ? `blur(${safeGlassBlur}px) saturate(${safeGlassSaturation}%)`
+                        : "none",
+                    position: "relative",
                     display: "flex",
                     flexDirection: "column",
                     justifyContent: "flex-start",
@@ -619,7 +869,7 @@ export default function AIChatSequence(props: Props) {
                             lineHeight: promptLineHeight,
                             letterSpacing: promptLetterSpacing,
                             fontWeight,
-                            paddingTop: isMobile ? "2px" : 0,
+                            paddingTop: isMobile ? "4px" : "2px",
                             whiteSpace: isMobile ? "normal" : "nowrap",
                             display: "block",
                             overflowWrap: "anywhere",
@@ -672,12 +922,18 @@ export default function AIChatSequence(props: Props) {
                                         maxWidth: "100%",
                                         display: "flex",
                                         alignItems: "center",
-                                        gap: isMobile ? "10px" : "14px",
-                                        padding: isMobile ? "8px" : "11px",
-                                        borderRadius: isMobile ? "16px" : "21px",
-                                        backgroundColor: fileCardBackgroundColor,
-                                        border: `1px solid ${fileCardBorderColor}`,
-                                        boxShadow: `0 5px 14px ${fileCardShadowColor}`,
+                                        gap: `${effectiveFileCardGap}px`,
+                                        padding: `${effectiveFileCardPadding}px`,
+                                        borderRadius: isMobile
+                                            ? `${safeFileCardRadiusMobile}px`
+                                            : `${safeFileCardRadiusDesktop}px`,
+                                        background: useGlassBackground
+                                            ? `linear-gradient(150deg, rgba(255, 255, 255, ${isDarkTheme ? "0.12" : "0.44"}), rgba(255, 255, 255, ${isDarkTheme ? "0.02" : "0.18"}) 70%), ${effectiveFileCardBackground}`
+                                            : effectiveFileCardBackground,
+                                        border: `1px solid ${effectiveFileCardBorder}`,
+                                        boxShadow: useGlassBackground
+                                            ? `0 6px 18px ${effectiveFileCardShadow}, inset 0 1px 0 rgba(255, 255, 255, ${isDarkTheme ? "0.18" : "0.7"})`
+                                            : `0 5px 14px ${effectiveFileCardShadow}`,
                                         opacity: filesVisible ? 1 : 0,
                                         transform: filesVisible
                                             ? "translateY(0)"
@@ -690,16 +946,18 @@ export default function AIChatSequence(props: Props) {
                                 >
                                     <div
                                         style={{
-                                            width: `${safeFileThumbSize}px`,
-                                            height: `${safeFileThumbSize}px`,
-                                            borderRadius: isMobile ? "12px" : "16px",
+                                            width: `${effectiveFileThumbSize}px`,
+                                            height: `${effectiveFileThumbSize}px`,
+                                            borderRadius: isMobile
+                                                ? `${safeFileThumbRadiusMobile}px`
+                                                : `${safeFileThumbRadiusDesktop}px`,
                                             overflow: "hidden",
                                             flexShrink: 0,
-                                            backgroundColor: fileThumbBackgroundColor,
+                                            backgroundColor: effectiveFileThumbBackground,
                                             display: "flex",
                                             alignItems: "center",
                                             justifyContent: "center",
-                                            fontSize: `${safeFileEmojiSize}px`,
+                                            fontSize: `${effectiveFileEmojiSize}px`,
                                         }}
                                     >
                                         {hasImage ? (
@@ -720,7 +978,7 @@ export default function AIChatSequence(props: Props) {
                                     <div style={{ minWidth: 0 }}>
                                         <div
                                             style={{
-                                                fontSize: `${cardTitleSize}px`,
+                                                fontSize: `${effectiveCardTitleSize}px`,
                                                 lineHeight: 1.1,
                                                 color: textColor,
                                                 whiteSpace: "nowrap",
@@ -734,7 +992,7 @@ export default function AIChatSequence(props: Props) {
                                         <div
                                             style={{
                                                 marginTop: isMobile ? "3px" : "5px",
-                                                fontSize: `${cardSourceSize}px`,
+                                                fontSize: `${effectiveCardSourceSize}px`,
                                                 lineHeight: 1.2,
                                                 color: fileSourceColor,
                                                 whiteSpace: "nowrap",
@@ -753,7 +1011,8 @@ export default function AIChatSequence(props: Props) {
 
                 <div
                     style={{
-                        marginTop: shouldShowFiles ? (isMobile ? "10px" : "18px") : "18px",
+                        marginTop: "auto",
+                        paddingTop: shouldShowFiles ? (isMobile ? "6px" : "10px") : "18px",
                         display: "flex",
                         alignItems: "flex-end",
                         justifyContent: "space-between",
@@ -807,7 +1066,9 @@ export default function AIChatSequence(props: Props) {
                             height: `${safeSendButtonSize}px`,
                             borderRadius: "999px",
                             border: "none",
-                            backgroundColor: sendButtonBackgroundColor,
+                            background: useGlassBackground
+                                ? `linear-gradient(160deg, rgba(255, 255, 255, ${isDarkTheme ? "0.92" : "0.98"}), rgba(255, 255, 255, ${isDarkTheme ? "0.82" : "0.78"}))`
+                                : effectiveSendButtonBackground,
                             color: sendButtonIconColor,
                             pointerEvents: "none",
                             display: "flex",
@@ -815,6 +1076,11 @@ export default function AIChatSequence(props: Props) {
                             justifyContent: "center",
                             padding: 0,
                             flexShrink: 0,
+                            boxShadow: useGlassBackground
+                                ? isDarkTheme
+                                    ? "inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 8px 18px rgba(2, 6, 23, 0.38)"
+                                    : "inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 18px rgba(15, 23, 42, 0.16)"
+                                : "none",
                         }}
                     >
                         <svg
@@ -930,6 +1196,20 @@ addPropertyControls(AIChatSequence, {
                 defaultValue: "light",
                 displaySegmentedControl: true,
             },
+            useCustomColors: {
+                type: ControlType.Boolean,
+                title: "Custom Colors",
+                defaultValue: false,
+                enabledTitle: "On",
+                disabledTitle: "Off",
+            },
+            useGlassBackground: {
+                type: ControlType.Boolean,
+                title: "Glass BG",
+                defaultValue: false,
+                enabledTitle: "On",
+                disabledTitle: "Off",
+            },
             font: {
                 type: ControlType.Font,
                 title: "Font",
@@ -948,66 +1228,111 @@ addPropertyControls(AIChatSequence, {
                 type: ControlType.Color,
                 title: "Text",
                 defaultValue: "#000000",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             mutedColor: {
                 type: ControlType.Color,
                 title: "Muted",
                 defaultValue: "#8a8a8a",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             backgroundColor: {
                 type: ControlType.Color,
                 title: "Background",
                 defaultValue: "#ffffff",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             borderColor: {
                 type: ControlType.Color,
                 title: "Border",
                 defaultValue: "rgba(0, 0, 0, 0.04)",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             shadowColor: {
                 type: ControlType.Color,
                 title: "Shadow",
                 defaultValue: "rgba(0, 0, 0, 0.08)",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             searchIconColor: {
                 type: ControlType.Color,
                 title: "Search Icon",
                 defaultValue: "#7d7d7d",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             fileCardBackgroundColor: {
                 type: ControlType.Color,
                 title: "File Card BG",
                 defaultValue: "#ffffff",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             fileCardBorderColor: {
                 type: ControlType.Color,
                 title: "File Card Border",
                 defaultValue: "rgba(0, 0, 0, 0.1)",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             fileCardShadowColor: {
                 type: ControlType.Color,
                 title: "File Card Shadow",
                 defaultValue: "rgba(0, 0, 0, 0.08)",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             fileThumbBackgroundColor: {
                 type: ControlType.Color,
                 title: "File Thumb BG",
                 defaultValue: "#efefef",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             fileSourceColor: {
                 type: ControlType.Color,
                 title: "File Source",
                 defaultValue: "#5f5f5f",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             sendButtonBackgroundColor: {
                 type: ControlType.Color,
                 title: "Send BG",
                 defaultValue: "#000000",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
             },
             sendButtonIconColor: {
                 type: ControlType.Color,
                 title: "Send Icon",
                 defaultValue: "#ffffff",
+                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+            },
+            glassTintColor: {
+                type: ControlType.Color,
+                title: "Glass Tint",
+                defaultValue: "rgba(255, 255, 255, 0.6)",
+                hidden: (props) => !(props.useGlassBackground ?? props.styleGroup?.useGlassBackground),
+            },
+            glassBorderColor: {
+                type: ControlType.Color,
+                title: "Glass Border",
+                defaultValue: "rgba(255, 255, 255, 0.7)",
+                hidden: (props) => !(props.useGlassBackground ?? props.styleGroup?.useGlassBackground),
+            },
+            glassBlur: {
+                type: ControlType.Number,
+                title: "Glass Blur",
+                defaultValue: 18,
+                min: 0,
+                max: 40,
+                step: 1,
+                unit: "px",
+                hidden: (props) => !(props.useGlassBackground ?? props.styleGroup?.useGlassBackground),
+            },
+            glassSaturation: {
+                type: ControlType.Number,
+                title: "Glass Saturation",
+                defaultValue: 125,
+                min: 60,
+                max: 180,
+                step: 1,
+                unit: "%",
+                hidden: (props) => !(props.useGlassBackground ?? props.styleGroup?.useGlassBackground),
             },
         },
     },
@@ -1128,150 +1453,222 @@ addPropertyControls(AIChatSequence, {
                 ],
                 maxCount: 24,
             },
-            searchIconSize: {
-                type: ControlType.Number,
-                title: "Search Icon",
-                defaultValue: 32,
-                min: 12,
-                max: 80,
-                step: 1,
-                unit: "px",
+            sizing: {
+                type: ControlType.Object,
+                title: "Sizing",
+                controls: {
+                    searchIconSize: {
+                        type: ControlType.Number,
+                        title: "Search Icon",
+                        defaultValue: 32,
+                        min: 12,
+                        max: 80,
+                        step: 1,
+                        unit: "px",
+                    },
+                    addIconSize: {
+                        type: ControlType.Number,
+                        title: "Plus Icon",
+                        defaultValue: 28,
+                        min: 12,
+                        max: 80,
+                        step: 1,
+                        unit: "px",
+                    },
+                    sendButtonSize: {
+                        type: ControlType.Number,
+                        title: "Send Button",
+                        defaultValue: 68,
+                        min: 24,
+                        max: 120,
+                        step: 1,
+                        unit: "px",
+                    },
+                    sendIconSize: {
+                        type: ControlType.Number,
+                        title: "Send Icon",
+                        defaultValue: 30,
+                        min: 12,
+                        max: 80,
+                        step: 1,
+                        unit: "px",
+                    },
+                    fileCardWidth: {
+                        type: ControlType.Number,
+                        title: "File Card W",
+                        defaultValue: 350,
+                        min: 120,
+                        max: 520,
+                        step: 1,
+                        unit: "px",
+                    },
+                    fileThumbSize: {
+                        type: ControlType.Number,
+                        title: "File Thumb",
+                        defaultValue: 76,
+                        min: 20,
+                        max: 140,
+                        step: 1,
+                        unit: "px",
+                    },
+                    fileEmojiSize: {
+                        type: ControlType.Number,
+                        title: "File Emoji",
+                        defaultValue: 30,
+                        min: 10,
+                        max: 80,
+                        step: 1,
+                        unit: "px",
+                    },
+                },
             },
-            addIconSize: {
-                type: ControlType.Number,
-                title: "Plus Icon",
-                defaultValue: 28,
-                min: 12,
-                max: 80,
-                step: 1,
-                unit: "px",
+            timing: {
+                type: ControlType.Object,
+                title: "Timing",
+                controls: {
+                    startDelay: {
+                        type: ControlType.Number,
+                        title: "Start Delay",
+                        defaultValue: 0.35,
+                        min: 0,
+                        max: 3,
+                        step: 0.05,
+                        unit: "s",
+                    },
+                    typingSpeed: {
+                        type: ControlType.Number,
+                        title: "Type Speed",
+                        defaultValue: 44,
+                        min: 12,
+                        max: 120,
+                        step: 1,
+                        unit: "ms",
+                    },
+                    deleteSpeed: {
+                        type: ControlType.Number,
+                        title: "Delete Speed",
+                        defaultValue: 24,
+                        min: 8,
+                        max: 100,
+                        step: 1,
+                        unit: "ms",
+                    },
+                    holdTime: {
+                        type: ControlType.Number,
+                        title: "Hold",
+                        defaultValue: 1.2,
+                        min: 0.2,
+                        max: 4,
+                        step: 0.1,
+                        unit: "s",
+                    },
+                    betweenPromptsDelay: {
+                        type: ControlType.Number,
+                        title: "Between",
+                        defaultValue: 0.25,
+                        min: 0,
+                        max: 2,
+                        step: 0.05,
+                        unit: "s",
+                    },
+                    fileRevealDelay: {
+                        type: ControlType.Number,
+                        title: "Files Delay",
+                        description: "Delay after typing starts before file cards animate in.",
+                        defaultValue: 0.12,
+                        min: 0,
+                        max: 1.5,
+                        step: 0.01,
+                        unit: "s",
+                    },
+                    fileRevealDuration: {
+                        type: ControlType.Number,
+                        title: "Files Duration",
+                        defaultValue: 420,
+                        min: 120,
+                        max: 1200,
+                        step: 10,
+                        unit: "ms",
+                    },
+                    fileRevealStagger: {
+                        type: ControlType.Number,
+                        title: "Files Stagger",
+                        defaultValue: 0.06,
+                        min: 0,
+                        max: 0.4,
+                        step: 0.01,
+                        unit: "s",
+                    },
+                    fileRiseOffset: {
+                        type: ControlType.Number,
+                        title: "Files Rise",
+                        defaultValue: 8,
+                        min: 0,
+                        max: 24,
+                        step: 1,
+                        unit: "px",
+                    },
+                },
             },
-            sendButtonSize: {
-                type: ControlType.Number,
-                title: "Send Button",
-                defaultValue: 68,
-                min: 24,
-                max: 120,
-                step: 1,
-                unit: "px",
-            },
-            sendIconSize: {
-                type: ControlType.Number,
-                title: "Send Icon",
-                defaultValue: 30,
-                min: 12,
-                max: 80,
-                step: 1,
-                unit: "px",
-            },
-            fileCardWidth: {
-                type: ControlType.Number,
-                title: "File Card W",
-                defaultValue: 350,
-                min: 120,
-                max: 520,
-                step: 1,
-                unit: "px",
-            },
-            fileThumbSize: {
-                type: ControlType.Number,
-                title: "File Thumb",
-                defaultValue: 76,
-                min: 20,
-                max: 140,
-                step: 1,
-                unit: "px",
-            },
-            fileEmojiSize: {
-                type: ControlType.Number,
-                title: "File Emoji",
-                defaultValue: 30,
-                min: 10,
-                max: 80,
-                step: 1,
-                unit: "px",
-            },
-            startDelay: {
-                type: ControlType.Number,
-                title: "Start Delay",
-                defaultValue: 0.35,
-                min: 0,
-                max: 3,
-                step: 0.05,
-                unit: "s",
-            },
-            typingSpeed: {
-                type: ControlType.Number,
-                title: "Type Speed",
-                defaultValue: 44,
-                min: 12,
-                max: 120,
-                step: 1,
-                unit: "ms",
-            },
-            deleteSpeed: {
-                type: ControlType.Number,
-                title: "Delete Speed",
-                defaultValue: 24,
-                min: 8,
-                max: 100,
-                step: 1,
-                unit: "ms",
-            },
-            holdTime: {
-                type: ControlType.Number,
-                title: "Hold",
-                defaultValue: 1.2,
-                min: 0.2,
-                max: 4,
-                step: 0.1,
-                unit: "s",
-            },
-            betweenPromptsDelay: {
-                type: ControlType.Number,
-                title: "Between",
-                defaultValue: 0.25,
-                min: 0,
-                max: 2,
-                step: 0.05,
-                unit: "s",
-            },
-            fileRevealDelay: {
-                type: ControlType.Number,
-                title: "Files Delay",
-                description: "Delay after typing starts before file cards animate in.",
-                defaultValue: 0.12,
-                min: 0,
-                max: 1.5,
-                step: 0.01,
-                unit: "s",
-            },
-            fileRevealDuration: {
-                type: ControlType.Number,
-                title: "Files Duration",
-                defaultValue: 420,
-                min: 120,
-                max: 1200,
-                step: 10,
-                unit: "ms",
-            },
-            fileRevealStagger: {
-                type: ControlType.Number,
-                title: "Files Stagger",
-                defaultValue: 0.06,
-                min: 0,
-                max: 0.4,
-                step: 0.01,
-                unit: "s",
-            },
-            fileRiseOffset: {
-                type: ControlType.Number,
-                title: "Files Rise",
-                defaultValue: 8,
-                min: 0,
-                max: 24,
-                step: 1,
-                unit: "px",
+            radius: {
+                type: ControlType.Object,
+                title: "Radius",
+                controls: {
+                    composerRadiusDesktop: {
+                        type: ControlType.Number,
+                        title: "Radius Desk",
+                        defaultValue: 42,
+                        min: 12,
+                        max: 72,
+                        step: 1,
+                        unit: "px",
+                    },
+                    composerRadiusMobile: {
+                        type: ControlType.Number,
+                        title: "Radius Mobile",
+                        defaultValue: 34,
+                        min: 10,
+                        max: 56,
+                        step: 1,
+                        unit: "px",
+                    },
+                    fileCardRadiusDesktop: {
+                        type: ControlType.Number,
+                        title: "Card Radius D",
+                        defaultValue: 21,
+                        min: 8,
+                        max: 48,
+                        step: 1,
+                        unit: "px",
+                    },
+                    fileCardRadiusMobile: {
+                        type: ControlType.Number,
+                        title: "Card Radius M",
+                        defaultValue: 16,
+                        min: 8,
+                        max: 40,
+                        step: 1,
+                        unit: "px",
+                    },
+                    fileThumbRadiusDesktop: {
+                        type: ControlType.Number,
+                        title: "Thumb Radius D",
+                        defaultValue: 16,
+                        min: 4,
+                        max: 32,
+                        step: 1,
+                        unit: "px",
+                    },
+                    fileThumbRadiusMobile: {
+                        type: ControlType.Number,
+                        title: "Thumb Radius M",
+                        defaultValue: 12,
+                        min: 4,
+                        max: 24,
+                        step: 1,
+                        unit: "px",
+                    },
+                },
             },
         },
     },

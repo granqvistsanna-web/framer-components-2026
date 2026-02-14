@@ -21,6 +21,7 @@ framer-components-2026/
 
 - Component files: `PascalCase.tsx`
 - One main component export per file
+- Typography rule: always use `ControlType.Font` with `controls: "extended"` in property controls.
 - Keep component props typed and grouped:
   - Content props
   - Style props
@@ -41,7 +42,7 @@ For each new component:
 
 1. Add clear prop types.
 2. Add Framer property controls with sensible defaults.
-3. Ensure font controls expose full font settings (`ControlType.Font` with full/extended controls).
+3. Always expose full font settings (`ControlType.Font` with `controls: "extended"`).
 4. Keep animation timings configurable.
 5. Add a short usage block in this README or `docs/`.
 6. Add a small playground/test file if behavior is complex.
