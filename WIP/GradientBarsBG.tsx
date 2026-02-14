@@ -47,6 +47,7 @@ interface StyleGroup {
     backgroundColor: string
     hueDrift: number
     intensityDrift: number
+    showGlow: boolean
     enableBlend: boolean
     useBlend?: boolean
     blendMode: "soft-light" | "screen" | "overlay"
@@ -97,6 +98,7 @@ interface MultipleGradientBarsBackgroundProps {
     appearStagger?: number
     enableStatic?: boolean
     showNoise?: boolean
+    showGlow?: boolean
     noiseOpacity?: number
     hueDrift?: number
     intensityDrift?: number
@@ -175,6 +177,7 @@ export default function GradientStripsBG(
     const blendOpacity = styleGroup.blendOpacity ?? props.blendOpacity ?? 0.88
     const edgeFeather = styleGroup.edgeFeather ?? props.edgeFeather ?? 0
     const showNoise = styleGroup.showNoise ?? props.showNoise ?? false
+    const showGlow = styleGroup.showGlow ?? props.showGlow ?? true
     const noiseOpacity = styleGroup.noiseOpacity ?? props.noiseOpacity ?? 0.05
 
     const enableStatic = states.enableStatic ?? props.enableStatic ?? false
@@ -333,7 +336,7 @@ export default function GradientStripsBG(
     const shouldShowNoise =
         showNoise && safeNoiseOpacity > 0 && !enablePerformanceMode
     const isRibbedLook = shape === "flat" && safeMinHeight >= 99 && safeMaxHeight >= 99
-    const shouldShowGlow = isRibbedLook && !enablePerformanceMode
+    const shouldShowGlow = showGlow && isRibbedLook && !enablePerformanceMode
     const seamOverlapPx = 1
     const stripOverdrawPx = 2
 
@@ -604,8 +607,8 @@ addPropertyControls(GradientStripsBG, {
             stylePreset: {
                 type: ControlType.Enum,
                 title: "Preset",
-                options: ["custom", "soft", "neon", "sunset", "pink-sunset"],
-                optionTitles: ["Custom", "Soft", "Neon", "Sunset", "Pink Sunset"],
+                options: ["custom", "soft", "neon", "pink-sunset"],
+                optionTitles: ["Custom", "Soft", "Neon", "Pink Sunset"],
                 defaultValue: "pink-sunset",
             },
             gradientColors: {
@@ -715,7 +718,9 @@ addPropertyControls(GradientStripsBG, {
                 displayStepper: true,
                 unit: "%",
                 hidden: (value) =>
-                    value?.shape !== "hill" && value?.shape !== "rounded-hill",
+                    value?.shape !== "valley" &&
+                    value?.shape !== "hill" &&
+                    value?.shape !== "rounded-hill",
             },
             curveIntensity: {
                 type: ControlType.Number,
@@ -795,6 +800,11 @@ addPropertyControls(GradientStripsBG, {
                 type: ControlType.Boolean,
                 title: "Show Noise",
                 defaultValue: false,
+            },
+            showGlow: {
+                type: ControlType.Boolean,
+                title: "Show Glow",
+                defaultValue: true,
             },
             noiseOpacity: {
                 type: ControlType.Number,
