@@ -15,7 +15,11 @@ framer-components-2026/
 └── .gitignore
 ```
 
-`shipped/` is intentionally empty until components are finalized.
+### Shipped Components
+
+- **GradientTextReveal**: A smooth text reveal animation with gradient colors.
+- **CurvedTicker**: A circular or curved scrolling text ticker.
+- **GradientBarsBG**: An animated background with dynamic gradient bars.
 
 ## Naming Conventions
 
