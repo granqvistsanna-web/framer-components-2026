@@ -41,9 +41,10 @@ For each new component:
 
 1. Add clear prop types.
 2. Add Framer property controls with sensible defaults.
-3. Keep animation timings configurable.
-4. Add a short usage block in this README or `docs/`.
-5. Add a small playground/test file if behavior is complex.
+3. Ensure font controls expose full font settings (`ControlType.Font` with full/extended controls).
+4. Keep animation timings configurable.
+5. Add a short usage block in this README or `docs/`.
+6. Add a small playground/test file if behavior is complex.
 
 ## GitHub Workflow
 
