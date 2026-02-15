@@ -74,15 +74,16 @@ Fail if:
 - Absolute positioning toggle unless necessary.
 - Line height slider.
 - Letter spacing slider.
-- Unlimited radius sliders.
+- Unlimited radius sliders (keep to 2-3 radius controls maximum).
 - Raw shadow offset, blur, spread sliders.
-- Mobile-specific micro sliders.
+- Mobile-specific micro sliders (e.g., mobilePadding, mobile-specific size overrides).
 
 If present, flag for removal unless strongly justified.
 
-Typography exception:
+Typography:
 
-- Expose font family controls when brand matching is a core use case.
+- Font controls should always use "extended" to expose fontFamily, fontSize, fontWeight, lineHeight, and letterSpacing.
+- Font family selection is essential for brand matching.
 
 ---
 

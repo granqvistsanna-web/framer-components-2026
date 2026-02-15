@@ -37,8 +37,8 @@ interface StatesGroup {
 
 interface StyleGroup {
     themeMode: "light" | "dark" | "auto"
-    useCustomColors: boolean
-    useGlassBackground: boolean
+    enableCustomColors: boolean
+    enableGlassBackground: boolean
     font: {
         fontFamily?: string
         fontSize?: number
@@ -68,8 +68,6 @@ interface StyleGroup {
 interface LayoutGroup {
     maxWidth: number
     padding: number
-    mobilePadding: number
-    mobileBreakpoint: number
 }
 
 interface PlaybackGroup {
@@ -165,8 +163,6 @@ interface Props {
 
     maxWidth?: number
     padding?: number
-    mobilePadding?: number
-    mobileBreakpoint?: number
     textColor?: string
     mutedColor?: string
     backgroundColor?: string
@@ -250,8 +246,6 @@ export default function AIChatSequence(props: Props) {
 
     const maxWidth = layout.maxWidth ?? props.maxWidth ?? 1220
     const padding = layout.padding ?? props.padding ?? 32
-    const mobilePadding = layout.mobilePadding ?? props.mobilePadding ?? 16
-    const mobileBreakpoint = layout.mobileBreakpoint ?? props.mobileBreakpoint ?? 760
 
     const font = styleGroup.font ?? {}
     const fontFamily =
@@ -265,9 +259,11 @@ export default function AIChatSequence(props: Props) {
     const promptLineHeight = font.lineHeight ?? 1.15
     const promptLetterSpacing = font.letterSpacing ?? -0.4
     const themeMode = styleGroup.themeMode ?? "light"
-    const useCustomColors = styleGroup.useCustomColors ?? false
-    const useGlassBackground = styleGroup.useGlassBackground ?? false
+    const enableCustomColors = styleGroup.enableCustomColors ?? false
+    const enableGlassBackground = styleGroup.enableGlassBackground ?? false
     const isDarkTheme = themeMode === "dark" || (themeMode === "auto" && systemPrefersDark)
+    const MOBILE_BREAKPOINT = 760
+    const MOBILE_PADDING = 16
 
     const darkDefaults = {
         text: "#f5f7fa",
@@ -285,84 +281,84 @@ export default function AIChatSequence(props: Props) {
         sendButtonIcon: "#0f172a",
     }
 
-    const textColor = useCustomColors
+    const textColor = enableCustomColors
         ? styleGroup.textColor ??
           props.textColor ??
           (isDarkTheme ? darkDefaults.text : "#000000")
         : isDarkTheme
           ? darkDefaults.text
           : "#000000"
-    const mutedColor = useCustomColors
+    const mutedColor = enableCustomColors
         ? styleGroup.mutedColor ??
           props.mutedColor ??
           (isDarkTheme ? darkDefaults.muted : "#8a8a8a")
         : isDarkTheme
           ? darkDefaults.muted
           : "#8a8a8a"
-    const backgroundColor = useCustomColors
+    const backgroundColor = enableCustomColors
         ? styleGroup.backgroundColor ??
           props.backgroundColor ??
           (isDarkTheme ? darkDefaults.background : "#ffffff")
         : isDarkTheme
           ? darkDefaults.background
           : "#ffffff"
-    const borderColor = useCustomColors
+    const borderColor = enableCustomColors
         ? styleGroup.borderColor ??
           props.borderColor ??
           (isDarkTheme ? darkDefaults.border : "rgba(0, 0, 0, 0.04)")
         : isDarkTheme
           ? darkDefaults.border
           : "rgba(0, 0, 0, 0.04)"
-    const shadowColor = useCustomColors
+    const shadowColor = enableCustomColors
         ? styleGroup.shadowColor ??
           props.shadowColor ??
           (isDarkTheme ? darkDefaults.shadow : "rgba(0, 0, 0, 0.08)")
         : isDarkTheme
           ? darkDefaults.shadow
           : "rgba(0, 0, 0, 0.08)"
-    const searchIconColor = useCustomColors
+    const searchIconColor = enableCustomColors
         ? styleGroup.searchIconColor ??
           (isDarkTheme ? darkDefaults.searchIcon : "#7d7d7d")
         : isDarkTheme
           ? darkDefaults.searchIcon
           : "#7d7d7d"
-    const fileCardBackgroundColor = useCustomColors
+    const fileCardBackgroundColor = enableCustomColors
         ? styleGroup.fileCardBackgroundColor ??
           (isDarkTheme ? darkDefaults.fileCardBackground : "#ffffff")
         : isDarkTheme
           ? darkDefaults.fileCardBackground
           : "#ffffff"
-    const fileCardBorderColor = useCustomColors
+    const fileCardBorderColor = enableCustomColors
         ? styleGroup.fileCardBorderColor ??
           (isDarkTheme ? darkDefaults.fileCardBorder : "rgba(0, 0, 0, 0.1)")
         : isDarkTheme
           ? darkDefaults.fileCardBorder
           : "rgba(0, 0, 0, 0.1)"
-    const fileCardShadowColor = useCustomColors
+    const fileCardShadowColor = enableCustomColors
         ? styleGroup.fileCardShadowColor ??
           (isDarkTheme ? darkDefaults.fileCardShadow : "rgba(0, 0, 0, 0.08)")
         : isDarkTheme
           ? darkDefaults.fileCardShadow
           : "rgba(0, 0, 0, 0.08)"
-    const fileThumbBackgroundColor = useCustomColors
+    const fileThumbBackgroundColor = enableCustomColors
         ? styleGroup.fileThumbBackgroundColor ??
           (isDarkTheme ? darkDefaults.fileThumbBackground : "#efefef")
         : isDarkTheme
           ? darkDefaults.fileThumbBackground
           : "#efefef"
-    const fileSourceColor = useCustomColors
+    const fileSourceColor = enableCustomColors
         ? styleGroup.fileSourceColor ??
           (isDarkTheme ? darkDefaults.fileSource : "#5f5f5f")
         : isDarkTheme
           ? darkDefaults.fileSource
           : "#5f5f5f"
-    const sendButtonBackgroundColor = useCustomColors
+    const sendButtonBackgroundColor = enableCustomColors
         ? styleGroup.sendButtonBackgroundColor ??
           (isDarkTheme ? darkDefaults.sendButtonBackground : "#000000")
         : isDarkTheme
           ? darkDefaults.sendButtonBackground
           : "#000000"
-    const sendButtonIconColor = useCustomColors
+    const sendButtonIconColor = enableCustomColors
         ? styleGroup.sendButtonIconColor ??
           (isDarkTheme ? darkDefaults.sendButtonIcon : "#ffffff")
         : isDarkTheme
@@ -376,6 +372,7 @@ export default function AIChatSequence(props: Props) {
         (isDarkTheme ? "rgba(216, 224, 238, 0.2)" : "rgba(255, 255, 255, 0.7)")
     const glassBlur = styleGroup.glassBlur ?? 18
     const glassSaturation = styleGroup.glassSaturation ?? 125
+    const safeMobilePadding = MOBILE_PADDING
 
     const helperText = content.helperText ?? props.helperText ?? "Attach files or links"
 
@@ -482,8 +479,6 @@ export default function AIChatSequence(props: Props) {
 
     const safeMaxWidth = Math.max(320, maxWidth)
     const safePadding = Math.max(0, padding)
-    const safeMobilePadding = Math.max(0, mobilePadding)
-    const safeMobileBreakpoint = Math.max(240, mobileBreakpoint)
     const safeFontSize = Math.max(12, fontSize)
     const safeMaxVisibleFiles = Math.max(0, Math.round(maxVisibleFiles))
     const safeStartDelay = Math.max(0, startDelay)
@@ -591,12 +586,12 @@ export default function AIChatSequence(props: Props) {
         if (!element || typeof ResizeObserver === "undefined") return
 
         const observer = new ResizeObserver(([entry]) => {
-            setIsMobile(entry.contentRect.width < safeMobileBreakpoint)
+            setIsMobile(entry.contentRect.width < MOBILE_BREAKPOINT)
         })
 
         observer.observe(element)
         return () => observer.disconnect()
-    }, [safeMobileBreakpoint])
+    }, [])
 
     useEffect(() => {
         if (!preview || promptItems.length === 0) {
@@ -754,38 +749,38 @@ export default function AIChatSequence(props: Props) {
         : Math.max(14, Math.round(composerFontSize * 0.32))
     const effectiveCardTitleSize = Math.max(14, Math.round(cardTitleSize * fileCardScale))
     const effectiveCardSourceSize = Math.max(12, Math.round(cardSourceSize * fileCardScale))
-    const composerBackground = useGlassBackground
+    const composerBackground = enableGlassBackground
         ? isDarkTheme
             ? `linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.02) 42%, rgba(0, 0, 0, 0.1) 100%), ${glassTintColor}`
             : `linear-gradient(145deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.2) 42%, rgba(255, 255, 255, 0.08) 100%), ${glassTintColor}`
         : backgroundColor
-    const composerBorderColor = useGlassBackground ? glassBorderColor : borderColor
-    const composerShadow = useGlassBackground
+    const composerBorderColor = enableGlassBackground ? glassBorderColor : borderColor
+    const composerShadow = enableGlassBackground
         ? isDarkTheme
             ? `0 22px 56px ${shadowColor}, inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 -1px 0 rgba(255, 255, 255, 0.07)`
             : `0 22px 56px ${shadowColor}, inset 0 1px 0 rgba(255, 255, 255, 0.82), inset 0 -1px 0 rgba(255, 255, 255, 0.42)`
         : `0 16px 44px ${shadowColor}`
-    const effectiveFileCardBackground = useGlassBackground
+    const effectiveFileCardBackground = enableGlassBackground
         ? isDarkTheme
             ? "rgba(23, 28, 38, 0.5)"
             : "rgba(255, 255, 255, 0.5)"
         : fileCardBackgroundColor
-    const effectiveFileCardBorder = useGlassBackground
+    const effectiveFileCardBorder = enableGlassBackground
         ? isDarkTheme
             ? "rgba(226, 236, 250, 0.2)"
             : "rgba(255, 255, 255, 0.72)"
         : fileCardBorderColor
-    const effectiveFileCardShadow = useGlassBackground
+    const effectiveFileCardShadow = enableGlassBackground
         ? isDarkTheme
             ? "rgba(3, 8, 18, 0.48)"
             : "rgba(31, 41, 55, 0.14)"
         : fileCardShadowColor
-    const effectiveFileThumbBackground = useGlassBackground
+    const effectiveFileThumbBackground = enableGlassBackground
         ? isDarkTheme
             ? "rgba(44, 54, 70, 0.62)"
             : "rgba(255, 255, 255, 0.65)"
         : fileThumbBackgroundColor
-    const effectiveSendButtonBackground = useGlassBackground
+    const effectiveSendButtonBackground = enableGlassBackground
         ? isDarkTheme
             ? "rgba(234, 241, 250, 0.9)"
             : "rgba(255, 255, 255, 0.84)"
@@ -818,10 +813,10 @@ export default function AIChatSequence(props: Props) {
                     background: composerBackground,
                     border: `1px solid ${composerBorderColor}`,
                     boxShadow: composerShadow,
-                    backdropFilter: useGlassBackground
+                    backdropFilter: enableGlassBackground
                         ? `blur(${safeGlassBlur}px) saturate(${safeGlassSaturation}%)`
                         : "none",
-                    WebkitBackdropFilter: useGlassBackground
+                    WebkitBackdropFilter: enableGlassBackground
                         ? `blur(${safeGlassBlur}px) saturate(${safeGlassSaturation}%)`
                         : "none",
                     position: "relative",
@@ -927,11 +922,11 @@ export default function AIChatSequence(props: Props) {
                                         borderRadius: isMobile
                                             ? `${safeFileCardRadiusMobile}px`
                                             : `${safeFileCardRadiusDesktop}px`,
-                                        background: useGlassBackground
+                                        background: enableGlassBackground
                                             ? `linear-gradient(150deg, rgba(255, 255, 255, ${isDarkTheme ? "0.12" : "0.44"}), rgba(255, 255, 255, ${isDarkTheme ? "0.02" : "0.18"}) 70%), ${effectiveFileCardBackground}`
                                             : effectiveFileCardBackground,
                                         border: `1px solid ${effectiveFileCardBorder}`,
-                                        boxShadow: useGlassBackground
+                                        boxShadow: enableGlassBackground
                                             ? `0 6px 18px ${effectiveFileCardShadow}, inset 0 1px 0 rgba(255, 255, 255, ${isDarkTheme ? "0.18" : "0.7"})`
                                             : `0 5px 14px ${effectiveFileCardShadow}`,
                                         opacity: filesVisible ? 1 : 0,
@@ -1066,7 +1061,7 @@ export default function AIChatSequence(props: Props) {
                             height: `${safeSendButtonSize}px`,
                             borderRadius: "999px",
                             border: "none",
-                            background: useGlassBackground
+                            background: enableGlassBackground
                                 ? `linear-gradient(160deg, rgba(255, 255, 255, ${isDarkTheme ? "0.92" : "0.98"}), rgba(255, 255, 255, ${isDarkTheme ? "0.82" : "0.78"}))`
                                 : effectiveSendButtonBackground,
                             color: sendButtonIconColor,
@@ -1076,7 +1071,7 @@ export default function AIChatSequence(props: Props) {
                             justifyContent: "center",
                             padding: 0,
                             flexShrink: 0,
-                            boxShadow: useGlassBackground
+                            boxShadow: enableGlassBackground
                                 ? isDarkTheme
                                     ? "inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 8px 18px rgba(2, 6, 23, 0.38)"
                                     : "inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 18px rgba(15, 23, 42, 0.16)"
@@ -1196,16 +1191,16 @@ addPropertyControls(AIChatSequence, {
                 defaultValue: "light",
                 displaySegmentedControl: true,
             },
-            useCustomColors: {
+            enableCustomColors: {
                 type: ControlType.Boolean,
-                title: "Custom Colors",
+                title: "Enable Custom Colors",
                 defaultValue: false,
                 enabledTitle: "On",
                 disabledTitle: "Off",
             },
-            useGlassBackground: {
+            enableGlassBackground: {
                 type: ControlType.Boolean,
-                title: "Glass BG",
+                title: "Enable Glass Background",
                 defaultValue: false,
                 enabledTitle: "On",
                 disabledTitle: "Off",
@@ -1228,91 +1223,91 @@ addPropertyControls(AIChatSequence, {
                 type: ControlType.Color,
                 title: "Text",
                 defaultValue: "#000000",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             mutedColor: {
                 type: ControlType.Color,
                 title: "Muted",
                 defaultValue: "#8a8a8a",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             backgroundColor: {
                 type: ControlType.Color,
                 title: "Background",
                 defaultValue: "#ffffff",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             borderColor: {
                 type: ControlType.Color,
                 title: "Border",
                 defaultValue: "rgba(0, 0, 0, 0.04)",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             shadowColor: {
                 type: ControlType.Color,
                 title: "Shadow",
                 defaultValue: "rgba(0, 0, 0, 0.08)",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             searchIconColor: {
                 type: ControlType.Color,
                 title: "Search Icon",
                 defaultValue: "#7d7d7d",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             fileCardBackgroundColor: {
                 type: ControlType.Color,
                 title: "File Card BG",
                 defaultValue: "#ffffff",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             fileCardBorderColor: {
                 type: ControlType.Color,
                 title: "File Card Border",
                 defaultValue: "rgba(0, 0, 0, 0.1)",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             fileCardShadowColor: {
                 type: ControlType.Color,
                 title: "File Card Shadow",
                 defaultValue: "rgba(0, 0, 0, 0.08)",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             fileThumbBackgroundColor: {
                 type: ControlType.Color,
                 title: "File Thumb BG",
                 defaultValue: "#efefef",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             fileSourceColor: {
                 type: ControlType.Color,
                 title: "File Source",
                 defaultValue: "#5f5f5f",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             sendButtonBackgroundColor: {
                 type: ControlType.Color,
                 title: "Send BG",
                 defaultValue: "#000000",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             sendButtonIconColor: {
                 type: ControlType.Color,
                 title: "Send Icon",
                 defaultValue: "#ffffff",
-                hidden: (props) => !(props.useCustomColors ?? props.styleGroup?.useCustomColors),
+                hidden: (props) => !(props.enableCustomColors ?? props.styleGroup?.enableCustomColors),
             },
             glassTintColor: {
                 type: ControlType.Color,
                 title: "Glass Tint",
                 defaultValue: "rgba(255, 255, 255, 0.6)",
-                hidden: (props) => !(props.useGlassBackground ?? props.styleGroup?.useGlassBackground),
+                hidden: (props) => !(props.enableGlassBackground ?? props.styleGroup?.enableGlassBackground),
             },
             glassBorderColor: {
                 type: ControlType.Color,
                 title: "Glass Border",
                 defaultValue: "rgba(255, 255, 255, 0.7)",
-                hidden: (props) => !(props.useGlassBackground ?? props.styleGroup?.useGlassBackground),
+                hidden: (props) => !(props.enableGlassBackground ?? props.styleGroup?.enableGlassBackground),
             },
             glassBlur: {
                 type: ControlType.Number,
@@ -1322,7 +1317,7 @@ addPropertyControls(AIChatSequence, {
                 max: 40,
                 step: 1,
                 unit: "px",
-                hidden: (props) => !(props.useGlassBackground ?? props.styleGroup?.useGlassBackground),
+                hidden: (props) => !(props.enableGlassBackground ?? props.styleGroup?.enableGlassBackground),
             },
             glassSaturation: {
                 type: ControlType.Number,
@@ -1332,7 +1327,7 @@ addPropertyControls(AIChatSequence, {
                 max: 180,
                 step: 1,
                 unit: "%",
-                hidden: (props) => !(props.useGlassBackground ?? props.styleGroup?.useGlassBackground),
+                hidden: (props) => !(props.enableGlassBackground ?? props.styleGroup?.enableGlassBackground),
             },
         },
     },

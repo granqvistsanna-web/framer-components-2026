@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Word Rotator Preview</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #f5f5f5;
+            padding: 40px;
+            gap: 60px;
+        }
+        .container {
+            text-align: center;
+        }
+        .heading {
+            letter-spacing: -0.02em;
+            margin: 0;
+            font-family: Inter, system-ui, sans-serif;
+            font-size: clamp(2rem, 6vw, 3.5rem);
+            font-weight: 600;
+            line-height: 1.2;
+            max-width: 900px;
+            color: #1a1a1a;
+        }
+        .word-wrapper {
+            display: inline-block;
+            position: relative;
+            vertical-align: baseline;
+        }
+        /* Pill background */
+        .pill {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            height: calc(100% + 16px);
+            border-radius: 100px;
+            background-color: #6366f1;
+            z-index: -1;
+            transform: translate(-50%, -50%);
+            transition: width 0.6s cubic-bezier(0.76, 0, 0.24, 1);
+        }
+        .inner {
+            display: inline-flex;
+            position: relative;
+            height: 1.2em;
+            overflow: hidden;
+            vertical-align: baseline;
+            align-items: center;
+            padding-left: 16px;
+            padding-right: 16px;
+            transition: width 0.6s cubic-bezier(0.76, 0, 0.24, 1);
+        }
+        .word {
+            display: block;
+            white-space: nowrap;
+            position: absolute;
+            top: 50%;
+            left: 16px;
+            transform: translateY(-50%);
+            color: #ffffff;
+            will-change: transform, opacity;
+        }
+        /* Hidden measurement */
+        .measure {
+            position: absolute;
+            visibility: hidden;
+            pointer-events: none;
+            white-space: nowrap;
+            top: 0; left: 0;
+        }
+        .measure span {
+            display: inline-block;
+        }
+        /* Controls */
+        .controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 12px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            font-family: Inter, system-ui, sans-serif;
+            font-size: 14px;
+        }
+        .controls label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+        .controls input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #6366f1;
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+    <div class="container">
+        <h1 class="heading">
+            Build
+            <span class="word-wrapper">
+                <span class="pill" id="pill"></span>
+                <span class="inner" id="inner">
+                    <span class="word" id="activeWord">beautiful</span>
+                </span>
+            </span>
+            experiences that matter.
+        </h1>
+    </div>
+
+    <!-- Hidden measurement spans -->
+    <div class="measure heading" id="measure"></div>
+
+    <div class="controls">
+        <label>
+            <input type="checkbox" id="pillToggle" checked />
+            Pill Background
+        </label>
+        <label>
+            <input type="checkbox" id="animateToggle" checked />
+            Animate Width
+        </label>
+    </div>
+
+    <script>
+        const words = ["beautiful", "powerful", "intuitive", "seamless"];
+        const pill = document.getElementById("pill");
+        const inner = document.getElementById("inner");
+        const measureContainer = document.getElementById("measure");
+        const inDuration = 600;  // ms
+        const outDuration = 500; // ms
+        const stepDuration = 2000; // ms
+        const paddingX = 16;
+
+        let pillEnabled = true;
+        let animateEnabled = true;
+
+        // Create measurement spans
+        const measureSpans = words.map((word) => {
+            const span = document.createElement("span");
+            span.textContent = word;
+            measureContainer.appendChild(span);
+            return span;
+        });
+
+        let activeIndex = 0;
+
+        function getWidth(index) {
+            return measureSpans[index].getBoundingClientRect().width;
+        }
+
+        function setWidths(index) {
+            const wordWidth = getWidth(index);
+            const totalWidth = wordWidth + (pillEnabled ? paddingX * 2 : 0);
+            
+            inner.style.width = wordWidth + "px";
+            if (pillEnabled) {
+                pill.style.width = totalWidth + "px";
+                pill.style.opacity = "1";
+            } else {
+                pill.style.opacity = "0";
+            }
+        }
+
+        // Set initial width
+        requestAnimationFrame(() => setWidths(0));
+
+        function createWordEl(text) {
+            const el = document.createElement("span");
+            el.className = "word";
+            el.textContent = text;
+            el.style.transform = "translateY(150%)";
+            el.style.opacity = "0";
+            return el;
+        }
+
+        function animateIn(el) {
+            const duration = animateEnabled ? inDuration : 0;
+            el.style.transition = `transform ${duration}ms cubic-bezier(0.76,0,0.24,1), opacity ${duration}ms cubic-bezier(0.76,0,0.24,1)`;
+            requestAnimationFrame(() => {
+                el.style.transform = "translateY(-50%)";
+                el.style.opacity = "1";
+            });
+        }
+
+        function animateOut(el, onDone) {
+            const duration = animateEnabled ? outDuration : 0;
+            el.style.transition = `transform ${duration}ms cubic-bezier(0.76,0,0.24,1), opacity ${duration}ms cubic-bezier(0.76,0,0.24,1)`;
+            el.style.transform = "translateY(-220%)";
+            el.style.opacity = "0";
+            setTimeout(() => {
+                if (el.parentNode) el.parentNode.removeChild(el);
+                if (onDone) onDone();
+            }, duration);
+        }
+
+        // Show first word
+        const firstWord = inner.querySelector(".word");
+        firstWord.style.transform = "translateY(-50%)";
+        firstWord.style.opacity = "1";
+        firstWord.style.transition = "none";
+
+        function showNext() {
+            const nextIndex = (activeIndex + 1) % words.length;
+            const prevEl = inner.querySelector(".word");
+            const nextEl = createWordEl(words[nextIndex]);
+
+            // Update widths
+            setWidths(nextIndex);
+
+            // Animate out old
+            if (prevEl) animateOut(prevEl);
+
+            // Animate in new
+            inner.appendChild(nextEl);
+            requestAnimationFrame(() => animateIn(nextEl));
+
+            activeIndex = nextIndex;
+        }
+
+        setInterval(showNext, stepDuration);
+
+        // Controls
+        document.getElementById("pillToggle").addEventListener("change", (e) => {
+            pillEnabled = e.target.checked;
+            setWidths(activeIndex);
+        });
+
+        document.getElementById("animateToggle").addEventListener("change", (e) => {
+            animateEnabled = e.target.checked;
+        });
+    </script>
+</body>
+</html>
