@@ -17,6 +17,7 @@ framer-components-2026/
 
 ### Shipped Components
 
+- **FluidPixelText**: Interactive text with fluid pixel distortion effect on hover (like goodhabit.studio).
 - **GradientTextReveal**: A smooth text reveal animation with gradient colors.
 - **CurvedTicker**: A circular or curved scrolling text ticker.
 - **GradientBarsBG**: An animated background with dynamic gradient bars.

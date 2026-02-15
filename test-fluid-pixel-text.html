@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fluid Pixel Text Test</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #f5f5f5;
+            font-family: 'Inter', sans-serif;
+            padding: 40px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            background: white;
+            border-radius: 16px;
+            padding: 60px 40px;
+            box-shadow: 0 10px 60px rgba(0, 0, 0, 0.08);
+        }
+
+        .canvas-wrapper {
+            width: 100%;
+            height: 400px;
+            position: relative;
+            background: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 40px;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: #22ff00;
+        }
+
+        input[type="color"] {
+            width: 100%;
+            height: 40px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .value {
+            font-size: 12px;
+            color: #666;
+            text-align: right;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 800;
+            margin-bottom: 8px;
+            color: #111;
+        }
+
+        p.description {
+            color: #666;
+            margin-bottom: 32px;
+            font-size: 15px;
+        }
+
+        .tip {
+            background: #f0f0f0;
+            padding: 16px 20px;
+            border-radius: 10px;
+            font-size: 14px;
+            color: #555;
+            margin-top: 32px;
+        }
+
+        .tip strong {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Fluid Pixel Text</h1>
+        <p class="description">Hover over the text to see the liquid pixel distortion effect.</p>
+        
+        <div class="canvas-wrapper">
+            <canvas id="fluidCanvas"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label>Text</label>
+                <input type="text" id="textInput" value="GOOD HABIT">
+            </div>
+            
+            <div class="control-group">
+                <label>Text Color</label>
+                <input type="color" id="textColorInput" value="#000000">
+            </div>
+
+            <div class="control-group">
+                <label>Effect Radius <span class="value" id="radiusValue">150px</span></label>
+                <input type="range" id="radiusInput" min="50" max="400" value="150">
+            </div>
+
+            <div class="control-group">
+                <label>Effect Intensity <span class="value" id="intensityValue">1.0</span></label>
+                <input type="range" id="intensityInput" min="0" max="3" step="0.1" value="1">
+            </div>
+
+            <div class="control-group">
+                <label>Pixel Size <span class="value" id="pixelValue">4px</span></label>
+                <input type="range" id="pixelInput" min="1" max="12" value="4">
+            </div>
+
+            <div class="control-group">
+                <label>Smoothing <span class="value" id="smoothingValue">0.15</span></label>
+                <input type="range" id="smoothingInput" min="0.01" max="0.5" step="0.01" value="0.15">
+            </div>
+
+            <div class="control-group">
+                <label>Dispersion <span class="value" id="dispersionValue">30px</span></label>
+                <input type="range" id="dispersionInput" min="10" max="80" step="5" value="30">
+            </div>
+
+            <div class="control-group">
+                <label>Return Speed <span class="value" id="returnValue">0.08</span></label>
+                <input type="range" id="returnInput" min="0.01" max="0.3" step="0.01" value="0.08">
+            </div>
+        </div>
+
+        <div class="tip">
+            <strong>How to use in Framer:</strong> Copy the FluidPixelText.tsx component from WIP folder into your Framer project. The component exposes all these controls as property controls.
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('fluidCanvas');
+        const ctx = canvas.getContext('2d');
+        const container = canvas.parentElement;
+
+        // Settings
+        let settings = {
+            text: 'GOOD HABIT',
+            textColor: '#000000',
+            effectIntensity: 1,
+            effectRadius: 150,
+            pixelSize: 4,
+            smoothing: 0.15,
+            enableGlow: true,
+            glowIntensity: 20,
+            dispersionAmount: 30,
+            returnSpeed: 0.08,
+        };
+
+        let particles = [];
+        let mouse = { x: -1000, y: -1000, vx: 0, vy: 0 };
+        let prevMouse = { x: -1000, y: -1000 };
+        let animationId;
+        let fontLoaded = false;
+
+        // Wait for font
+        document.fonts.ready.then(() => {
+            fontLoaded = true;
+            resize();
+            initParticles();
+            animate();
+        });
+
+        function resize() {
+            const rect = container.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+            ctx.scale(dpr, dpr);
+            return { width: rect.width, height: rect.height };
+        }
+
+        function initParticles() {
+            const { width, height } = resize();
+            
+            // Clear and draw text
+            ctx.clearRect(0, 0, width, height);
+            
+            // Set font
+            const fontSize = 120;
+            ctx.font = `900 ${fontSize}px Inter, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = settings.textColor;
+            ctx.letterSpacing = '-0.02em';
+
+            // Draw text
+            const lines = settings.text.split('\n');
+            const lineHeight = fontSize * 1.1;
+            const totalHeight = lines.length * lineHeight;
+            const startY = (height - totalHeight) / 2 + fontSize / 2;
+
+            lines.forEach((line, index) => {
+                ctx.fillText(line, width / 2, startY + index * lineHeight);
+            });
+
+            // Get pixel data
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            const dpr = window.devicePixelRatio || 1;
+
+            particles = [];
+            const step = Math.max(2, Math.floor(settings.pixelSize));
+            
+            for (let y = 0; y < canvas.height; y += step) {
+                for (let x = 0; x < canvas.width; x += step) {
+                    const index = (y * canvas.width + x) * 4;
+                    const alpha = data[index + 3];
+                    
+                    if (alpha > 128) {
+                        particles.push({
+                            x: x / dpr,
+                            y: y / dpr,
+                            vx: 0,
+                            vy: 0,
+                            originX: x / dpr,
+                            originY: y / dpr,
+                            color: `rgba(${data[index]}, ${data[index + 1]}, ${data[index + 2]}, ${alpha / 255})`,
+                        });
+                    }
+                }
+            }
+
+            ctx.clearRect(0, 0, width, height);
+        }
+
+        function animate() {
+            const rect = canvas.getBoundingClientRect();
+            const width = rect.width;
+            const height = rect.height;
+
+            ctx.clearRect(0, 0, width, height);
+
+            // Calculate mouse velocity
+            mouse.vx = mouse.x - prevMouse.x;
+            mouse.vy = mouse.y - prevMouse.y;
+            prevMouse.x = mouse.x;
+            prevMouse.y = mouse.y;
+
+            const mouseSpeed = Math.sqrt(mouse.vx * mouse.vx + mouse.vy * mouse.vy);
+            const dynamicRadius = settings.effectRadius + mouseSpeed * 0.5;
+
+            particles.forEach((particle) => {
+                const dx = mouse.x - particle.x;
+                const dy = mouse.y - particle.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < dynamicRadius) {
+                    const force = (1 - dist / dynamicRadius) * settings.effectIntensity;
+                    const angle = Math.atan2(dy, dx);
+                    const swirlAngle = angle + Math.PI / 2;
+                    const swirlForce = force * 0.3;
+
+                    const targetX = particle.originX - Math.cos(angle) * force * settings.dispersionAmount;
+                    const targetY = particle.originY - Math.sin(angle) * force * settings.dispersionAmount;
+                    
+                    const swirlX = Math.cos(swirlAngle) * swirlForce * (settings.dispersionAmount * 0.6);
+                    const swirlY = Math.sin(swirlAngle) * swirlForce * (settings.dispersionAmount * 0.6);
+
+                    particle.vx += (targetX - particle.x + swirlX - particle.vx) * settings.smoothing;
+                    particle.vy += (targetY - particle.y + swirlY - particle.vy) * settings.smoothing;
+                } else {
+                    particle.vx += (particle.originX - particle.x) * settings.returnSpeed;
+                    particle.vy += (particle.originY - particle.y) * settings.returnSpeed;
+                    particle.vx *= 0.92;
+                    particle.vy *= 0.92;
+                }
+
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+
+                const size = Math.max(2, settings.pixelSize * (0.8 + Math.random() * 0.4));
+                
+                if (settings.enableGlow) {
+                    const glowSize = size + settings.glowIntensity;
+                    const gradient = ctx.createRadialGradient(
+                        particle.x, particle.y, 0,
+                        particle.x, particle.y, glowSize
+                    );
+                    gradient.addColorStop(0, particle.color);
+                    gradient.addColorStop(0.5, particle.color.replace(/[\d.]+\)$/g, '0.5)'));
+                    gradient.addColorStop(1, particle.color.replace(/[\d.]+\)$/g, '0)'));
+                    
+                    ctx.beginPath();
+                    ctx.arc(particle.x, particle.y, glowSize, 0, Math.PI * 2);
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                }
+
+                ctx.fillStyle = particle.color;
+                ctx.fillRect(
+                    particle.x - size / 2,
+                    particle.y - size / 2,
+                    size,
+                    size
+                );
+            });
+
+            animationId = requestAnimationFrame(animate);
+        }
+
+        // Event listeners
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            mouse.x = -1000;
+            mouse.y = -1000;
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            mouse.x = touch.clientX - rect.left;
+            mouse.y = touch.clientY - rect.top;
+        });
+
+        canvas.addEventListener('touchend', () => {
+            mouse.x = -1000;
+            mouse.y = -1000;
+        });
+
+        // Control listeners
+        document.getElementById('textInput').addEventListener('input', (e) => {
+            settings.text = e.target.value;
+            initParticles();
+        });
+
+        document.getElementById('textColorInput').addEventListener('input', (e) => {
+            settings.textColor = e.target.value;
+            initParticles();
+        });
+
+        document.getElementById('radiusInput').addEventListener('input', (e) => {
+            settings.effectRadius = parseInt(e.target.value);
+            document.getElementById('radiusValue').textContent = e.target.value + 'px';
+        });
+
+        document.getElementById('intensityInput').addEventListener('input', (e) => {
+            settings.effectIntensity = parseFloat(e.target.value);
+            document.getElementById('intensityValue').textContent = e.target.value;
+        });
+
+        document.getElementById('pixelInput').addEventListener('input', (e) => {
+            settings.pixelSize = parseInt(e.target.value);
+            document.getElementById('pixelValue').textContent = e.target.value + 'px';
+            initParticles();
+        });
+
+        document.getElementById('smoothingInput').addEventListener('input', (e) => {
+            settings.smoothing = parseFloat(e.target.value);
+            document.getElementById('smoothingValue').textContent = e.target.value;
+        });
+
+        document.getElementById('dispersionInput').addEventListener('input', (e) => {
+            settings.dispersionAmount = parseInt(e.target.value);
+            document.getElementById('dispersionValue').textContent = e.target.value + 'px';
+        });
+
+        document.getElementById('returnInput').addEventListener('input', (e) => {
+            settings.returnSpeed = parseFloat(e.target.value);
+            document.getElementById('returnValue').textContent = e.target.value;
+        });
+
+        window.addEventListener('resize', () => {
+            resize();
+            initParticles();
+        });
+    </script>
+</body>
+</html>

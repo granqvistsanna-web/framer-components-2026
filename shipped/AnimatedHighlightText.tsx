@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { addPropertyControls, ControlType } from "framer"
 
@@ -7,13 +7,10 @@ interface WordItem {
 }
 
 interface Props {
-    // Content
     textBefore: string
     textAfter: string
     words: WordItem[]
-    // Layout
     textAlign: "left" | "center" | "right"
-    // Typography
     font: {
         fontFamily: string
         fontSize: number
@@ -22,7 +19,6 @@ interface Props {
         letterSpacing: number | string
     }
     textColor: string
-    // Style
     highlightMode: "none" | "solid" | "pill"
     highlightColor: string
     pillColor: string
@@ -32,7 +28,6 @@ interface Props {
     animatePillWidth: boolean
     verticalOffset: number
     wordGap: number
-    // Advanced
     stepDuration: number
     inDuration: number
     outDuration: number
@@ -43,6 +38,10 @@ const defaultWords: WordItem[] = [
     { text: "dynamic" },
     { text: "impactful" },
     { text: "striking" },
+    { text: "modern" },
+    { text: "clean" },
+    { text: "sleek" },
+    { text: "vibrant" },
 ]
 
 export default function AnimatedHighlightText({
@@ -51,8 +50,8 @@ export default function AnimatedHighlightText({
     words = defaultWords,
     textAlign = "center",
     font = {
-        fontFamily: "Inter, system-ui, sans-serif",
-        fontSize: 72,
+        fontFamily: "Inter",
+        fontSize: 56,
         fontWeight: 700,
         lineHeight: 1.1,
         letterSpacing: "-0.02em",
@@ -60,79 +59,58 @@ export default function AnimatedHighlightText({
     textColor = "#1a1a1a",
     highlightMode = "pill",
     highlightColor = "#6366f1",
-    pillColor = "#E8FF47",
-    pillPaddingX = 20,
-    pillPaddingY = 12,
-    pillRadius = 8,
+    pillColor = "#E3FF42",
+    pillPaddingX = 12,
+    pillPaddingY = 6,
+    pillRadius = 4,
     animatePillWidth = true,
-    verticalOffset = 0,
+    verticalOffset = -10,
     wordGap = 8,
     stepDuration = 2.5,
     inDuration = 0.5,
     outDuration = 0.4,
 }: Props) {
-    const validWords = words.filter((w) => w.text?.trim())
-    const wordList = validWords.map((w) => w.text)
+    const wordList = words.filter((w) => w.text?.trim()).map((w) => w.text)
+    if (wordList.length === 0) wordList.push("words")
 
-    // Fallback if no valid words
-    if (wordList.length === 0) {
-        wordList.push("words")
-    }
-
-    // Reduced motion support
     const prefersReducedMotion =
         typeof window !== "undefined" &&
         window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
 
-    const { fontFamily, fontSize, fontWeight, lineHeight, letterSpacing } = font
+    const fontFamily = font?.fontFamily || "Inter"
+    const fontSize = typeof font?.fontSize === "number" ? font.fontSize : 56
+    const fontWeight = font?.fontWeight ?? 700
+    const lineHeight = font?.lineHeight ?? 1.1
+    const letterSpacing = font?.letterSpacing ?? "-0.02em"
 
-    // Find longest word by character length
-    const longestIndex = wordList.length > 0
-        ? wordList.reduce(
-            (maxI, w, i, arr) => (w.length > arr[maxI].length ? i : maxI),
-            0
-        )
-        : 0
+    const longestIndex = wordList.reduce(
+        (maxI, w, i, arr) => (w.length > arr[maxI].length ? i : maxI),
+        0
+    )
 
     const [activeIndex, setActiveIndex] = useState(longestIndex)
-    const [longestWidth, setLongestWidth] = useState<number>(0)
-    const [currentWidth, setCurrentWidth] = useState<number>(0)
-    const longestWordRef = useRef<HTMLSpanElement | null>(null)
+    const [longestWidth, setLongestWidth] = useState(0)
+    const [currentWidth, setCurrentWidth] = useState(0)
     const wordRefs = useRef<(HTMLSpanElement | null)[]>([])
-    const setWordRef = useCallback((index: number) => (el: HTMLSpanElement | null) => {
-        wordRefs.current[index] = el
-    }, [])
 
-    // Measure all words and set initial widths
     useEffect(() => {
         const measure = () => {
-            // Measure longest word
-            if (longestWordRef.current) {
-                const width = longestWordRef.current.getBoundingClientRect().width
-                setLongestWidth(width)
-            }
-            // Measure current (longest) word for initial animated width
-            const currentRef = wordRefs.current[longestIndex]
-            if (currentRef) {
-                setCurrentWidth(currentRef.getBoundingClientRect().width)
-            }
+            const widths = wordRefs.current.map((ref) => ref?.getBoundingClientRect().width ?? 0)
+            setLongestWidth(Math.max(...widths))
+            setCurrentWidth(widths[longestIndex] ?? 0)
         }
         const timer = setTimeout(measure, 50)
         return () => clearTimeout(timer)
     }, [words, font, longestIndex])
 
-    // Rotation timer
     useEffect(() => {
         if (wordList.length <= 1) return
 
         const interval = setInterval(() => {
             setActiveIndex((prev) => {
                 const next = (prev + 1) % wordList.length
-                // Update animated width to next word's width
-                const nextRef = wordRefs.current[next]
-                if (nextRef) {
-                    setCurrentWidth(nextRef.getBoundingClientRect().width)
-                }
+                const nextWidth = wordRefs.current[next]?.getBoundingClientRect().width
+                if (nextWidth) setCurrentWidth(nextWidth)
                 return next
             })
         }, stepDuration * 1000)
@@ -140,49 +118,9 @@ export default function AnimatedHighlightText({
         return () => clearInterval(interval)
     }, [wordList.length, stepDuration])
 
-    const containerStyle: React.CSSProperties = {
-        width: "100%",
-        fontFamily,
-        fontSize,
-        fontWeight: fontWeight as any,
-        lineHeight: lineHeight as any,
-        letterSpacing: letterSpacing as any,
-        color: textColor,
-        textAlign,
-        margin: 0,
-        position: "relative",
-    }
-
-    const wordWrapperStyle: React.CSSProperties = {
-        display: "inline-block",
-        position: "relative",
-        verticalAlign: "middle",
-        marginTop: `${verticalOffset}px`,
-        marginLeft: wordGap,
-        marginRight: wordGap,
-    }
-
-    const innerStyle: React.CSSProperties = {
-        display: "inline-flex",
-        position: "relative",
-        height: "1.3em",
-        overflow: "hidden",
-        verticalAlign: "middle",
-        alignItems: "center",
-    }
-
-    const wordStyle: React.CSSProperties = {
-        display: "block",
-        whiteSpace: "nowrap",
-        position: "absolute",
-        top: "50%",
-        left: 0,
-        transform: "translateY(-50%)",
-    }
-
     const showPill = highlightMode === "pill"
+    const wordColor = showPill ? textColor : highlightMode === "solid" ? highlightColor : textColor
 
-    // Calculate the animated width including padding
     const animatedWidth = showPill && animatePillWidth
         ? currentWidth + pillPaddingX * 2
         : currentWidth
@@ -191,20 +129,23 @@ export default function AnimatedHighlightText({
         ? longestWidth + pillPaddingX * 2
         : longestWidth
 
-    // Determine text color for rotating word
-    const getWordColor = () => {
-        if (showPill) {
-            return textColor // Same as surrounding text for pill mode
-        }
-        if (highlightMode === "solid") {
-            return highlightColor
-        }
-        return textColor
-    }
+    const transition = prefersReducedMotion
+        ? { duration: 0 }
+        : { duration: inDuration, ease: [0.76, 0, 0.24, 1] }
 
     return (
-        <div style={containerStyle} role="text">
-            {/* Measurement spans for all words */}
+        <div
+            style={{
+                width: "100%",
+                fontFamily,
+                fontSize,
+                fontWeight,
+                lineHeight,
+                letterSpacing,
+                color: textColor,
+                textAlign,
+            }}
+        >
             <div
                 aria-hidden="true"
                 style={{
@@ -214,24 +155,26 @@ export default function AnimatedHighlightText({
                     whiteSpace: "nowrap",
                 }}
             >
-                <span ref={longestWordRef}>{wordList[longestIndex]}</span>
                 {wordList.map((word, i) => (
-                    <span
-                        key={i}
-                        ref={setWordRef(i)}
-                    >
+                    <span key={i} ref={(el) => (wordRefs.current[i] = el)}>
                         {word}
                     </span>
                 ))}
             </div>
 
-            {/* Wrapper for textBefore */}
             {textBefore?.trim() && <span>{textBefore} </span>}
 
-            {/* Wrapper for rotating word + textAfter */}
             <span>
-                <span style={wordWrapperStyle}>
-                    {/* Pill Background */}
+                <span
+                    style={{
+                        display: "inline-block",
+                        position: "relative",
+                        verticalAlign: "middle",
+                        marginTop: `${verticalOffset}px`,
+                        marginLeft: `${wordGap}px`,
+                        marginRight: `${wordGap}px`,
+                    }}
+                >
                     {showPill && (
                         <motion.span
                             aria-hidden="true"
@@ -244,57 +187,46 @@ export default function AnimatedHighlightText({
                                 backgroundColor: pillColor,
                                 transform: "translate(-50%, -50%)",
                             }}
-                            animate={{
-                                width: animatedWidth > 0 ? animatedWidth : longestWidthWithPadding,
-                            }}
-                            transition={prefersReducedMotion ? { duration: 0 } : {
-                                duration: inDuration,
-                                ease: [0.76, 0, 0.24, 1],
-                            }}
+                            animate={{ width: animatedWidth > 0 ? animatedWidth : longestWidthWithPadding }}
+                            transition={transition}
                         />
                     )}
 
                     <motion.span
                         style={{
-                            ...innerStyle,
+                            display: "inline-flex",
+                            position: "relative",
+                            height: "1.3em",
+                            overflow: "hidden",
+                            verticalAlign: "middle",
+                            alignItems: "center",
                             paddingLeft: showPill ? pillPaddingX : 0,
                             paddingRight: showPill ? pillPaddingX : 0,
                         }}
-                        animate={{
-                            width: currentWidth > 0 ? currentWidth : longestWidth,
-                        }}
-                        transition={prefersReducedMotion ? { duration: 0 } : {
-                            duration: inDuration,
-                            ease: [0.76, 0, 0.24, 1],
-                        }}
+                        animate={{ width: currentWidth > 0 ? currentWidth : longestWidth }}
+                        transition={transition}
                     >
                         <AnimatePresence mode="popLayout" initial={false}>
                             <motion.span
                                 key={activeIndex}
                                 style={{
-                                    ...wordStyle,
-                                    color: getWordColor(),
+                                    display: "block",
+                                    whiteSpace: "nowrap",
+                                    position: "absolute",
+                                    top: "50%",
+                                    left: 0,
+                                    transform: "translateY(-50%)",
+                                    color: wordColor,
                                 }}
                                 initial={{ y: "120%", opacity: 0 }}
                                 animate={{ y: "-50%", opacity: 1 }}
                                 exit={{ y: "-220%", opacity: 0 }}
                                 transition={prefersReducedMotion ? { duration: 0 } : {
-                                    y: {
-                                        duration: inDuration,
-                                        ease: [0.76, 0, 0.24, 1],
-                                    },
-                                    opacity: {
-                                        duration: outDuration,
-                                        ease: [0.76, 0, 0.24, 1],
-                                    },
+                                    y: { duration: inDuration, ease: [0.76, 0, 0.24, 1] },
+                                    opacity: { duration: outDuration, ease: [0.76, 0, 0.24, 1] },
                                 }}
                             >
-                                <span aria-live="polite" className="sr-only">
-                                    {wordList[activeIndex]}
-                                </span>
-                                <span aria-hidden="true">
-                                    {wordList[activeIndex]}
-                                </span>
+                                {wordList[activeIndex] || ""}
                             </motion.span>
                         </AnimatePresence>
                     </motion.span>
@@ -307,7 +239,6 @@ export default function AnimatedHighlightText({
 }
 
 addPropertyControls(AnimatedHighlightText, {
-    // ─── Content ───
     textBefore: {
         type: ControlType.String,
         title: "Before",
@@ -322,6 +253,10 @@ addPropertyControls(AnimatedHighlightText, {
             { text: "dynamic" },
             { text: "impactful" },
             { text: "striking" },
+            { text: "modern" },
+            { text: "clean" },
+            { text: "sleek" },
+            { text: "vibrant" },
         ],
         control: {
             type: ControlType.Object,
@@ -337,8 +272,6 @@ addPropertyControls(AnimatedHighlightText, {
         displayTextArea: true,
         placeholder: "Text after rotating word",
     },
-
-    // ─── Layout ───
     textAlign: {
         type: ControlType.Enum,
         title: "Align",
@@ -346,12 +279,17 @@ addPropertyControls(AnimatedHighlightText, {
         options: ["left", "center", "right"],
         optionTitles: ["Left", "Center", "Right"],
     },
-
-    // ─── Style ───
     font: {
         type: ControlType.Font,
         title: "Font",
         controls: "extended",
+        defaultValue: {
+            fontFamily: "Inter",
+            fontSize: 56,
+            fontWeight: 700,
+            lineHeight: 1.1,
+            letterSpacing: "-0.02em",
+        },
     },
     textColor: {
         type: ControlType.Color,
@@ -374,13 +312,13 @@ addPropertyControls(AnimatedHighlightText, {
     pillColor: {
         type: ControlType.Color,
         title: "Pill",
-        defaultValue: "#E8FF47",
+        defaultValue: "#E3FF42",
         hidden: (props) => props.highlightMode !== "pill",
     },
     pillPaddingX: {
         type: ControlType.Number,
         title: "Pad X",
-        defaultValue: 20,
+        defaultValue: 12,
         min: 0,
         max: 60,
         step: 4,
@@ -390,7 +328,7 @@ addPropertyControls(AnimatedHighlightText, {
     pillPaddingY: {
         type: ControlType.Number,
         title: "Pad Y",
-        defaultValue: 12,
+        defaultValue: 6,
         min: 0,
         max: 40,
         step: 4,
@@ -400,7 +338,7 @@ addPropertyControls(AnimatedHighlightText, {
     pillRadius: {
         type: ControlType.Number,
         title: "Radius",
-        defaultValue: 8,
+        defaultValue: 4,
         min: 0,
         max: 100,
         unit: "px",
@@ -416,7 +354,7 @@ addPropertyControls(AnimatedHighlightText, {
     verticalOffset: {
         type: ControlType.Number,
         title: "Offset Y",
-        defaultValue: 0,
+        defaultValue: -10,
         min: -20,
         max: 20,
         step: 1,
@@ -431,8 +369,6 @@ addPropertyControls(AnimatedHighlightText, {
         step: 2,
         displayStepper: true,
     },
-
-    // ─── Advanced ───
     stepDuration: {
         type: ControlType.Number,
         title: "Interval",
