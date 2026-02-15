@@ -52,11 +52,6 @@ function FluidPixelText(props: Props) {
   )
   const layoutRef = useRef({ pad: 0, imgW: 0, imgH: 0 })
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const isAnimatingRef = useRef(false)
-  const reducedMotionRef = useRef(
-    typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-  )
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(false)
   const [dims, setDims] = useState({ w: 0, h: 0, cssW: 0, cssH: 0, cssPad: 0 })
@@ -238,17 +233,6 @@ function FluidPixelText(props: Props) {
     }
   }, [])
 
-  // Start or resume the animation loop
-  const startLoop = useCallback(() => {
-    if (isAnimatingRef.current || reducedMotionRef.current) return
-    isAnimatingRef.current = true
-    rafRef.current = requestAnimationFrame(loop)
-  }, [])
-
-  // Keep startLoop pointing at latest loop without re-triggering effects
-  const startLoopRef = useRef(startLoop)
-  startLoopRef.current = startLoop
-
   // Animation loop
   const loop = useCallback(() => {
     const c = canvasRef.current
@@ -272,8 +256,6 @@ function FluidPixelText(props: Props) {
     const scaledRadius = dispersionRadius * dpr
     const scaledStrength = repulsionStrength * dpr
     const maxVel = scaledRadius * 0.5
-
-    let settled = true
 
     // Physics
     particlesRef.current.forEach((p) => {
@@ -318,10 +300,6 @@ function FluidPixelText(props: Props) {
         ctx.clearRect(p.originX, p.originY, p.size, p.size)
       }
 
-      // Check if this particle is still moving
-      if (drift > 0.3 || Math.abs(p.vx) + Math.abs(p.vy) > 0.1) {
-        settled = false
-      }
     })
 
     // Draw displaced particles + smear trails
@@ -351,35 +329,16 @@ function FluidPixelText(props: Props) {
       }
     })
 
-    // Stop loop when all particles have settled (saves CPU/battery)
-    if (settled) {
-      isAnimatingRef.current = false
-      return
-    }
-
     rafRef.current = requestAnimationFrame(loop)
   }, [dispersionRadius, returnSpeed, friction, repulsionStrength, swirl])
 
-  // Start animation when ready (skipped for reduced motion)
+  // Start animation when ready
   useEffect(() => {
-    if (!loaded || reducedMotionRef.current) return
+    if (!loaded) return
 
-    // Draw the static base image once for reduced-motion or initial frame
-    const c = canvasRef.current
-    const base = cleanCanvasRef.current
-    if (c && base) {
-      const ctx = c.getContext("2d")
-      if (ctx) {
-        const { pad } = layoutRef.current
-        ctx.clearRect(0, 0, c.width, c.height)
-        ctx.drawImage(base, pad, pad)
-      }
-    }
-
-    startLoopRef.current()
+    rafRef.current = requestAnimationFrame(loop)
 
     return () => {
-      isAnimatingRef.current = false
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
   }, [loaded, loop])
@@ -404,8 +363,6 @@ function FluidPixelText(props: Props) {
       vy: prev.vy * smooth + rawVy * (1 - smooth),
     }
 
-    // Wake the loop if it went idle
-    startLoopRef.current()
   }, [])
 
   const onPointerLeave = useCallback(() => {
