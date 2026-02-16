@@ -27,6 +27,8 @@ interface Props {
   friction?: number
   repulsionStrength?: number
   swirl?: number
+  fadeIn?: boolean
+  fadeInDuration?: number
 }
 
 function FluidPixelText(props: Props) {
@@ -38,9 +40,12 @@ function FluidPixelText(props: Props) {
     friction = 0.85,
     repulsionStrength = 4,
     swirl = 0.05,
+    fadeIn = true,
+    fadeInDuration = 0.6,
   } = props
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const particlesRef = useRef<Particle[]>([])
   const mouseRef = useRef({ x: -9999, y: -9999, vx: 0, vy: 0 })
@@ -59,6 +64,13 @@ function FluidPixelText(props: Props) {
   const buildParticles = useCallback(
     (img: HTMLImageElement, containerWidth: number, containerHeight: number) => {
       if (!img.naturalWidth || !img.naturalHeight) return
+
+      // Release previous offscreen canvas bitmap
+      if (cleanCanvasRef.current) {
+        cleanCanvasRef.current.width = 0
+        cleanCanvasRef.current.height = 0
+        cleanCanvasRef.current = null
+      }
 
       const dpr =
         typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1
@@ -215,10 +227,12 @@ function FluidPixelText(props: Props) {
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
+    let cancelled = false
 
     const ro = new ResizeObserver(() => {
       clearTimeout(resizeTimerRef.current)
       resizeTimerRef.current = setTimeout(() => {
+        if (cancelled) return
         const img = imgRef.current
         if (img && img.complete && img.naturalWidth > 0) {
           buildFnRef.current(img, container.clientWidth, container.clientHeight)
@@ -228,6 +242,7 @@ function FluidPixelText(props: Props) {
 
     ro.observe(container)
     return () => {
+      cancelled = true
       ro.disconnect()
       clearTimeout(resizeTimerRef.current)
     }
@@ -238,7 +253,7 @@ function FluidPixelText(props: Props) {
     const c = canvasRef.current
     const base = cleanCanvasRef.current
     if (!c || !base) return
-    const ctx = c.getContext("2d")
+    const ctx = ctxRef.current
     if (!ctx) return
 
     const dpr = dprRef.current
@@ -336,6 +351,7 @@ function FluidPixelText(props: Props) {
   useEffect(() => {
     if (!loaded) return
 
+    ctxRef.current = canvasRef.current?.getContext("2d") ?? null
     rafRef.current = requestAnimationFrame(loop)
 
     return () => {
@@ -382,6 +398,7 @@ function FluidPixelText(props: Props) {
         alignItems: "center",
         justifyContent: "center",
         overflow: "visible",
+        touchAction: "none",
         minHeight: MIN_CONTAINER_HEIGHT,
       }}
     >
@@ -394,23 +411,11 @@ function FluidPixelText(props: Props) {
           height: dims.cssH || "100%",
           margin: dims.cssPad ? -dims.cssPad : 0,
           opacity: loaded ? 1 : 0,
-          transition: "opacity 0.15s ease",
+          transition: fadeIn
+            ? `opacity ${fadeInDuration}s ease`
+            : undefined,
         }}
       />
-
-      {!loaded && !error && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <span style={{ color: "#999", fontSize: 13 }}>Loading...</span>
-        </div>
-      )}
 
       {error && (
         <div
@@ -490,6 +495,21 @@ addPropertyControls(FluidPixelText, {
     max: 0.99,
     step: 0.01,
     description: "Higher = more bounce",
+  },
+  fadeIn: {
+    type: ControlType.Boolean,
+    title: "Fade In",
+    defaultValue: true,
+  },
+  fadeInDuration: {
+    type: ControlType.Number,
+    title: "Fade Duration",
+    defaultValue: 0.6,
+    min: 0.1,
+    max: 2,
+    step: 0.1,
+    unit: "s",
+    hidden: (props: Props) => !props.fadeIn,
   },
 })
 

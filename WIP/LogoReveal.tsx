@@ -1,3 +1,6 @@
+// Logo Reveal
+// @framerSupportedLayoutWidth any-prefer-fixed
+// @framerSupportedLayoutHeight any-prefer-fixed
 import * as React from "react"
 import { useEffect, useRef, useState } from "react"
 import { addPropertyControls, ControlType } from "framer"
@@ -13,8 +16,7 @@ const clipPathMap = {
 const logoSizeMap = {
     S: "8em",
     M: "12em",
-    L: "16em",
-    XL: "20em",
+    L: "18em",
 }
 
 const defaultLogo = `<svg width="100%" viewBox="0 0 252 95" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -65,7 +67,7 @@ function sanitizeSvg(html: string): string {
 interface Props {
     // Content
     logoSvg?: string
-    logoSize?: "S" | "M" | "L" | "XL"
+    logoSize?: "S" | "M" | "L"
     // Style
     variant?: "simple" | "gradient" | "blur"
     backgroundColor?: string
@@ -78,7 +80,7 @@ interface Props {
     showPreview?: boolean
     enableLoop?: boolean
     loopDelay?: number
-    triggerOnScroll?: boolean
+    enableScrollTrigger?: boolean
     scrollThreshold?: number
     duration?: number
     logoFillDirection?: "left" | "right" | "top" | "bottom"
@@ -103,7 +105,7 @@ export default function LogoReveal({
     showPreview = true,
     enableLoop = false,
     loopDelay = 1,
-    triggerOnScroll = false,
+    enableScrollTrigger = false,
     scrollThreshold = 0.5,
     duration = 3,
     logoFillDirection = "left",
@@ -114,7 +116,7 @@ export default function LogoReveal({
     const [key, setKey] = useState(0)
     const [isVisible, setIsVisible] = useState(true)
     const [isExiting, setIsExiting] = useState(false)
-    const [isInView, setIsInView] = useState(!triggerOnScroll)
+    const [isInView, setIsInView] = useState(!enableScrollTrigger)
     const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
     const wrapRef = useRef<HTMLDivElement>(null)
     const bgRef = useRef<HTMLDivElement>(null)
@@ -134,9 +136,9 @@ export default function LogoReveal({
         return () => mediaQuery.removeEventListener("change", handler)
     }, [])
 
-    // Intersection Observer for triggerOnScroll
+    // Intersection Observer for enableScrollTrigger
     useEffect(() => {
-        if (!triggerOnScroll || !wrapRef.current) return
+        if (!enableScrollTrigger || !wrapRef.current) return
 
         const observer = new IntersectionObserver(
             ([entry]) => {
@@ -150,7 +152,7 @@ export default function LogoReveal({
 
         observer.observe(wrapRef.current)
         return () => observer.disconnect()
-    }, [triggerOnScroll, scrollThreshold])
+    }, [enableScrollTrigger, scrollThreshold])
 
     useEffect(() => {
         let loadTimeline: any = null
@@ -311,10 +313,10 @@ export default function LogoReveal({
             aria-busy={!isExiting}
             tabIndex={-1}
             style={{
-                position: triggerOnScroll ? "absolute" : "fixed",
+                position: enableScrollTrigger ? "absolute" : "fixed",
                 inset: 0,
                 width: "100%",
-                height: triggerOnScroll ? "100%" : "100dvh",
+                height: enableScrollTrigger ? "100%" : "100dvh",
                 zIndex: 100,
                 pointerEvents: isExiting ? "none" : "auto",
                 outline: "none",
@@ -408,7 +410,7 @@ LogoReveal.defaultProps = {
     showPreview: true,
     enableLoop: false,
     loopDelay: 1,
-    triggerOnScroll: false,
+    enableScrollTrigger: false,
     scrollThreshold: 0.5,
     duration: 3,
     logoFillDirection: "left",
@@ -428,8 +430,8 @@ addPropertyControls(LogoReveal, {
         type: ControlType.Enum,
         title: "Logo Size",
         defaultValue: "M",
-        options: ["S", "M", "L", "XL"],
-        optionTitles: ["Small", "Medium", "Large", "Extra Large"],
+        options: ["S", "M", "L"],
+        optionTitles: ["Small", "Medium", "Large"],
     },
 
     // Style Group
@@ -485,7 +487,7 @@ addPropertyControls(LogoReveal, {
         enabledTitle: "On",
         disabledTitle: "Off",
     },
-    triggerOnScroll: {
+    enableScrollTrigger: {
         type: ControlType.Boolean,
         title: "Trigger on Scroll",
         defaultValue: false,
@@ -498,7 +500,7 @@ addPropertyControls(LogoReveal, {
         min: 0.1,
         max: 1,
         step: 0.1,
-        hidden: (props: Props) => !props.triggerOnScroll,
+        hidden: (props: Props) => !props.enableScrollTrigger,
     },
     duration: {
         type: ControlType.Number,
