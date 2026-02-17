@@ -135,6 +135,8 @@ const PRESET_PALETTES = {
 /**
  * @framerSupportedLayoutWidth any
  * @framerSupportedLayoutHeight any
+ * @framerIntrinsicWidth 400
+ * @framerIntrinsicHeight 300
  */
 export default function GradientStripsBG(
     props: MultipleGradientBarsBackgroundProps

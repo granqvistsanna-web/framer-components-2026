@@ -11,13 +11,7 @@ interface Props {
     textAfter: string
     words: WordItem[]
     textAlign: "left" | "center" | "right"
-    font: {
-        fontFamily: string
-        fontSize: number
-        fontWeight: number | string
-        lineHeight: number | string
-        letterSpacing: number | string
-    }
+    font: Record<string, any>
     textColor: string
     highlightMode: "none" | "solid" | "pill"
     highlightColor: string
@@ -49,13 +43,7 @@ export default function AnimatedHighlightText({
     textAfter = "text components.",
     words = defaultWords,
     textAlign = "center",
-    font = {
-        fontFamily: "Inter",
-        fontSize: 56,
-        fontWeight: 700,
-        lineHeight: 1.1,
-        letterSpacing: "-0.02em",
-    },
+    font = {} as Record<string, any>,
     textColor = "#1a1a1a",
     highlightMode = "pill",
     highlightColor = "#6366f1",
@@ -76,12 +64,6 @@ export default function AnimatedHighlightText({
     const prefersReducedMotion =
         typeof window !== "undefined" &&
         window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-
-    const fontFamily = font?.fontFamily || "Inter"
-    const fontSize = typeof font?.fontSize === "number" ? font.fontSize : 56
-    const fontWeight = font?.fontWeight ?? 700
-    const lineHeight = font?.lineHeight ?? 1.1
-    const letterSpacing = font?.letterSpacing ?? "-0.02em"
 
     const longestIndex = wordList.reduce(
         (maxI, w, i, arr) => (w.length > arr[maxI].length ? i : maxI),
@@ -121,11 +103,11 @@ export default function AnimatedHighlightText({
     const showPill = highlightMode === "pill"
     const wordColor = showPill ? textColor : highlightMode === "solid" ? highlightColor : textColor
 
-    const animatedWidth = showPill && animatePillWidth
-        ? currentWidth + pillPaddingX * 2
+    const animatedWidth = showPill
+        ? (animatePillWidth ? currentWidth : longestWidth) + pillPaddingX * 2
         : currentWidth
 
-    const longestWidthWithPadding = showPill && animatePillWidth
+    const longestWidthWithPadding = showPill
         ? longestWidth + pillPaddingX * 2
         : longestWidth
 
@@ -137,11 +119,7 @@ export default function AnimatedHighlightText({
         <div
             style={{
                 width: "100%",
-                fontFamily,
-                fontSize,
-                fontWeight,
-                lineHeight,
-                letterSpacing,
+                ...font,
                 color: textColor,
                 textAlign,
             }}
@@ -153,6 +131,7 @@ export default function AnimatedHighlightText({
                     visibility: "hidden",
                     pointerEvents: "none",
                     whiteSpace: "nowrap",
+                    ...font,
                 }}
             >
                 {wordList.map((word, i) => (
@@ -215,7 +194,6 @@ export default function AnimatedHighlightText({
                                     position: "absolute",
                                     top: "50%",
                                     left: 0,
-                                    transform: "translateY(-50%)",
                                     color: wordColor,
                                 }}
                                 initial={{ y: "120%", opacity: 0 }}
@@ -232,7 +210,7 @@ export default function AnimatedHighlightText({
                     </motion.span>
                 </span>
 
-                {textAfter && <> {textAfter}</>}
+                {textAfter?.trim() && <> {textAfter}</>}
             </span>
         </div>
     )
@@ -283,13 +261,6 @@ addPropertyControls(AnimatedHighlightText, {
         type: ControlType.Font,
         title: "Font",
         controls: "extended",
-        defaultValue: {
-            fontFamily: "Inter",
-            fontSize: 56,
-            fontWeight: 700,
-            lineHeight: 1.1,
-            letterSpacing: "-0.02em",
-        },
     },
     textColor: {
         type: ControlType.Color,
