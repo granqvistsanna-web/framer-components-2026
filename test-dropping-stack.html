@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DroppingCardsStack – Standalone Test</title>
 
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+
     <!-- GSAP core + plugins from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.1/dist/gsap.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.1/dist/Draggable.min.js"></script>
@@ -20,8 +25,8 @@
         html, body {
             width: 100%;
             height: 100%;
-            background: #1a1a1a;
-            font-family: system-ui, -apple-system, sans-serif;
+            background: #111110;
+            font-family: 'Instrument Serif', Georgia, serif;
             overflow: hidden;
         }
 
@@ -97,46 +102,67 @@
             box-sizing: border-box;
         }
 
-        .card-top {
+        /* ── Decorative quote mark ── */
+        .card-quote-mark {
+            font-size: 5.4em;
+            line-height: 0.8;
+            opacity: 0.3;
+            user-select: none;
+            margin-top: -0.1em;
+        }
+
+        /* ── Quote text ── */
+        .card-quote {
+            font-style: italic;
+            font-size: 1.8em;
+            font-weight: 400;
+            line-height: 1.35;
+            letter-spacing: -0.01em;
+            flex: 1;
             display: flex;
-            justify-content: space-between;
+            align-items: center;
+            margin: 0;
         }
 
-        .card-image {
-            background-color: rgba(0,0,0,0.1);
-            border-radius: 0.5em;
-            width: 35%;
-            position: relative;
+        /* ── Divider line ── */
+        .card-divider {
+            width: 2em;
+            height: 1px;
+            opacity: 0.3;
+            margin-bottom: 1em;
         }
-        .card-image .aspect {
-            padding-top: 62.5%;
+
+        /* ── Attribution row ── */
+        .card-attribution {
+            display: flex;
+            align-items: center;
+            gap: 0.75em;
         }
-        .card-image img {
+
+        .card-avatar {
+            width: 2.5em;
+            height: 2.5em;
+            border-radius: 50%;
             object-fit: cover;
-            border-radius: inherit;
-            width: 100%;
-            height: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
+            opacity: 0.7;
+            flex-shrink: 0;
         }
 
-        .card-tags {
-            width: 45%;
-        }
-        .card-tags p {
+        .card-name {
+            font-size: 0.9em;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+            font-family: system-ui, -apple-system, sans-serif;
             margin: 0;
-            padding: 0.15em 0;
-            font-size: 1em;
-            line-height: 1.4;
         }
 
-        .card-title {
-            letter-spacing: -0.03em;
-            font-size: 4.75em;
-            font-weight: 600;
-            line-height: 0.9;
-            margin: 0;
+        .card-role {
+            font-size: 0.7em;
+            opacity: 0.4;
+            letter-spacing: 0.08em;
+            margin-top: 0.15em;
+            font-family: system-ui, -apple-system, sans-serif;
+            text-transform: uppercase;
         }
 
         /* ── Controls ── */
@@ -173,12 +199,12 @@
         }
 
         .control-circle.prev-circle {
-            color: #201d1d;
-            background-color: rgba(244, 244, 244, 0.2);
+            color: #1a1c1e;
+            background-color: rgba(212, 207, 200, 0.15);
         }
         .control-circle.next-circle {
-            color: #201d1d;
-            background-color: #f4f4f4;
+            color: #1a1c1e;
+            background-color: #d4cfc8;
         }
 
         /* ── Responsive: Tablet (< 768px) ── */
@@ -207,25 +233,8 @@
                 padding: 2.25em;
             }
 
-            .card-top {
-                flex-direction: column;
-                gap: 0.75em;
-            }
-
-            .card-image {
-                width: 50%;
-            }
-
-            .card-tags {
-                width: 100%;
-            }
-
-            .card-title {
-                font-size: 4em;
-            }
-
-            .card-tags p {
-                font-size: 1em;
+            .card-quote {
+                font-size: 1.5em;
             }
 
             .control-circle {
@@ -251,12 +260,8 @@
                 padding: 1.8em;
             }
 
-            .card-title {
-                font-size: 3.3em;
-            }
-
-            .card-tags p {
-                font-size: 1em;
+            .card-quote {
+                font-size: 1.3em;
             }
 
             .control-circle {
@@ -279,110 +284,107 @@
         <!-- List of cards -->
         <div class="dropping-stack-list" data-dropping-stack-list>
 
-            <!-- Card 1 – Branding & Identity -->
+            <!-- Card 1 – Sarah Chen -->
             <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
-                <div class="card-face" style="color:#201d1d; background-color:#ffc664;">
+                <div class="card-face" style="color:#e8e4df; background-color:#1a1c1e;">
                     <div class="aspect"></div>
                     <div class="content">
-                        <div class="card-top">
-                            <div class="card-image">
-                                <div class="aspect"></div>
-                                <img src="https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/6969fb1c152133800af9cd81_service-1.avif" alt="" loading="lazy">
-                            </div>
-                            <div class="card-tags">
-                                <p>Brand Strategy</p>
-                                <p>Logo Design</p>
-                                <p>Visual Identity</p>
+                        <div class="card-quote-mark" style="color:#c4b5a4;">&ldquo;</div>
+                        <p class="card-quote">The attention to detail transformed our entire brand presence. Every interaction feels intentional.</p>
+                        <div>
+                            <div class="card-divider" style="background-color:#c4b5a4;"></div>
+                            <div class="card-attribution">
+                                <img class="card-avatar" src="https://i.pravatar.cc/150?u=sarah" alt="" loading="lazy" style="border: 1.5px solid #c4b5a4;">
+                                <div>
+                                    <p class="card-name">Sarah Chen</p>
+                                    <div class="card-role">Design Director, Vault Studio</div>
+                                </div>
                             </div>
                         </div>
-                        <div><div class="card-title">Branding &amp; Identity.</div></div>
                     </div>
                 </div>
             </div>
 
-            <!-- Card 2 – Marketing -->
+            <!-- Card 2 – Marcus Webb -->
             <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
-                <div class="card-face" style="color:#201d1d; background-color:#f4f4f4;">
+                <div class="card-face" style="color:#e8e4df; background-color:#1b1e1c;">
                     <div class="aspect"></div>
                     <div class="content">
-                        <div class="card-top">
-                            <div class="card-image">
-                                <div class="aspect"></div>
-                                <img src="https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a00119a186f6eae03811f_service-2.avif" alt="" loading="lazy">
-                            </div>
-                            <div class="card-tags">
-                                <p>Ads Creation</p>
-                                <p>SEO Setup</p>
-                                <p>Email Marketing</p>
-                                <p>Funnel Strategy</p>
-                                <p>Analytics</p>
+                        <div class="card-quote-mark" style="color:#8a9a8e;">&ldquo;</div>
+                        <p class="card-quote">Working with this level of craft is rare. The typography alone elevated our product above competitors.</p>
+                        <div>
+                            <div class="card-divider" style="background-color:#8a9a8e;"></div>
+                            <div class="card-attribution">
+                                <img class="card-avatar" src="https://i.pravatar.cc/150?u=marcus" alt="" loading="lazy" style="border: 1.5px solid #8a9a8e;">
+                                <div>
+                                    <p class="card-name">Marcus Webb</p>
+                                    <div class="card-role">Head of Product, Lumen</div>
+                                </div>
                             </div>
                         </div>
-                        <div><div class="card-title">Marketing.</div></div>
                     </div>
                 </div>
             </div>
 
-            <!-- Card 3 – UX Strategy -->
+            <!-- Card 3 – Ava Lindström -->
             <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
-                <div class="card-face" style="color:#f4f4f4; background-color:#8963eb;">
+                <div class="card-face" style="color:#e8e4df; background-color:#1a1c1f;">
                     <div class="aspect"></div>
                     <div class="content">
-                        <div class="card-top">
-                            <div class="card-image">
-                                <div class="aspect"></div>
-                                <img src="https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a000e473a6fb87e025764_service-3.avif" alt="" loading="lazy">
-                            </div>
-                            <div class="card-tags">
-                                <p>UX audits</p>
-                                <p>Wireframes &amp; Prototypes</p>
-                                <p>User Testing</p>
+                        <div class="card-quote-mark" style="color:#7d8fa1;">&ldquo;</div>
+                        <p class="card-quote">They understood the brief before we finished explaining it. The result was sharper than anything we imagined.</p>
+                        <div>
+                            <div class="card-divider" style="background-color:#7d8fa1;"></div>
+                            <div class="card-attribution">
+                                <img class="card-avatar" src="https://i.pravatar.cc/150?u=ava" alt="" loading="lazy" style="border: 1.5px solid #7d8fa1;">
+                                <div>
+                                    <p class="card-name">Ava Lindström</p>
+                                    <div class="card-role">Creative Lead, Nørth</div>
+                                </div>
                             </div>
                         </div>
-                        <div><div class="card-title">UX Strategy.</div></div>
                     </div>
                 </div>
             </div>
 
-            <!-- Card 4 – Creative Wizard -->
+            <!-- Card 4 – James Okafor -->
             <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
-                <div class="card-face" style="color:#201d1d; background-color:#e4bdf2;">
+                <div class="card-face" style="color:#e8e4df; background-color:#1c1b1a;">
                     <div class="aspect"></div>
                     <div class="content">
-                        <div class="card-top">
-                            <div class="card-image">
-                                <div class="aspect"></div>
-                                <img src="https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a0012a2bbbee1e9a7b23d_service-4.avif" alt="" loading="lazy">
-                            </div>
-                            <div class="card-tags">
-                                <p>Magic Spells</p>
-                                <p>Legendary Status</p>
-                                <p>Creative Powerhouse</p>
-                                <p>Early Adopter</p>
+                        <div class="card-quote-mark" style="color:#a69b91;">&ldquo;</div>
+                        <p class="card-quote">Restraint is the hardest design skill. Every element here earned its place — nothing excess, nothing missing.</p>
+                        <div>
+                            <div class="card-divider" style="background-color:#a69b91;"></div>
+                            <div class="card-attribution">
+                                <img class="card-avatar" src="https://i.pravatar.cc/150?u=james" alt="" loading="lazy" style="border: 1.5px solid #a69b91;">
+                                <div>
+                                    <p class="card-name">James Okafor</p>
+                                    <div class="card-role">Founder, Serif &amp; Co</div>
+                                </div>
                             </div>
                         </div>
-                        <div><div class="card-title">Creative Wizard.</div></div>
                     </div>
                 </div>
             </div>
 
-            <!-- Card 5 – Websites -->
+            <!-- Card 5 – Mia Tanaka -->
             <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
-                <div class="card-face" style="color:#f4f4f4; background-color:#10101f;">
+                <div class="card-face" style="color:#e8e4df; background-color:#151413;">
                     <div class="aspect"></div>
                     <div class="content">
-                        <div class="card-top">
-                            <div class="card-image">
-                                <div class="aspect"></div>
-                                <img src="https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a034ccd0b1a0c5b3af037_service-5.avif" alt="" loading="lazy">
-                            </div>
-                            <div class="card-tags">
-                                <p>Web Design</p>
-                                <p>Webflow Development</p>
-                                <p>Site Operations</p>
+                        <div class="card-quote-mark" style="color:#d4cfc8;">&ldquo;</div>
+                        <p class="card-quote">The kind of work that makes you rethink your own standards. Quietly exceptional.</p>
+                        <div>
+                            <div class="card-divider" style="background-color:#d4cfc8;"></div>
+                            <div class="card-attribution">
+                                <img class="card-avatar" src="https://i.pravatar.cc/150?u=mia" alt="" loading="lazy" style="border: 1.5px solid #d4cfc8;">
+                                <div>
+                                    <p class="card-name">Mia Tanaka</p>
+                                    <div class="card-role">Art Director, Form</div>
+                                </div>
                             </div>
                         </div>
-                        <div><div class="card-title">Websites.</div></div>
                     </div>
                 </div>
             </div>

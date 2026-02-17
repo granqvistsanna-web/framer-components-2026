@@ -133,8 +133,8 @@ const PRESET_PALETTES = {
 } as const
 
 /**
- * @framerSupportedLayoutWidth any
- * @framerSupportedLayoutHeight any
+ * @framerSupportedLayoutWidth any-prefer-fixed
+ * @framerSupportedLayoutHeight any-prefer-fixed
  * @framerIntrinsicWidth 400
  * @framerIntrinsicHeight 300
  */
@@ -600,6 +600,10 @@ export default function GradientStripsBG(
 }
 
 GradientStripsBG.displayName = "Gradient Strips BG"
+GradientStripsBG.defaultProps = {
+    width: 400,
+    height: 300,
+}
 
 addPropertyControls(GradientStripsBG, {
     content: {
@@ -609,8 +613,14 @@ addPropertyControls(GradientStripsBG, {
             stylePreset: {
                 type: ControlType.Enum,
                 title: "Preset",
-                options: ["custom", "soft", "neon", "pink-sunset"],
-                optionTitles: ["Custom", "Soft", "Neon", "Pink Sunset"],
+                options: ["custom", "soft", "neon", "sunset", "pink-sunset"],
+                optionTitles: [
+                    "Custom",
+                    "Soft",
+                    "Neon",
+                    "Sunset",
+                    "Pink Sunset",
+                ],
                 defaultValue: "pink-sunset",
             },
             gradientColors: {

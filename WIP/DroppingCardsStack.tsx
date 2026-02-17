@@ -3,9 +3,11 @@ import { useEffect, useRef, useId, useMemo, useState } from "react"
 import { addPropertyControls, ControlType } from "framer"
 
 interface CardData {
-    title: string
-    tags: string
-    image: string
+    quote: string
+    name: string
+    role: string
+    avatar: string
+    accentColor: string
     bgColor: string
     textColor: string
 }
@@ -13,10 +15,10 @@ interface CardData {
 interface Props {
     cards: CardData[]
     fontSize: number
-    fontFamily: string
+    font: Record<string, any>
     borderRadius: number
     cardPadding: number
-    titleSize: number
+    quoteSize: number
     cardAspectRatio: number
     stackOffsetX: number
     stackOffsetY: number
@@ -42,39 +44,49 @@ type StackAnimState = {
 
 const DEFAULT_CARDS: CardData[] = [
     {
-        title: "Branding & Identity.",
-        tags: "Brand Strategy, Logo Design, Visual Identity",
-        image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/6969fb1c152133800af9cd81_service-1.avif",
-        bgColor: "#ffc664",
-        textColor: "#201d1d",
+        quote: "Lovable helped us go from idea to launched product in a single weekend. It felt like having a senior engineer on call.",
+        name: "Sarah Chen",
+        role: "Design Director, Vault Studio",
+        avatar: "https://i.pravatar.cc/150?u=sarah",
+        accentColor: "#F97066",
+        bgColor: "#faf9f7",
+        textColor: "#1a1a2e",
     },
     {
-        title: "Marketing.",
-        tags: "Ads Creation, SEO Setup, Email Marketing, Funnel Strategy, Analytics",
-        image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a00119a186f6eae03811f_service-2.avif",
-        bgColor: "#f4f4f4",
-        textColor: "#201d1d",
+        quote: "We stopped writing boilerplate and started shipping features. The velocity shift was immediate and dramatic.",
+        name: "Marcus Webb",
+        role: "Head of Product, Lumen",
+        avatar: "https://i.pravatar.cc/150?u=marcus",
+        accentColor: "#D946A8",
+        bgColor: "#f8f7f5",
+        textColor: "#1a1a2e",
     },
     {
-        title: "UX Strategy.",
-        tags: "UX audits, Wireframes & Prototypes, User Testing",
-        image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a000e473a6fb87e025764_service-3.avif",
-        bgColor: "#8963eb",
-        textColor: "#f4f4f4",
+        quote: "I showed my team the prototype and they refused to believe AI built it. That's when I knew we'd found something special.",
+        name: "Ava Lindstr\u00f6m",
+        role: "Creative Lead, N\u00f8rth",
+        avatar: "https://i.pravatar.cc/150?u=ava",
+        accentColor: "#8B5CF6",
+        bgColor: "#f9f8f6",
+        textColor: "#1a1a2e",
     },
     {
-        title: "Creative Wizard.",
-        tags: "Magic Spells, Legendary Status, Creative Powerhouse, Early Adopter",
-        image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a0012a2bbbee1e9a7b23d_service-4.avif",
-        bgColor: "#e4bdf2",
-        textColor: "#201d1d",
+        quote: "Other tools give you code. Lovable gives you a product. There's a world of difference between those two things.",
+        name: "James Okafor",
+        role: "Founder, Serif & Co",
+        avatar: "https://i.pravatar.cc/150?u=james",
+        accentColor: "#6366F1",
+        bgColor: "#f7f6f4",
+        textColor: "#1a1a2e",
     },
     {
-        title: "Websites.",
-        tags: "Web Design, Webflow Development, Site Operations",
-        image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a034ccd0b1a0c5b3af037_service-5.avif",
-        bgColor: "#10101f",
-        textColor: "#f4f4f4",
+        quote: "From the first prompt to production deploy \u2014 the whole experience just felt right. Effortless and intentional.",
+        name: "Mia Tanaka",
+        role: "Art Director, Form",
+        avatar: "https://i.pravatar.cc/150?u=mia",
+        accentColor: "#EC4899",
+        bgColor: "#faf8f6",
+        textColor: "#1a1a2e",
     },
 ]
 
@@ -138,10 +150,10 @@ function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number 
 export default function DroppingCardsStack({
     cards = DEFAULT_CARDS,
     fontSize = 16,
-    fontFamily = "inherit",
+    font = {} as Record<string, any>,
     borderRadius = 1.25,
     cardPadding = 3,
-    titleSize = 4.75,
+    quoteSize = 1.8,
     cardAspectRatio = 62.5,
     stackOffsetX = 7.5,
     stackOffsetY = 7.5,
@@ -150,8 +162,8 @@ export default function DroppingCardsStack({
     dragThreshold = 20,
     showControls = true,
     controlSize = 3,
-    controlBgColor = "#f4f4f4",
-    controlColor = "#201d1d",
+    controlBgColor = "#d4cfc8",
+    controlColor = "#1a1c1e",
     preview = true,
 }: Props) {
     const stackRef = useRef<HTMLDivElement>(null)
@@ -175,18 +187,16 @@ export default function DroppingCardsStack({
 
         return {
             fontSize: isMobile ? fontSize * scale : fontSize,
-            titleSize: isSmall ? titleSize * 0.7 : isMobile ? titleSize * 0.85 : titleSize,
+            quoteSize: isSmall ? quoteSize * 0.75 : isMobile ? quoteSize * 0.85 : quoteSize,
             cardPadding: isSmall ? cardPadding * 0.6 : isMobile ? cardPadding * 0.75 : cardPadding,
             stackOffsetX: isSmall ? stackOffsetX * 0.3 : isMobile ? stackOffsetX * 0.4 : stackOffsetX,
             stackOffsetY: isSmall ? stackOffsetY * 0.3 : isMobile ? stackOffsetY * 0.4 : stackOffsetY,
             controlSize: isMobile ? Math.max(3.5, controlSize) : controlSize,
             cardMaxWidth: "50em",
             stackPaddingLeft: isSmall ? 0.75 : isMobile ? 1 : 0,
-            tagsFontSize: "1em",
             cardAspectRatio: isMobile ? Math.max(cardAspectRatio, 120) : cardAspectRatio,
-            verticalLayout: isMobile,
         }
-    }, [containerWidth, isMobile, isSmall, fontSize, titleSize, cardPadding, stackOffsetX, stackOffsetY, controlSize, cardAspectRatio])
+    }, [containerWidth, isMobile, isSmall, fontSize, quoteSize, cardPadding, stackOffsetX, stackOffsetY, controlSize, cardAspectRatio])
 
     const displayCards = useMemo(() => {
         if (!cards || cards.length === 0) return []
@@ -730,7 +740,7 @@ export default function DroppingCardsStack({
         responsive.stackOffsetY,
     ])
 
-    const resolvedFont = fontFamily || "inherit"
+    const fontStyle = { fontFamily: "Georgia, 'Times New Roman', serif", ...font }
 
     if (!preview) return null
 
@@ -743,7 +753,7 @@ export default function DroppingCardsStack({
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontFamily: resolvedFont,
+                    ...fontStyle,
                     fontSize: `${responsive.fontSize}px`,
                     color: "#999",
                 }}
@@ -765,7 +775,7 @@ export default function DroppingCardsStack({
                 justifyContent: "center",
                 gap: isMobile ? "1.25em" : "2em",
                 fontSize: `${responsive.fontSize}px`,
-                fontFamily: resolvedFont,
+                ...fontStyle,
                 boxSizing: "border-box",
             }}
         >
@@ -820,8 +830,22 @@ export default function DroppingCardsStack({
                                     margin: "0 auto",
                                     position: "relative",
                                     overflow: "hidden",
+                                    boxShadow: "0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06), inset 0 0.5px 0 0 rgba(255,255,255,0.8)",
+                                    border: "1px solid rgba(0,0,0,0.06)",
                                 }}
                             >
+                                {/* Gradient accent bar */}
+                                <div
+                                    style={{
+                                        position: "absolute",
+                                        top: 0,
+                                        left: 0,
+                                        right: 0,
+                                        height: "3px",
+                                        background: `linear-gradient(90deg, ${card.accentColor}, ${card.accentColor}88 40%, transparent)`,
+                                        zIndex: 1,
+                                    }}
+                                />
                                 {/* Aspect ratio spacer */}
                                 <div
                                     style={{
@@ -833,8 +857,7 @@ export default function DroppingCardsStack({
                                     style={{
                                         display: "flex",
                                         flexDirection: "column",
-                                        justifyContent:
-                                            "space-between",
+                                        justifyContent: "space-between",
                                         width: "100%",
                                         height: "100%",
                                         padding: `${responsive.cardPadding}em`,
@@ -844,97 +867,78 @@ export default function DroppingCardsStack({
                                         boxSizing: "border-box",
                                     }}
                                 >
-                                    {/* Start: image + tags */}
+                                    {/* Quote text */}
                                     <div
                                         style={{
+                                            fontSize: `${responsive.quoteSize}em`,
+                                            ...fontStyle,
+                                            fontWeight: 400,
+                                            lineHeight: 1.4,
+                                            letterSpacing: "-0.015em",
+                                            flex: 1,
                                             display: "flex",
-                                            flexDirection: responsive.verticalLayout ? "column" : "row",
-                                            justifyContent: responsive.verticalLayout ? "flex-start" : "space-between",
-                                            gap: responsive.verticalLayout ? "0.75em" : undefined,
+                                            alignItems: "center",
                                         }}
                                     >
-                                        {/* Visual / image */}
-                                        <div
-                                            style={{
-                                                backgroundColor:
-                                                    "rgba(0,0,0,0.1)",
-                                                borderRadius:
-                                                    "0.5em",
-                                                width: responsive.verticalLayout ? "50%" : "35%",
-                                                position:
-                                                    "relative",
-                                            }}
-                                        >
-                                            <div
-                                                style={{
-                                                    paddingTop:
-                                                        "62.5%",
-                                                }}
-                                            />
-                                            {card.image && (
-                                                <img
-                                                    src={card.image}
-                                                    alt=""
-                                                    loading="lazy"
-                                                    style={{
-                                                        objectFit:
-                                                            "cover",
-                                                        borderRadius:
-                                                            "inherit",
-                                                        width: "100%",
-                                                        height: "100%",
-                                                        position:
-                                                            "absolute",
-                                                        top: 0,
-                                                        left: 0,
-                                                    }}
-                                                />
-                                            )}
-                                        </div>
-                                        {/* Tags */}
-                                        <div
-                                            style={{ width: responsive.verticalLayout ? "100%" : "45%" }}
-                                        >
-                                            {(card.tags || "")
-                                                .split(",")
-                                                .filter(Boolean)
-                                                .map(
-                                                    (
-                                                        tag: string,
-                                                        j: number
-                                                    ) => (
-                                                        <p
-                                                            key={j}
-                                                            style={{
-                                                                margin: 0,
-                                                                padding:
-                                                                    "0.15em 0",
-                                                                fontSize:
-                                                                    responsive.tagsFontSize,
-                                                                lineHeight: 1.4,
-                                                            }}
-                                                        >
-                                                            {tag.trim()}
-                                                        </p>
-                                                    )
-                                                )}
-                                        </div>
+                                        {card.quote}
                                     </div>
-                                    {/* End: title */}
-                                    <div
-                                        style={{ display: "flex" }}
-                                    >
+                                    {/* Attribution */}
+                                    <div>
                                         <div
                                             style={{
-                                                letterSpacing:
-                                                    "-0.03em",
-                                                fontSize: `${responsive.titleSize}em`,
-                                                fontWeight: 600,
-                                                lineHeight: 0.9,
-                                                margin: 0,
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: "0.75em",
                                             }}
                                         >
-                                            {card.title}
+                                            {card.avatar && (
+                                                <div style={{
+                                                    width: "2.75em",
+                                                    height: "2.75em",
+                                                    borderRadius: "50%",
+                                                    background: `linear-gradient(135deg, #F97066, #D946A8, #8B5CF6)`,
+                                                    padding: "2px",
+                                                    flexShrink: 0,
+                                                }}>
+                                                    <img
+                                                        src={card.avatar}
+                                                        alt=""
+                                                        loading="lazy"
+                                                        style={{
+                                                            width: "100%",
+                                                            height: "100%",
+                                                            borderRadius: "50%",
+                                                            objectFit: "cover",
+                                                            display: "block",
+                                                        }}
+                                                    />
+                                                </div>
+                                            )}
+                                            <div>
+                                                <div
+                                                    style={{
+                                                        fontSize: "0.9em",
+                                                        fontWeight: 600,
+                                                        letterSpacing: "-0.01em",
+                                                        fontFamily:
+                                                            "system-ui, -apple-system, sans-serif",
+                                                    }}
+                                                >
+                                                    {card.name}
+                                                </div>
+                                                <div
+                                                    style={{
+                                                        fontSize: "0.75em",
+                                                        opacity: 0.5,
+                                                        letterSpacing: "0.01em",
+                                                        marginTop: "0.15em",
+                                                        fontFamily:
+                                                            "system-ui, -apple-system, sans-serif",
+                                                    }}
+                                                >
+                                                    {card.role}
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1089,77 +1093,95 @@ addPropertyControls(DroppingCardsStack, {
         control: {
             type: ControlType.Object,
             controls: {
-                title: {
+                quote: {
                     type: ControlType.String,
-                    title: "Title",
-                    defaultValue: "Title.",
+                    title: "Quote",
+                    defaultValue: "Add your testimonial here.",
                 },
-                tags: {
+                name: {
                     type: ControlType.String,
-                    title: "Tags",
-                    defaultValue: "Tag 1, Tag 2, Tag 3",
+                    title: "Name",
+                    defaultValue: "Full Name",
                 },
-                image: {
+                role: {
                     type: ControlType.String,
-                    title: "Image URL",
+                    title: "Role",
+                    defaultValue: "Title, Company",
+                },
+                avatar: {
+                    type: ControlType.String,
+                    title: "Avatar URL",
                     defaultValue: "",
+                },
+                accentColor: {
+                    type: ControlType.Color,
+                    title: "Accent",
+                    defaultValue: "#c4b5a4",
                 },
                 bgColor: {
                     type: ControlType.Color,
                     title: "Background",
-                    defaultValue: "#ffc664",
+                    defaultValue: "#1a1c1e",
                 },
                 textColor: {
                     type: ControlType.Color,
                     title: "Text Color",
-                    defaultValue: "#201d1d",
+                    defaultValue: "#e8e4df",
                 },
             },
         },
         defaultValue: [
             {
-                title: "Branding & Identity.",
-                tags: "Brand Strategy, Logo Design, Visual Identity",
-                image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/6969fb1c152133800af9cd81_service-1.avif",
-                bgColor: "#ffc664",
-                textColor: "#201d1d",
+                quote: "The attention to detail transformed our entire brand presence. Every interaction feels intentional.",
+                name: "Sarah Chen",
+                role: "Design Director, Vault Studio",
+                avatar: "https://i.pravatar.cc/150?u=sarah",
+                accentColor: "#c4b5a4",
+                bgColor: "#1a1c1e",
+                textColor: "#e8e4df",
             },
             {
-                title: "Marketing.",
-                tags: "Ads Creation, SEO Setup, Email Marketing, Funnel Strategy, Analytics",
-                image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a00119a186f6eae03811f_service-2.avif",
-                bgColor: "#f4f4f4",
-                textColor: "#201d1d",
+                quote: "Working with this level of craft is rare. The typography alone elevated our product above competitors.",
+                name: "Marcus Webb",
+                role: "Head of Product, Lumen",
+                avatar: "https://i.pravatar.cc/150?u=marcus",
+                accentColor: "#8a9a8e",
+                bgColor: "#1b1e1c",
+                textColor: "#e8e4df",
             },
             {
-                title: "UX Strategy.",
-                tags: "UX audits, Wireframes & Prototypes, User Testing",
-                image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a000e473a6fb87e025764_service-3.avif",
-                bgColor: "#8963eb",
-                textColor: "#f4f4f4",
+                quote: "They understood the brief before we finished explaining it. The result was sharper than anything we imagined.",
+                name: "Ava Lindström",
+                role: "Creative Lead, Nørth",
+                avatar: "https://i.pravatar.cc/150?u=ava",
+                accentColor: "#7d8fa1",
+                bgColor: "#1a1c1f",
+                textColor: "#e8e4df",
             },
             {
-                title: "Creative Wizard.",
-                tags: "Magic Spells, Legendary Status, Creative Powerhouse, Early Adopter",
-                image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a0012a2bbbee1e9a7b23d_service-4.avif",
-                bgColor: "#e4bdf2",
-                textColor: "#201d1d",
+                quote: "Restraint is the hardest design skill. Every element here earned its place — nothing excess, nothing missing.",
+                name: "James Okafor",
+                role: "Founder, Serif & Co",
+                avatar: "https://i.pravatar.cc/150?u=james",
+                accentColor: "#a69b91",
+                bgColor: "#1c1b1a",
+                textColor: "#e8e4df",
             },
             {
-                title: "Websites.",
-                tags: "Web Design, Webflow Development, Site Operations",
-                image: "https://cdn.prod.website-files.com/6969f795b8c9b9bba545e75b/696a034ccd0b1a0c5b3af037_service-5.avif",
-                bgColor: "#10101f",
-                textColor: "#f4f4f4",
+                quote: "The kind of work that makes you rethink your own standards. Quietly exceptional.",
+                name: "Mia Tanaka",
+                role: "Art Director, Form",
+                avatar: "https://i.pravatar.cc/150?u=mia",
+                accentColor: "#d4cfc8",
+                bgColor: "#151413",
+                textColor: "#e8e4df",
             },
         ],
     },
-    fontFamily: {
-        type: ControlType.String,
+    font: {
+        type: ControlType.Font,
         title: "Font",
-        defaultValue: "inherit",
-        placeholder: "e.g. Inter, sans-serif",
-        description: "CSS font-family value. Use \"inherit\" for parent font.",
+        controls: "extended",
     },
     fontSize: {
         type: ControlType.Number,
@@ -1171,13 +1193,13 @@ addPropertyControls(DroppingCardsStack, {
         unit: "px",
         description: "Base font size — all em values scale from this",
     },
-    titleSize: {
+    quoteSize: {
         type: ControlType.Number,
-        title: "Title Size",
-        defaultValue: 4.75,
-        min: 1,
-        max: 10,
-        step: 0.25,
+        title: "Quote Size",
+        defaultValue: 1.8,
+        min: 0.8,
+        max: 4,
+        step: 0.1,
         unit: "em",
     },
     borderRadius: {
@@ -1271,13 +1293,13 @@ addPropertyControls(DroppingCardsStack, {
     controlBgColor: {
         type: ControlType.Color,
         title: "Control Background",
-        defaultValue: "#f4f4f4",
+        defaultValue: "#d4cfc8",
         hidden: (props: Props) => !props.showControls,
     },
     controlColor: {
         type: ControlType.Color,
         title: "Control Icon Color",
-        defaultValue: "#201d1d",
+        defaultValue: "#1a1c1e",
         hidden: (props: Props) => !props.showControls,
     },
 })

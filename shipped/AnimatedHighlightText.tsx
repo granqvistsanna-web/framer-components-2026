@@ -58,6 +58,8 @@ export default function AnimatedHighlightText({
     inDuration = 0.5,
     outDuration = 0.4,
 }: Props) {
+    const fontStyle = { fontSize: 48, fontWeight: 700, lineHeight: "1.2", ...font }
+
     const wordList = words.filter((w) => w.text?.trim()).map((w) => w.text)
     if (wordList.length === 0) wordList.push("words")
 
@@ -119,7 +121,7 @@ export default function AnimatedHighlightText({
         <div
             style={{
                 width: "100%",
-                ...font,
+                ...fontStyle,
                 color: textColor,
                 textAlign,
             }}
@@ -131,7 +133,7 @@ export default function AnimatedHighlightText({
                     visibility: "hidden",
                     pointerEvents: "none",
                     whiteSpace: "nowrap",
-                    ...font,
+                    ...fontStyle,
                 }}
             >
                 {wordList.map((word, i) => (
