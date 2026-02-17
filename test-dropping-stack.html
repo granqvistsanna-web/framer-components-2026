@@ -3,14 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DroppingCardsStack – Standalone Test</title>
+    <title>DraggableCardStack – Generic Wrapper Test</title>
 
-    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
 
-    <!-- GSAP core + plugins from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.1/dist/gsap.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.1/dist/Draggable.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.1/dist/CustomEase.min.js"></script>
@@ -25,8 +23,8 @@
         html, body {
             width: 100%;
             height: 100%;
-            background: #111110;
-            font-family: 'Instrument Serif', Georgia, serif;
+            background: #f0eeeb;
+            font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
             overflow: hidden;
         }
 
@@ -59,11 +57,14 @@
             position: relative;
         }
 
-        /* ── Individual card wrapper ── */
+        /* ── Individual card wrapper (generic — no card-specific styles) ── */
         .dropping-stack-item {
             will-change: transform, opacity;
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
             user-select: none;
             -webkit-user-select: none;
+            -webkit-touch-callout: none;
             width: 100%;
             display: flex;
             justify-content: center;
@@ -75,21 +76,23 @@
             position: absolute;
         }
 
-        /* ── Card face ── */
-        .card-face {
+        /* ── User-designed card (this is what users would build themselves) ── */
+        .user-card {
             border-radius: 1.25em;
             width: 100%;
             max-width: 50em;
             margin: 0 auto;
             position: relative;
             overflow: hidden;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06), inset 0 0.5px 0 0 rgba(255,255,255,0.8);
+            border: 1px solid rgba(0,0,0,0.06);
         }
 
-        .card-face .aspect {
-            padding-top: 62.5%;     /* 16:10 ratio */
+        .user-card .aspect {
+            padding-top: 62.5%;
         }
 
-        .card-face .content {
+        .user-card .content {
             display: flex;
             flex-direction: column;
             justify-content: space-between;
@@ -102,67 +105,64 @@
             box-sizing: border-box;
         }
 
-        /* ── Decorative quote mark ── */
-        .card-quote-mark {
-            font-size: 5.4em;
-            line-height: 0.8;
-            opacity: 0.3;
-            user-select: none;
-            margin-top: -0.1em;
-        }
-
-        /* ── Quote text ── */
-        .card-quote {
-            font-style: italic;
+        .user-card .quote {
             font-size: 1.8em;
             font-weight: 400;
-            line-height: 1.35;
-            letter-spacing: -0.01em;
+            line-height: 1.4;
+            letter-spacing: -0.015em;
             flex: 1;
             display: flex;
             align-items: center;
-            margin: 0;
         }
 
-        /* ── Divider line ── */
-        .card-divider {
-            width: 2em;
-            height: 1px;
-            opacity: 0.3;
-            margin-bottom: 1em;
-        }
-
-        /* ── Attribution row ── */
-        .card-attribution {
+        .user-card .attribution {
             display: flex;
             align-items: center;
             gap: 0.75em;
         }
 
-        .card-avatar {
-            width: 2.5em;
-            height: 2.5em;
+        .user-card .avatar-ring {
+            width: 2.75em;
+            height: 2.75em;
             border-radius: 50%;
-            object-fit: cover;
-            opacity: 0.7;
+            background: linear-gradient(135deg, #F97066, #D946A8, #8B5CF6);
+            padding: 2px;
             flex-shrink: 0;
         }
 
-        .card-name {
-            font-size: 0.9em;
-            font-weight: 500;
-            letter-spacing: 0.02em;
-            font-family: system-ui, -apple-system, sans-serif;
-            margin: 0;
+        .user-card .avatar-ring img {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+            display: block;
         }
 
-        .card-role {
-            font-size: 0.7em;
+        .user-card .name {
+            font-size: 0.9em;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+        }
+
+        .user-card .role {
+            font-size: 0.75em;
             opacity: 0.4;
-            letter-spacing: 0.08em;
+            letter-spacing: 0.01em;
             margin-top: 0.15em;
-            font-family: system-ui, -apple-system, sans-serif;
-            text-transform: uppercase;
+        }
+
+        .user-card .deco {
+            position: absolute;
+            top: -0.05em;
+            right: 1.65em;
+            font-size: 7em;
+            line-height: 0.85;
+            font-family: Georgia, 'Times New Roman', serif;
+            font-weight: 400;
+            opacity: 0.1;
+            pointer-events: none;
+            user-select: none;
+            z-index: 0;
         }
 
         /* ── Controls ── */
@@ -177,6 +177,8 @@
             background: none;
             border: none;
             padding: 0;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
         .control-btn.prev {
             transform: scaleX(-1);
@@ -195,204 +197,156 @@
             transform: translateY(0em) rotate(0.001deg);
         }
         .control-btn:hover .control-circle {
-            transform: translateY(-0.25em) rotate(0.001deg) !important;
+            transform: translateY(-0.15em) scale(1.05) rotate(0.001deg) !important;
         }
 
         .control-circle.prev-circle {
-            color: #1a1c1e;
-            background-color: rgba(212, 207, 200, 0.15);
+            color: #1a1a2e;
+            background-color: rgba(26,26,46,0.08);
+            opacity: 0.5;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }
         .control-circle.next-circle {
-            color: #1a1c1e;
-            background-color: #d4cfc8;
+            color: #1a1a2e;
+            background-color: #1a1a2e;
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }
 
-        /* ── Responsive: Tablet (< 768px) ── */
+        /* ── Responsive ── */
         @media (max-width: 767px) {
-            .dropping-stack-root {
-                font-size: 14px;
-                gap: 1.25em;
-            }
-
-            .dropping-stack-collection {
-                padding-left: 1em;
-                padding-right: 3em;
-                padding-bottom: 3em;
-            }
-
-            .card-face {
-                width: 100%;
-                max-width: 50em;
-            }
-
-            .card-face > .aspect {
-                padding-top: 120%;
-            }
-
-            .card-face .content {
-                padding: 2.25em;
-            }
-
-            .card-quote {
-                font-size: 1.5em;
-            }
-
-            .control-circle {
-                width: 3.5em;
-                height: 3.5em;
-            }
+            .dropping-stack-root { font-size: 14px; gap: 1.25em; }
+            .dropping-stack-collection { padding-left: 1em; padding-right: 3em; padding-bottom: 3em; }
+            .user-card > .aspect { padding-top: 120%; }
+            .user-card .content { padding: 2.25em; }
+            .user-card .quote { font-size: 1.5em; }
+            .control-circle { width: 3.5em; height: 3.5em; }
         }
 
-        /* ── Responsive: Small mobile (< 480px) ── */
         @media (max-width: 479px) {
-            .dropping-stack-root {
-                font-size: 14px;
-                gap: 1em;
-            }
-
-            .dropping-stack-collection {
-                padding-left: 0.75em;
-                padding-right: 2em;
-                padding-bottom: 2em;
-            }
-
-            .card-face .content {
-                padding: 1.8em;
-            }
-
-            .card-quote {
-                font-size: 1.3em;
-            }
-
-            .control-circle {
-                width: 3.5em;
-                height: 3.5em;
-            }
+            .dropping-stack-root { font-size: 14px; gap: 1em; }
+            .dropping-stack-collection { padding-left: 0.75em; padding-right: 2em; padding-bottom: 2em; }
+            .user-card .content { padding: 1.8em; }
+            .user-card .quote { font-size: 1.3em; }
+            .control-circle { width: 3.5em; height: 3.5em; }
         }
     </style>
 </head>
 <body>
 
-<!-- ────────────────────────────────────────────
-     HTML structure mirrors the React component
-     ──────────────────────────────────────────── -->
+<!--
+    This test simulates the generic DraggableCardStack wrapper.
+    The wrapper only provides: item containers, stack animation, controls.
+    Card design is entirely user-provided (the .user-card elements below).
+-->
 <div class="dropping-stack-root" data-dropping-stack-init>
 
-    <!-- Collection wrapper -->
     <div class="dropping-stack-collection" data-dropping-stack-collection>
-
-        <!-- List of cards -->
         <div class="dropping-stack-list" data-dropping-stack-list>
 
-            <!-- Card 1 – Sarah Chen -->
-            <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
-                <div class="card-face" style="color:#e8e4df; background-color:#1a1c1e;">
+            <!-- User-designed card 1 -->
+            <div class="dropping-stack-item" data-card-item>
+                <div class="user-card" style="color:#1a1a2e; background-color:#faf9f7;">
+                    <div class="deco" style="color:#F97066;">&ldquo;</div>
                     <div class="aspect"></div>
                     <div class="content">
-                        <div class="card-quote-mark" style="color:#c4b5a4;">&ldquo;</div>
-                        <p class="card-quote">The attention to detail transformed our entire brand presence. Every interaction feels intentional.</p>
-                        <div>
-                            <div class="card-divider" style="background-color:#c4b5a4;"></div>
-                            <div class="card-attribution">
-                                <img class="card-avatar" src="https://i.pravatar.cc/150?u=sarah" alt="" loading="lazy" style="border: 1.5px solid #c4b5a4;">
-                                <div>
-                                    <p class="card-name">Sarah Chen</p>
-                                    <div class="card-role">Design Director, Vault Studio</div>
-                                </div>
+                        <p class="quote">This tool helped us go from idea to launched product in a single weekend. It felt like having a senior engineer on call.</p>
+                        <div class="attribution">
+                            <div class="avatar-ring">
+                                <img src="https://i.pravatar.cc/150?u=sarah" alt="" loading="lazy">
+                            </div>
+                            <div>
+                                <p class="name">Sarah Chen</p>
+                                <div class="role">Design Director, Vault Studio</div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Card 2 – Marcus Webb -->
-            <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
-                <div class="card-face" style="color:#e8e4df; background-color:#1b1e1c;">
+            <!-- User-designed card 2 -->
+            <div class="dropping-stack-item" data-card-item>
+                <div class="user-card" style="color:#1a1a2e; background-color:#f8f7f5;">
+                    <div class="deco" style="color:#D946A8;">&ldquo;</div>
                     <div class="aspect"></div>
                     <div class="content">
-                        <div class="card-quote-mark" style="color:#8a9a8e;">&ldquo;</div>
-                        <p class="card-quote">Working with this level of craft is rare. The typography alone elevated our product above competitors.</p>
-                        <div>
-                            <div class="card-divider" style="background-color:#8a9a8e;"></div>
-                            <div class="card-attribution">
-                                <img class="card-avatar" src="https://i.pravatar.cc/150?u=marcus" alt="" loading="lazy" style="border: 1.5px solid #8a9a8e;">
-                                <div>
-                                    <p class="card-name">Marcus Webb</p>
-                                    <div class="card-role">Head of Product, Lumen</div>
-                                </div>
+                        <p class="quote">We stopped writing boilerplate and started shipping features. The velocity shift was immediate and dramatic.</p>
+                        <div class="attribution">
+                            <div class="avatar-ring">
+                                <img src="https://i.pravatar.cc/150?u=marcus" alt="" loading="lazy">
+                            </div>
+                            <div>
+                                <p class="name">Marcus Webb</p>
+                                <div class="role">Head of Product, Lumen</div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Card 3 – Ava Lindström -->
-            <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
-                <div class="card-face" style="color:#e8e4df; background-color:#1a1c1f;">
+            <!-- User-designed card 3 -->
+            <div class="dropping-stack-item" data-card-item>
+                <div class="user-card" style="color:#1a1a2e; background-color:#f9f8f6;">
+                    <div class="deco" style="color:#8B5CF6;">&ldquo;</div>
                     <div class="aspect"></div>
                     <div class="content">
-                        <div class="card-quote-mark" style="color:#7d8fa1;">&ldquo;</div>
-                        <p class="card-quote">They understood the brief before we finished explaining it. The result was sharper than anything we imagined.</p>
-                        <div>
-                            <div class="card-divider" style="background-color:#7d8fa1;"></div>
-                            <div class="card-attribution">
-                                <img class="card-avatar" src="https://i.pravatar.cc/150?u=ava" alt="" loading="lazy" style="border: 1.5px solid #7d8fa1;">
-                                <div>
-                                    <p class="card-name">Ava Lindström</p>
-                                    <div class="card-role">Creative Lead, Nørth</div>
-                                </div>
+                        <p class="quote">I showed my team the prototype and they refused to believe AI built it. That's when I knew we'd found something special.</p>
+                        <div class="attribution">
+                            <div class="avatar-ring">
+                                <img src="https://i.pravatar.cc/150?u=ava" alt="" loading="lazy">
+                            </div>
+                            <div>
+                                <p class="name">Ava Lindstr&ouml;m</p>
+                                <div class="role">Creative Lead, N&oslash;rth</div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Card 4 – James Okafor -->
-            <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
-                <div class="card-face" style="color:#e8e4df; background-color:#1c1b1a;">
+            <!-- User-designed card 4 -->
+            <div class="dropping-stack-item" data-card-item>
+                <div class="user-card" style="color:#1a1a2e; background-color:#f7f6f4;">
+                    <div class="deco" style="color:#6366F1;">&ldquo;</div>
                     <div class="aspect"></div>
                     <div class="content">
-                        <div class="card-quote-mark" style="color:#a69b91;">&ldquo;</div>
-                        <p class="card-quote">Restraint is the hardest design skill. Every element here earned its place — nothing excess, nothing missing.</p>
-                        <div>
-                            <div class="card-divider" style="background-color:#a69b91;"></div>
-                            <div class="card-attribution">
-                                <img class="card-avatar" src="https://i.pravatar.cc/150?u=james" alt="" loading="lazy" style="border: 1.5px solid #a69b91;">
-                                <div>
-                                    <p class="card-name">James Okafor</p>
-                                    <div class="card-role">Founder, Serif &amp; Co</div>
-                                </div>
+                        <p class="quote">Other tools give you code. This gives you a product. There's a world of difference between those two things.</p>
+                        <div class="attribution">
+                            <div class="avatar-ring">
+                                <img src="https://i.pravatar.cc/150?u=james" alt="" loading="lazy">
+                            </div>
+                            <div>
+                                <p class="name">James Okafor</p>
+                                <div class="role">Founder, Serif &amp; Co</div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Card 5 – Mia Tanaka -->
-            <div class="dropping-stack-item" data-dropping-stack-item data-card-item>
-                <div class="card-face" style="color:#e8e4df; background-color:#151413;">
+            <!-- User-designed card 5 -->
+            <div class="dropping-stack-item" data-card-item>
+                <div class="user-card" style="color:#1a1a2e; background-color:#faf8f6;">
+                    <div class="deco" style="color:#EC4899;">&ldquo;</div>
                     <div class="aspect"></div>
                     <div class="content">
-                        <div class="card-quote-mark" style="color:#d4cfc8;">&ldquo;</div>
-                        <p class="card-quote">The kind of work that makes you rethink your own standards. Quietly exceptional.</p>
-                        <div>
-                            <div class="card-divider" style="background-color:#d4cfc8;"></div>
-                            <div class="card-attribution">
-                                <img class="card-avatar" src="https://i.pravatar.cc/150?u=mia" alt="" loading="lazy" style="border: 1.5px solid #d4cfc8;">
-                                <div>
-                                    <p class="card-name">Mia Tanaka</p>
-                                    <div class="card-role">Art Director, Form</div>
-                                </div>
+                        <p class="quote">From the first prompt to production deploy &mdash; the whole experience just felt right. Effortless and intentional.</p>
+                        <div class="attribution">
+                            <div class="avatar-ring">
+                                <img src="https://i.pravatar.cc/150?u=mia" alt="" loading="lazy">
+                            </div>
+                            <div>
+                                <p class="name">Mia Tanaka</p>
+                                <div class="role">Art Director, Form</div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-        </div><!-- /list -->
-    </div><!-- /collection -->
+        </div>
+    </div>
 
-    <!-- Prev / Next controls -->
     <div class="controls">
         <div class="control-btn prev" data-dropping-stack-prev>
             <div class="control-circle prev-circle">
@@ -410,27 +364,20 @@
         </div>
     </div>
 
-</div><!-- /root -->
+</div>
 
-
-<!-- ────────────────────────────────────────────
-     JS – direct port of the React useEffect init
-     ──────────────────────────────────────────── -->
 <script>
-(function initDroppingCardsStack() {
+(function initDraggableCardStack() {
     "use strict";
 
-    // ── Config (mirrors default props) ──
     var visibleCount = 4;
     var duration     = 0.75;
     var dragThreshold = 20;
 
-    // ── Register plugins & custom ease ──
     gsap.registerPlugin(Draggable, CustomEase);
     try { CustomEase.create("stackEase", "0.625, 0.05, 0, 1"); } catch (_) {}
     var mainEase = "stackEase";
 
-    // ── DOM references ──
     var stackEl      = document.querySelector("[data-dropping-stack-init]");
     var collectionEl = document.querySelector("[data-dropping-stack-collection]");
     var listEl       = document.querySelector("[data-dropping-stack-list]");
@@ -440,7 +387,6 @@
     var cardElements = Array.from(listEl.querySelectorAll("[data-card-item]"));
     var total        = cardElements.length;
 
-    // ── State ──
     var activeIndex = 0;
     var isAnimating = false;
     var isActive    = true;
@@ -451,7 +397,6 @@
     var offsetY     = "0px";
     var currentDraggable = null;
 
-    // ── Helpers ──
     function mod(n, m) { return ((n % m) + m) % m; }
     function cardAt(offset) { return cardElements[mod(activeIndex + offset, total)]; }
 
@@ -485,7 +430,6 @@
         limitY = rect.height || 1;
     }
 
-    // ── Apply visual state (positions, z-index, draggable) ──
     function applyState() {
         updateOffsetsFromPadding();
 
@@ -557,7 +501,6 @@
         })[0];
     }
 
-    // ── Animate to next card ──
     function animateNext(fromDrag, releaseX, releaseY) {
         if (isAnimating) return;
         isAnimating = true;
@@ -615,7 +558,6 @@
         tl.to(incomingBack, inTo, 0);
     }
 
-    // ── Animate to previous card ──
     function animatePrev() {
         if (isAnimating) return;
         isAnimating = true;
@@ -659,11 +601,9 @@
         tl.to(leavingBack, hideBack, 0);
     }
 
-    // ── Button controls ──
     prevBtn.addEventListener("click", function() { animatePrev(); });
     nextBtn.addEventListener("click", function() { animateNext(false); });
 
-    // ── Keyboard controls ──
     var observer = new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
             isActive = entry.isIntersecting && entry.intersectionRatio >= 0.6;
@@ -680,10 +620,8 @@
         if (e.key === "ArrowLeft")  { e.preventDefault(); animatePrev(); }
     });
 
-    // ── Resize handler ──
     window.addEventListener("resize", function() { applyState(); });
 
-    // ── Kick off ──
     applyState();
 })();
 </script>

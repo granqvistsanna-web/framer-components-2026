@@ -49,6 +49,36 @@ interface VerticalGridLinesProps {
     style?: React.CSSProperties
 }
 
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value))
+}
+
+function normalizeRange(min: number, max: number): [number, number] {
+    return min <= max ? [min, max] : [max, min]
+}
+
+function usePrefersReducedMotion(): boolean {
+    const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+
+    useEffect(() => {
+        if (typeof window === "undefined" || !window.matchMedia) return
+        const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
+
+        const update = () => setPrefersReducedMotion(mediaQuery.matches)
+        update()
+
+        if (typeof mediaQuery.addEventListener === "function") {
+            mediaQuery.addEventListener("change", update)
+            return () => mediaQuery.removeEventListener("change", update)
+        }
+
+        mediaQuery.addListener(update)
+        return () => mediaQuery.removeListener(update)
+    }, [])
+
+    return prefersReducedMotion
+}
+
 /**
  * Vertical Grid Lines with traveling segments
  *
@@ -97,14 +127,30 @@ export default function VerticalGridLines({
         noiseOpacity = 0.05,
     } = effects ?? {}
 
-    const prefersReducedMotion =
-        typeof window !== "undefined" &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    const [resolvedMinOpacity, resolvedMaxOpacity] = normalizeRange(
+        clamp(segmentMinOpacity, 0, 1),
+        clamp(segmentMaxOpacity, 0, 1)
+    )
+    const [resolvedMinDuration, resolvedMaxDuration] = normalizeRange(
+        Math.max(0.1, minDuration),
+        Math.max(0.1, maxDuration)
+    )
+    const [resolvedMinDelay, resolvedMaxDelay] = normalizeRange(
+        Math.max(0, minDelay),
+        Math.max(0, maxDelay)
+    )
+    const resolvedLineCount = clamp(Math.floor(lineCount), 1, 24)
+    const resolvedLineWidth = Math.max(1, lineWidth)
+    const resolvedSegmentHeight = Math.max(1, segmentHeight)
+    const resolvedGradientMaskHeight = Math.max(0, gradientMaskHeight)
+    const resolvedNoiseOpacity = clamp(noiseOpacity, 0, 1)
+
+    const prefersReducedMotion = usePrefersReducedMotion()
     const shouldAnimate = animate && !prefersReducedMotion
     const noiseFilterId = useId()
 
     const containerRef = useRef<HTMLDivElement>(null)
-    const [containerHeight, setContainerHeight] = useState(1000)
+    const [containerHeight, setContainerHeight] = useState(0)
     const [segmentMap, setSegmentMap] = useState<Map<number, SegmentData>>(
         new Map()
     )
@@ -123,13 +169,17 @@ export default function VerticalGridLines({
         const container = containerRef.current
         if (!container) return
 
-        const updateHeight = () => {
-            setContainerHeight(container.getBoundingClientRect().height)
+        const updateHeight = (height: number) => {
+            setContainerHeight((prev) => (prev === height ? prev : height))
         }
 
-        updateHeight()
+        updateHeight(container.getBoundingClientRect().height)
 
-        const ro = new ResizeObserver(updateHeight)
+        const ro = new ResizeObserver((entries) => {
+            const entry = entries[0]
+            if (!entry) return
+            updateHeight(entry.contentRect.height)
+        })
         ro.observe(container)
 
         return () => ro.disconnect()
@@ -149,10 +199,11 @@ export default function VerticalGridLines({
                 if (prev.has(lineIndex)) return prev
 
                 const opacity =
-                    segmentMinOpacity +
-                    Math.random() * (segmentMaxOpacity - segmentMinOpacity)
+                    resolvedMinOpacity +
+                    Math.random() * (resolvedMaxOpacity - resolvedMinOpacity)
                 const duration =
-                    minDuration + Math.random() * (maxDuration - minDuration)
+                    resolvedMinDuration +
+                    Math.random() * (resolvedMaxDuration - resolvedMinDuration)
                 const jitter = enableJitter ? (Math.random() - 0.5) * 0.4 : 0
                 const resolvedDirection =
                     direction === "random"
@@ -164,7 +215,7 @@ export default function VerticalGridLines({
                 const next = new Map(prev)
                 next.set(lineIndex, {
                     id: `${lineIndex}-${Date.now()}`,
-                    height: segmentHeight,
+                    height: resolvedSegmentHeight,
                     opacity,
                     duration,
                     jitter,
@@ -174,11 +225,11 @@ export default function VerticalGridLines({
             })
         },
         [
-            segmentHeight,
-            segmentMinOpacity,
-            segmentMaxOpacity,
-            minDuration,
-            maxDuration,
+            resolvedSegmentHeight,
+            resolvedMinOpacity,
+            resolvedMaxOpacity,
+            resolvedMinDuration,
+            resolvedMaxDuration,
             enableJitter,
             direction,
         ]
@@ -194,23 +245,27 @@ export default function VerticalGridLines({
 
             if (loop) {
                 const delay =
-                    (minDelay + Math.random() * (maxDelay - minDelay)) * 1000
+                    (resolvedMinDelay +
+                        Math.random() * (resolvedMaxDelay - resolvedMinDelay)) *
+                    1000
                 safeTimeout(() => spawnSegment(lineIndex), delay)
             }
         },
-        [loop, minDelay, maxDelay, spawnSegment, safeTimeout]
+        [loop, resolvedMinDelay, resolvedMaxDelay, spawnSegment, safeTimeout]
     )
 
     useEffect(() => {
         setSegmentMap(new Map())
 
-        if (!shouldAnimate) return
+        if (!shouldAnimate || containerHeight <= 0) return
 
-        for (let i = 0; i < lineCount; i++) {
+        for (let i = 0; i < resolvedLineCount; i++) {
             const shouldStartActive = Math.random() > 0.3
             const delay = shouldStartActive
                 ? Math.random() * 2000
-                : (minDelay + Math.random() * (maxDelay - minDelay)) * 1000
+                : (resolvedMinDelay +
+                      Math.random() * (resolvedMaxDelay - resolvedMinDelay)) *
+                  1000
             safeTimeout(() => spawnSegment(i), delay)
         }
 
@@ -218,16 +273,25 @@ export default function VerticalGridLines({
             timeoutsRef.current.forEach(clearTimeout)
             timeoutsRef.current.clear()
         }
-    }, [lineCount, minDelay, maxDelay, spawnSegment, safeTimeout, shouldAnimate])
+    }, [
+        resolvedLineCount,
+        resolvedMinDelay,
+        resolvedMaxDelay,
+        spawnSegment,
+        safeTimeout,
+        shouldAnimate,
+        containerHeight,
+    ])
 
     const lineIndices = useMemo(
-        () => Array.from({ length: lineCount }, (_, i) => i),
-        [lineCount]
+        () => Array.from({ length: resolvedLineCount }, (_, i) => i),
+        [resolvedLineCount]
     )
 
     return (
         <div
             ref={containerRef}
+            aria-hidden="true"
             style={{
                 position: "absolute",
                 inset: 0,
@@ -245,7 +309,7 @@ export default function VerticalGridLines({
                             top: 0,
                             left: 0,
                             right: 0,
-                            height: gradientMaskHeight,
+                            height: resolvedGradientMaskHeight,
                             background: `linear-gradient(to bottom, ${finalMaskColor} 0%, transparent 100%)`,
                             zIndex: 2,
                             pointerEvents: "none",
@@ -257,7 +321,7 @@ export default function VerticalGridLines({
                             bottom: 0,
                             left: 0,
                             right: 0,
-                            height: gradientMaskHeight,
+                            height: resolvedGradientMaskHeight,
                             background: `linear-gradient(to top, ${finalMaskColor} 0%, transparent 100%)`,
                             zIndex: 2,
                             pointerEvents: "none",
@@ -275,35 +339,38 @@ export default function VerticalGridLines({
                     position: "relative",
                 }}
             >
-                {lineIndices.map((index) => (
-                    <div
-                        key={`line-${index}`}
-                        style={{
-                            width: lineWidth,
-                            height: "100%",
-                            backgroundColor: finalLineColor,
-                            position: "relative",
-                        }}
-                    >
-                        <AnimatePresence>
-                            {segmentMap.has(index) && (
-                                <TravelingSegment
-                                    key={segmentMap.get(index)!.id}
-                                    data={segmentMap.get(index)!}
-                                    segmentColor={finalSegmentColor}
-                                    containerHeight={containerHeight}
-                                    lineWidth={lineWidth}
-                                    enablePulse={enablePulse}
-                                    enableGlow={enableGlow}
-                                    segmentMaxOpacity={segmentMaxOpacity}
-                                    onComplete={() =>
-                                        handleSegmentComplete(index)
-                                    }
-                                />
-                            )}
-                        </AnimatePresence>
-                    </div>
-                ))}
+                {lineIndices.map((index) => {
+                    const segment = segmentMap.get(index)
+                    return (
+                        <div
+                            key={`line-${index}`}
+                            style={{
+                                width: resolvedLineWidth,
+                                height: "100%",
+                                backgroundColor: finalLineColor,
+                                position: "relative",
+                            }}
+                        >
+                            <AnimatePresence>
+                                {segment && (
+                                    <TravelingSegment
+                                        key={segment.id}
+                                        data={segment}
+                                        segmentColor={finalSegmentColor}
+                                        containerHeight={containerHeight}
+                                        lineWidth={resolvedLineWidth}
+                                        enablePulse={enablePulse}
+                                        enableGlow={enableGlow}
+                                        segmentMaxOpacity={resolvedMaxOpacity}
+                                        onComplete={() =>
+                                            handleSegmentComplete(index)
+                                        }
+                                    />
+                                )}
+                            </AnimatePresence>
+                        </div>
+                    )
+                })}
             </div>
 
             {enableNoise && (
@@ -329,7 +396,7 @@ export default function VerticalGridLines({
                             position: "absolute",
                             inset: 0,
                             filter: `url(#${noiseFilterId})`,
-                            opacity: noiseOpacity,
+                            opacity: resolvedNoiseOpacity,
                             zIndex: 1,
                             pointerEvents: "none",
                         }}
@@ -419,10 +486,6 @@ function TravelingSegment({
 }
 
 VerticalGridLines.displayName = "Vertical Grid Lines"
-VerticalGridLines.defaultProps = {
-    width: "100%",
-    height: "100%",
-}
 
 addPropertyControls(VerticalGridLines, {
     // — Top-level controls —
@@ -529,7 +592,7 @@ addPropertyControls(VerticalGridLines, {
             },
             minDuration: {
                 type: ControlType.Number,
-                title: "Min Speed",
+                title: "Min Duration",
                 defaultValue: 4,
                 min: 1,
                 max: 20,
@@ -538,7 +601,7 @@ addPropertyControls(VerticalGridLines, {
             },
             maxDuration: {
                 type: ControlType.Number,
-                title: "Max Speed",
+                title: "Max Duration",
                 defaultValue: 8,
                 min: 1,
                 max: 20,
@@ -553,7 +616,7 @@ addPropertyControls(VerticalGridLines, {
                 max: 10,
                 step: 0.5,
                 unit: "s",
-                hidden: (props) => !props.loop,
+                hidden: (props: any) => !(props?.timing?.loop ?? props?.loop),
             },
             maxDelay: {
                 type: ControlType.Number,
@@ -563,7 +626,7 @@ addPropertyControls(VerticalGridLines, {
                 max: 15,
                 step: 0.5,
                 unit: "s",
-                hidden: (props) => !props.loop,
+                hidden: (props: any) => !(props?.timing?.loop ?? props?.loop),
             },
         },
     },
@@ -596,7 +659,8 @@ addPropertyControls(VerticalGridLines, {
             gradientMaskColor: {
                 type: ControlType.Color,
                 title: "Mask Color",
-                hidden: (props) => !props.enableGradientMask,
+                hidden: (props: any) =>
+                    !(props?.effects?.enableGradientMask ?? props?.enableGradientMask),
             },
             gradientMaskHeight: {
                 type: ControlType.Number,
@@ -606,7 +670,8 @@ addPropertyControls(VerticalGridLines, {
                 max: 200,
                 step: 5,
                 unit: "px",
-                hidden: (props) => !props.enableGradientMask,
+                hidden: (props: any) =>
+                    !(props?.effects?.enableGradientMask ?? props?.enableGradientMask),
             },
             enableNoise: {
                 type: ControlType.Boolean,
@@ -620,7 +685,8 @@ addPropertyControls(VerticalGridLines, {
                 min: 0.01,
                 max: 0.3,
                 step: 0.01,
-                hidden: (props) => !props.enableNoise,
+                hidden: (props: any) =>
+                    !(props?.effects?.enableNoise ?? props?.enableNoise),
             },
         },
     },

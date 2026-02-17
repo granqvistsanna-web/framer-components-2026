@@ -2,6 +2,17 @@ import * as React from "react"
 import { useEffect, useRef, useId, useMemo, useState } from "react"
 import { addPropertyControls, ControlType } from "framer"
 
+type GsapTimeline = { kill: () => void }
+type DraggableInstance = { kill: () => void }
+
+declare global {
+    interface Window {
+        gsap: any
+        Draggable: any
+        CustomEase: any
+    }
+}
+
 interface CardData {
     quote: string
     name: string
@@ -14,11 +25,10 @@ interface CardData {
 
 interface Props {
     cards: CardData[]
-    fontSize: number
     font: Record<string, any>
+    quoteSize: number
     borderRadius: number
     cardPadding: number
-    quoteSize: number
     cardAspectRatio: number
     stackOffsetX: number
     stackOffsetY: number
@@ -29,7 +39,13 @@ interface Props {
     controlSize: number
     controlBgColor: string
     controlColor: string
-    preview: boolean
+    controlIcon: string
+    accentStyle: "gradient" | "solid"
+    gradientColor1: string
+    gradientColor2: string
+    gradientColor3: string
+    decorativeElement: "none" | "quote" | "star" | "diamond" | "custom"
+    decorativeIcon: string
 }
 
 type StackAnimState = {
@@ -44,10 +60,10 @@ type StackAnimState = {
 
 const DEFAULT_CARDS: CardData[] = [
     {
-        quote: "Lovable helped us go from idea to launched product in a single weekend. It felt like having a senior engineer on call.",
+        quote: "This tool helped us go from idea to launched product in a single weekend. It felt like having a senior engineer on call.",
         name: "Sarah Chen",
         role: "Design Director, Vault Studio",
-        avatar: "https://i.pravatar.cc/150?u=sarah",
+        avatar: "",
         accentColor: "#F97066",
         bgColor: "#faf9f7",
         textColor: "#1a1a2e",
@@ -56,7 +72,7 @@ const DEFAULT_CARDS: CardData[] = [
         quote: "We stopped writing boilerplate and started shipping features. The velocity shift was immediate and dramatic.",
         name: "Marcus Webb",
         role: "Head of Product, Lumen",
-        avatar: "https://i.pravatar.cc/150?u=marcus",
+        avatar: "",
         accentColor: "#D946A8",
         bgColor: "#f8f7f5",
         textColor: "#1a1a2e",
@@ -65,16 +81,16 @@ const DEFAULT_CARDS: CardData[] = [
         quote: "I showed my team the prototype and they refused to believe AI built it. That's when I knew we'd found something special.",
         name: "Ava Lindstr\u00f6m",
         role: "Creative Lead, N\u00f8rth",
-        avatar: "https://i.pravatar.cc/150?u=ava",
+        avatar: "",
         accentColor: "#8B5CF6",
         bgColor: "#f9f8f6",
         textColor: "#1a1a2e",
     },
     {
-        quote: "Other tools give you code. Lovable gives you a product. There's a world of difference between those two things.",
+        quote: "Other tools give you code. This gives you a product. There's a world of difference between those two things.",
         name: "James Okafor",
         role: "Founder, Serif & Co",
-        avatar: "https://i.pravatar.cc/150?u=james",
+        avatar: "",
         accentColor: "#6366F1",
         bgColor: "#f7f6f4",
         textColor: "#1a1a2e",
@@ -83,7 +99,7 @@ const DEFAULT_CARDS: CardData[] = [
         quote: "From the first prompt to production deploy \u2014 the whole experience just felt right. Effortless and intentional.",
         name: "Mia Tanaka",
         role: "Art Director, Form",
-        avatar: "https://i.pravatar.cc/150?u=mia",
+        avatar: "",
         accentColor: "#EC4899",
         bgColor: "#faf8f6",
         textColor: "#1a1a2e",
@@ -147,13 +163,12 @@ function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number 
     return width
 }
 
-export default function DroppingCardsStack({
+export default function TestimonialCardsStack({
     cards = DEFAULT_CARDS,
-    fontSize = 16,
     font = {} as Record<string, any>,
-    borderRadius = 1.25,
-    cardPadding = 3,
-    quoteSize = 1.8,
+    quoteSize = 28,
+    borderRadius = 20,
+    cardPadding = 48,
     cardAspectRatio = 62.5,
     stackOffsetX = 7.5,
     stackOffsetY = 7.5,
@@ -162,9 +177,15 @@ export default function DroppingCardsStack({
     dragThreshold = 20,
     showControls = true,
     controlSize = 3,
-    controlBgColor = "#d4cfc8",
-    controlColor = "#1a1c1e",
-    preview = true,
+    controlBgColor = "#1a1a2e",
+    controlColor = "#ffffff",
+    controlIcon = "",
+    accentStyle = "gradient",
+    gradientColor1 = "#F97066",
+    gradientColor2 = "#D946A8",
+    gradientColor3 = "#8B5CF6",
+    decorativeElement = "quote",
+    decorativeIcon = "",
 }: Props) {
     const stackRef = useRef<HTMLDivElement>(null)
     const collectionRef = useRef<HTMLDivElement>(null)
@@ -179,24 +200,29 @@ export default function DroppingCardsStack({
     const isSmall = containerWidth < 480
 
     const responsive = useMemo(() => {
-        // Scale factor: gentle reduction on mobile to keep content filling the card
-        let scale = 1
-        if (containerWidth < 768) {
-            scale = Math.max(0.85, containerWidth / 768)
-        }
+        // Scale all px values proportionally on smaller containers
+        const scale = containerWidth < 768 ? Math.max(0.65, containerWidth / 768) : 1
+        const s = (v: number) => v * scale
 
         return {
-            fontSize: isMobile ? fontSize * scale : fontSize,
-            quoteSize: isSmall ? quoteSize * 0.75 : isMobile ? quoteSize * 0.85 : quoteSize,
-            cardPadding: isSmall ? cardPadding * 0.6 : isMobile ? cardPadding * 0.75 : cardPadding,
-            stackOffsetX: isSmall ? stackOffsetX * 0.3 : isMobile ? stackOffsetX * 0.4 : stackOffsetX,
-            stackOffsetY: isSmall ? stackOffsetY * 0.3 : isMobile ? stackOffsetY * 0.4 : stackOffsetY,
-            controlSize: isMobile ? Math.max(3.5, controlSize) : controlSize,
-            cardMaxWidth: "50em",
-            stackPaddingLeft: isSmall ? 0.75 : isMobile ? 1 : 0,
+            quoteSize: s(quoteSize),
+            nameSize: s(quoteSize * 0.52),
+            roleSize: s(quoteSize * 0.43),
+            cardPadding: s(cardPadding),
+            borderRadius: s(borderRadius),
+            stackOffsetX: s(isSmall ? stackOffsetX * 0.3 : isMobile ? stackOffsetX * 0.5 : stackOffsetX),
+            stackOffsetY: s(isSmall ? stackOffsetY * 0.3 : isMobile ? stackOffsetY * 0.5 : stackOffsetY),
+            controlSize: Math.max(36, s(controlSize)),
+            avatarSize: s(quoteSize * 1.55),
+            gap: s(isMobile ? 20 : 32),
+            controlGap: s(6),
+            attributionGap: s(12),
+            quoteMarkSize: s(quoteSize * 4),
+            cardMaxWidth: 800,
+            stackPaddingLeft: isSmall ? 12 : isMobile ? 16 : 0,
             cardAspectRatio: isMobile ? Math.max(cardAspectRatio, 120) : cardAspectRatio,
         }
-    }, [containerWidth, isMobile, isSmall, fontSize, quoteSize, cardPadding, stackOffsetX, stackOffsetY, controlSize, cardAspectRatio])
+    }, [containerWidth, isMobile, isSmall, quoteSize, borderRadius, cardPadding, stackOffsetX, stackOffsetY, controlSize, cardAspectRatio])
 
     const displayCards = useMemo(() => {
         if (!cards || cards.length === 0) return []
@@ -214,7 +240,6 @@ export default function DroppingCardsStack({
     const cardsKey = JSON.stringify(displayCards)
 
     useEffect(() => {
-        if (!preview) return
         if (displayCards.length < 3) return
 
         const state = {
@@ -702,7 +727,7 @@ export default function DroppingCardsStack({
                 applyState()
             } catch (error) {
                 console.error(
-                    "DroppingCardsStack: Failed to initialize",
+                    "TestimonialCardsStack: Failed to initialize",
                     error
                 )
             }
@@ -732,17 +757,15 @@ export default function DroppingCardsStack({
     }, [
         cardsKey,
         visibleCount,
+
         duration,
         dragThreshold,
-        preview,
-        responsive.fontSize,
+        responsive.quoteSize,
         responsive.stackOffsetX,
         responsive.stackOffsetY,
     ])
 
     const fontStyle = { fontFamily: "Georgia, 'Times New Roman', serif", ...font }
-
-    if (!preview) return null
 
     if (!cards || cards.length === 0) {
         return (
@@ -754,7 +777,7 @@ export default function DroppingCardsStack({
                     alignItems: "center",
                     justifyContent: "center",
                     ...fontStyle,
-                    fontSize: `${responsive.fontSize}px`,
+                    fontSize: `${responsive.quoteSize}px`,
                     color: "#999",
                 }}
             >
@@ -773,8 +796,7 @@ export default function DroppingCardsStack({
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: isMobile ? "1.25em" : "2em",
-                fontSize: `${responsive.fontSize}px`,
+                gap: `${responsive.gap}px`,
                 ...fontStyle,
                 boxSizing: "border-box",
             }}
@@ -785,9 +807,9 @@ export default function DroppingCardsStack({
                 style={{
                     width: "100%",
                     boxSizing: "border-box",
-                    paddingLeft: responsive.stackPaddingLeft ? `${responsive.stackPaddingLeft}em` : undefined,
-                    paddingRight: `${responsive.stackOffsetX}em`,
-                    paddingBottom: `${responsive.stackOffsetY}em`,
+                    paddingLeft: responsive.stackPaddingLeft ? `${responsive.stackPaddingLeft}px` : undefined,
+                    paddingRight: `${responsive.stackOffsetX}px`,
+                    paddingBottom: `${responsive.stackOffsetY}px`,
                 }}
             >
                 {/* Card list */}
@@ -809,8 +831,11 @@ export default function DroppingCardsStack({
                             }
                             style={{
                                 willChange: "transform, opacity",
+                                WebkitBackfaceVisibility: "hidden" as any,
+                                backfaceVisibility: "hidden",
                                 userSelect: "none",
                                 WebkitUserSelect: "none",
+                                WebkitTouchCallout: "none" as any,
                                 width: "100%",
                                 display: "flex",
                                 justifyContent: "center",
@@ -824,7 +849,7 @@ export default function DroppingCardsStack({
                                 style={{
                                     color: card.textColor,
                                     backgroundColor: card.bgColor,
-                                    borderRadius: `${borderRadius}em`,
+                                    borderRadius: `${responsive.borderRadius}px`,
                                     width: "100%",
                                     maxWidth: responsive.cardMaxWidth,
                                     margin: "0 auto",
@@ -834,18 +859,56 @@ export default function DroppingCardsStack({
                                     border: "1px solid rgba(0,0,0,0.06)",
                                 }}
                             >
-                                {/* Gradient accent bar */}
-                                <div
-                                    style={{
-                                        position: "absolute",
-                                        top: 0,
-                                        left: 0,
-                                        right: 0,
-                                        height: "3px",
-                                        background: `linear-gradient(90deg, ${card.accentColor}, ${card.accentColor}88 40%, transparent)`,
-                                        zIndex: 1,
-                                    }}
-                                />
+                                {/* Decorative element */}
+                                {decorativeElement !== "none" && (
+                                    <div
+                                        aria-hidden="true"
+                                        style={{
+                                            position: "absolute",
+                                            top: decorativeElement === "quote" ? "-1px" : `${responsive.cardPadding * 0.2}px`,
+                                            right: `${responsive.cardPadding * 0.55}px`,
+                                            pointerEvents: "none",
+                                            userSelect: "none",
+                                            zIndex: 0,
+                                            opacity: 0.1,
+                                            color: card.accentColor,
+                                        }}
+                                    >
+                                        {decorativeElement === "quote" && (
+                                            <span style={{
+                                                fontSize: `${responsive.quoteMarkSize}px`,
+                                                lineHeight: 0.85,
+                                                fontFamily: "Georgia, 'Times New Roman', serif",
+                                                fontWeight: 400,
+                                            }}>
+                                                {"\u201C"}
+                                            </span>
+                                        )}
+                                        {decorativeElement === "star" && (
+                                            <svg width={responsive.quoteMarkSize * 0.5} height={responsive.quoteMarkSize * 0.5} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M32 0C33.5 24 40 30.5 64 32C40 33.5 33.5 40 32 64C30.5 40 24 33.5 0 32C24 30.5 30.5 24 32 0Z" fill="currentColor" />
+                                            </svg>
+                                        )}
+                                        {decorativeElement === "diamond" && (
+                                            <svg width={responsive.quoteMarkSize * 0.43} height={responsive.quoteMarkSize * 0.43} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <rect x="32" y="2" width="42" height="42" rx="4" transform="rotate(45 32 2)" fill="currentColor" />
+                                            </svg>
+                                        )}
+                                        {decorativeElement === "custom" && decorativeIcon && (
+                                            <img
+                                                src={decorativeIcon}
+                                                alt=""
+                                                style={{
+                                                    width: `${responsive.quoteMarkSize * 0.5}px`,
+                                                    height: `${responsive.quoteMarkSize * 0.5}px`,
+                                                    objectFit: "contain",
+                                                    display: "block",
+                                                    opacity: 1,
+                                                }}
+                                            />
+                                        )}
+                                    </div>
+                                )}
                                 {/* Aspect ratio spacer */}
                                 <div
                                     style={{
@@ -860,7 +923,7 @@ export default function DroppingCardsStack({
                                         justifyContent: "space-between",
                                         width: "100%",
                                         height: "100%",
-                                        padding: `${responsive.cardPadding}em`,
+                                        padding: `${responsive.cardPadding}px`,
                                         position: "absolute",
                                         top: 0,
                                         left: 0,
@@ -870,7 +933,7 @@ export default function DroppingCardsStack({
                                     {/* Quote text */}
                                     <div
                                         style={{
-                                            fontSize: `${responsive.quoteSize}em`,
+                                            fontSize: `${responsive.quoteSize}px`,
                                             ...fontStyle,
                                             fontWeight: 400,
                                             lineHeight: 1.4,
@@ -888,36 +951,60 @@ export default function DroppingCardsStack({
                                             style={{
                                                 display: "flex",
                                                 alignItems: "center",
-                                                gap: "0.75em",
+                                                gap: `${responsive.attributionGap}px`,
                                             }}
                                         >
                                             {card.avatar && (
-                                                <div style={{
-                                                    width: "2.75em",
-                                                    height: "2.75em",
-                                                    borderRadius: "50%",
-                                                    background: `linear-gradient(135deg, #F97066, #D946A8, #8B5CF6)`,
-                                                    padding: "2px",
-                                                    flexShrink: 0,
-                                                }}>
-                                                    <img
-                                                        src={card.avatar}
-                                                        alt=""
-                                                        loading="lazy"
-                                                        style={{
-                                                            width: "100%",
-                                                            height: "100%",
-                                                            borderRadius: "50%",
-                                                            objectFit: "cover",
-                                                            display: "block",
-                                                        }}
-                                                    />
-                                                </div>
+                                                accentStyle === "gradient" ? (
+                                                    <div style={{
+                                                        width: `${responsive.avatarSize}px`,
+                                                        height: `${responsive.avatarSize}px`,
+                                                        borderRadius: "50%",
+                                                        background: `linear-gradient(135deg, ${gradientColor1}, ${gradientColor2}, ${gradientColor3})`,
+                                                        padding: "2px",
+                                                        flexShrink: 0,
+                                                    }}>
+                                                        <img
+                                                            src={card.avatar}
+                                                            alt=""
+                                                            loading="lazy"
+                                                            style={{
+                                                                width: "100%",
+                                                                height: "100%",
+                                                                borderRadius: "50%",
+                                                                objectFit: "cover",
+                                                                display: "block",
+                                                            }}
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <div style={{
+                                                        width: `${responsive.avatarSize}px`,
+                                                        height: `${responsive.avatarSize}px`,
+                                                        borderRadius: "50%",
+                                                        background: card.accentColor,
+                                                        padding: "2px",
+                                                        flexShrink: 0,
+                                                    }}>
+                                                        <img
+                                                            src={card.avatar}
+                                                            alt=""
+                                                            loading="lazy"
+                                                            style={{
+                                                                width: "100%",
+                                                                height: "100%",
+                                                                borderRadius: "50%",
+                                                                objectFit: "cover",
+                                                                display: "block",
+                                                            }}
+                                                        />
+                                                    </div>
+                                                )
                                             )}
                                             <div>
                                                 <div
                                                     style={{
-                                                        fontSize: "0.9em",
+                                                        fontSize: `${responsive.nameSize}px`,
                                                         fontWeight: 600,
                                                         letterSpacing: "-0.01em",
                                                         fontFamily:
@@ -928,10 +1015,10 @@ export default function DroppingCardsStack({
                                                 </div>
                                                 <div
                                                     style={{
-                                                        fontSize: "0.75em",
+                                                        fontSize: `${responsive.roleSize}px`,
                                                         opacity: 0.5,
                                                         letterSpacing: "0.01em",
-                                                        marginTop: "0.15em",
+                                                        marginTop: 2,
                                                         fontFamily:
                                                             "system-ui, -apple-system, sans-serif",
                                                     }}
@@ -953,7 +1040,7 @@ export default function DroppingCardsStack({
                 <div
                     style={{
                         display: "flex",
-                        gap: "0.375em",
+                        gap: `${responsive.controlGap}px`,
                     }}
                 >
                     {/* Prev button */}
@@ -973,6 +1060,8 @@ export default function DroppingCardsStack({
                             cursor: "pointer",
                             borderRadius: "50%",
                             transform: "scaleX(-1)",
+                            WebkitTapHighlightColor: "transparent",
+                            touchAction: "manipulation",
                         }}
                     >
                         <div
@@ -980,36 +1069,50 @@ export default function DroppingCardsStack({
                             style={{
                                 color: controlColor,
                                 backgroundColor: controlBgColor,
-                                opacity: 0.2,
+                                opacity: 0.5,
                                 borderRadius: "50%",
                                 flex: "none",
                                 justifyContent: "center",
                                 alignItems: "center",
-                                width: `${responsive.controlSize}em`,
-                                height: `${responsive.controlSize}em`,
+                                width: `${responsive.controlSize}px`,
+                                height: `${responsive.controlSize}px`,
                                 display: "flex",
                                 position: "relative",
                                 transition:
                                     "transform 0.3s ease",
                                 transform:
-                                    "translateY(0em) rotate(0.001deg)",
+                                    "translateY(0) rotate(0.001deg)",
+                                boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
                             }}
                         >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="40%"
-                                viewBox="0 0 18 18"
-                                fill="none"
-                            >
-                                <path
-                                    d="M6.74976 14.25L11.9998 9L6.74976 3.75"
-                                    stroke="currentColor"
-                                    strokeWidth="2.5"
-                                    strokeMiterlimit="10"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
+                            {controlIcon ? (
+                                <img
+                                    src={controlIcon}
+                                    alt=""
+                                    style={{
+                                        width: "40%",
+                                        height: "40%",
+                                        objectFit: "contain",
+                                        display: "block",
+                                    }}
                                 />
-                            </svg>
+                            ) : (
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    width="40%"
+                                    viewBox="0 0 18 18"
+                                    fill="none"
+                                >
+                                    <path
+                                        d="M6.74976 14.25L11.9998 9L6.74976 3.75"
+                                        stroke="currentColor"
+                                        strokeWidth="2.5"
+                                        strokeMiterlimit="10"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                                </svg>
+                            )}
                         </div>
                     </div>
                     {/* Next button */}
@@ -1028,42 +1131,58 @@ export default function DroppingCardsStack({
                         style={{
                             cursor: "pointer",
                             borderRadius: "50%",
+                            WebkitTapHighlightColor: "transparent",
+                            touchAction: "manipulation",
                         }}
                     >
                         <div
                             className={`${uniqueId}-circle`}
                             style={{
-                                color: controlColor,
-                                backgroundColor: controlBgColor,
+                                color: accentStyle === "gradient" ? "#ffffff" : controlColor,
+                                background: accentStyle === "gradient" ? `linear-gradient(135deg, ${gradientColor1}, ${gradientColor2}, ${gradientColor3})` : controlBgColor,
                                 borderRadius: "50%",
                                 flex: "none",
                                 justifyContent: "center",
                                 alignItems: "center",
-                                width: `${responsive.controlSize}em`,
-                                height: `${responsive.controlSize}em`,
+                                width: `${responsive.controlSize}px`,
+                                height: `${responsive.controlSize}px`,
                                 display: "flex",
                                 position: "relative",
                                 transition:
                                     "transform 0.3s ease",
                                 transform:
-                                    "translateY(0em) rotate(0.001deg)",
+                                    "translateY(0) rotate(0.001deg)",
+                                boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
                             }}
                         >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="40%"
-                                viewBox="0 0 18 18"
-                                fill="none"
-                            >
-                                <path
-                                    d="M6.74976 14.25L11.9998 9L6.74976 3.75"
-                                    stroke="currentColor"
-                                    strokeWidth="2.5"
-                                    strokeMiterlimit="10"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
+                            {controlIcon ? (
+                                <img
+                                    src={controlIcon}
+                                    alt=""
+                                    style={{
+                                        width: "40%",
+                                        height: "40%",
+                                        objectFit: "contain",
+                                        display: "block",
+                                    }}
                                 />
-                            </svg>
+                            ) : (
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    width="40%"
+                                    viewBox="0 0 18 18"
+                                    fill="none"
+                                >
+                                    <path
+                                        d="M6.74976 14.25L11.9998 9L6.74976 3.75"
+                                        stroke="currentColor"
+                                        strokeWidth="2.5"
+                                        strokeMiterlimit="10"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                                </svg>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1072,21 +1191,14 @@ export default function DroppingCardsStack({
             {/* Scoped hover styles */}
             <style>{`
                 .${uniqueId}-control:hover .${uniqueId}-circle {
-                    transform: translateY(-0.25em) rotate(0.001deg) !important;
+                    transform: translateY(-2px) scale(1.05) rotate(0.001deg) !important;
                 }
             `}</style>
         </div>
     )
 }
 
-addPropertyControls(DroppingCardsStack, {
-    preview: {
-        type: ControlType.Boolean,
-        title: "Preview",
-        defaultValue: true,
-        enabledTitle: "On",
-        disabledTitle: "Off",
-    },
+addPropertyControls(TestimonialCardsStack, {
     cards: {
         type: ControlType.Array,
         title: "Cards",
@@ -1109,72 +1221,72 @@ addPropertyControls(DroppingCardsStack, {
                     defaultValue: "Title, Company",
                 },
                 avatar: {
-                    type: ControlType.String,
-                    title: "Avatar URL",
-                    defaultValue: "",
+                    type: ControlType.File,
+                    title: "Avatar",
+                    allowedFileTypes: ["png", "jpg", "jpeg", "gif", "webp", "svg"],
                 },
                 accentColor: {
                     type: ControlType.Color,
                     title: "Accent",
-                    defaultValue: "#c4b5a4",
+                    defaultValue: "#D946A8",
                 },
                 bgColor: {
                     type: ControlType.Color,
                     title: "Background",
-                    defaultValue: "#1a1c1e",
+                    defaultValue: "#faf9f7",
                 },
                 textColor: {
                     type: ControlType.Color,
                     title: "Text Color",
-                    defaultValue: "#e8e4df",
+                    defaultValue: "#1a1a2e",
                 },
             },
         },
         defaultValue: [
             {
-                quote: "The attention to detail transformed our entire brand presence. Every interaction feels intentional.",
+                quote: "This tool helped us go from idea to launched product in a single weekend. It felt like having a senior engineer on call.",
                 name: "Sarah Chen",
                 role: "Design Director, Vault Studio",
-                avatar: "https://i.pravatar.cc/150?u=sarah",
-                accentColor: "#c4b5a4",
-                bgColor: "#1a1c1e",
-                textColor: "#e8e4df",
+                avatar: "",
+                accentColor: "#F97066",
+                bgColor: "#faf9f7",
+                textColor: "#1a1a2e",
             },
             {
-                quote: "Working with this level of craft is rare. The typography alone elevated our product above competitors.",
+                quote: "We stopped writing boilerplate and started shipping features. The velocity shift was immediate and dramatic.",
                 name: "Marcus Webb",
                 role: "Head of Product, Lumen",
-                avatar: "https://i.pravatar.cc/150?u=marcus",
-                accentColor: "#8a9a8e",
-                bgColor: "#1b1e1c",
-                textColor: "#e8e4df",
+                avatar: "",
+                accentColor: "#D946A8",
+                bgColor: "#f8f7f5",
+                textColor: "#1a1a2e",
             },
             {
-                quote: "They understood the brief before we finished explaining it. The result was sharper than anything we imagined.",
-                name: "Ava Lindström",
-                role: "Creative Lead, Nørth",
-                avatar: "https://i.pravatar.cc/150?u=ava",
-                accentColor: "#7d8fa1",
-                bgColor: "#1a1c1f",
-                textColor: "#e8e4df",
+                quote: "I showed my team the prototype and they refused to believe AI built it. That\u2019s when I knew we\u2019d found something special.",
+                name: "Ava Lindstr\u00f6m",
+                role: "Creative Lead, N\u00f8rth",
+                avatar: "",
+                accentColor: "#8B5CF6",
+                bgColor: "#f9f8f6",
+                textColor: "#1a1a2e",
             },
             {
-                quote: "Restraint is the hardest design skill. Every element here earned its place — nothing excess, nothing missing.",
+                quote: "Other tools give you code. This gives you a product. There\u2019s a world of difference between those two things.",
                 name: "James Okafor",
                 role: "Founder, Serif & Co",
-                avatar: "https://i.pravatar.cc/150?u=james",
-                accentColor: "#a69b91",
-                bgColor: "#1c1b1a",
-                textColor: "#e8e4df",
+                avatar: "",
+                accentColor: "#6366F1",
+                bgColor: "#f7f6f4",
+                textColor: "#1a1a2e",
             },
             {
-                quote: "The kind of work that makes you rethink your own standards. Quietly exceptional.",
+                quote: "From the first prompt to production deploy \u2014 the whole experience just felt right. Effortless and intentional.",
                 name: "Mia Tanaka",
                 role: "Art Director, Form",
-                avatar: "https://i.pravatar.cc/150?u=mia",
-                accentColor: "#d4cfc8",
-                bgColor: "#151413",
-                textColor: "#e8e4df",
+                avatar: "",
+                accentColor: "#EC4899",
+                bgColor: "#faf8f6",
+                textColor: "#1a1a2e",
             },
         ],
     },
@@ -1183,42 +1295,32 @@ addPropertyControls(DroppingCardsStack, {
         title: "Font",
         controls: "extended",
     },
-    fontSize: {
-        type: ControlType.Number,
-        title: "Base Size",
-        defaultValue: 16,
-        min: 8,
-        max: 24,
-        step: 1,
-        unit: "px",
-        description: "Base font size — all em values scale from this",
-    },
     quoteSize: {
         type: ControlType.Number,
         title: "Quote Size",
-        defaultValue: 1.8,
-        min: 0.8,
-        max: 4,
-        step: 0.1,
-        unit: "em",
+        defaultValue: 28,
+        min: 12,
+        max: 64,
+        step: 1,
+        unit: "px",
     },
     borderRadius: {
         type: ControlType.Number,
         title: "Border Radius",
-        defaultValue: 1.25,
+        defaultValue: 20,
         min: 0,
-        max: 3,
-        step: 0.125,
-        unit: "em",
+        max: 48,
+        step: 1,
+        unit: "px",
     },
     cardPadding: {
         type: ControlType.Number,
         title: "Card Padding",
-        defaultValue: 3,
-        min: 1,
-        max: 6,
-        step: 0.25,
-        unit: "em",
+        defaultValue: 48,
+        min: 8,
+        max: 96,
+        step: 2,
+        unit: "px",
     },
     cardAspectRatio: {
         type: ControlType.Number,
@@ -1233,20 +1335,20 @@ addPropertyControls(DroppingCardsStack, {
     stackOffsetX: {
         type: ControlType.Number,
         title: "Stack Offset X",
-        defaultValue: 7.5,
+        defaultValue: 120,
         min: 0,
-        max: 15,
-        step: 0.5,
-        unit: "em",
+        max: 240,
+        step: 4,
+        unit: "px",
     },
     stackOffsetY: {
         type: ControlType.Number,
         title: "Stack Offset Y",
-        defaultValue: 7.5,
+        defaultValue: 120,
         min: 0,
-        max: 15,
-        step: 0.5,
-        unit: "em",
+        max: 240,
+        step: 4,
+        unit: "px",
     },
     visibleCount: {
         type: ControlType.Number,
@@ -1283,23 +1385,67 @@ addPropertyControls(DroppingCardsStack, {
     controlSize: {
         type: ControlType.Number,
         title: "Control Size",
-        defaultValue: 3,
-        min: 2,
-        max: 5,
-        step: 0.25,
-        unit: "em",
+        defaultValue: 48,
+        min: 28,
+        max: 80,
+        step: 2,
+        unit: "px",
         hidden: (props: Props) => !props.showControls,
     },
     controlBgColor: {
         type: ControlType.Color,
         title: "Control Background",
-        defaultValue: "#d4cfc8",
+        defaultValue: "#1a1a2e",
         hidden: (props: Props) => !props.showControls,
     },
     controlColor: {
         type: ControlType.Color,
         title: "Control Icon Color",
-        defaultValue: "#1a1c1e",
+        defaultValue: "#ffffff",
         hidden: (props: Props) => !props.showControls,
+    },
+    controlIcon: {
+        type: ControlType.File,
+        title: "Custom Arrow Icon",
+        allowedFileTypes: ["png", "svg", "jpg", "webp"],
+        hidden: (props: Props) => !props.showControls,
+    },
+    decorativeElement: {
+        type: ControlType.Enum,
+        title: "Card Decoration",
+        options: ["none", "quote", "star", "diamond", "custom"],
+        optionTitles: ["None", "Quote \u201C", "Star \u2727", "Diamond \u25C7", "Custom"],
+        defaultValue: "quote",
+    },
+    decorativeIcon: {
+        type: ControlType.File,
+        title: "Custom Decoration",
+        allowedFileTypes: ["png", "svg", "jpg", "webp"],
+        hidden: (props: Props) => props.decorativeElement !== "custom",
+    },
+    accentStyle: {
+        type: ControlType.Enum,
+        title: "Accent Style",
+        options: ["gradient", "solid"],
+        optionTitles: ["Gradient", "Solid"],
+        defaultValue: "gradient",
+    },
+    gradientColor1: {
+        type: ControlType.Color,
+        title: "Gradient Start",
+        defaultValue: "#F97066",
+        hidden: (props: Props) => props.accentStyle !== "gradient",
+    },
+    gradientColor2: {
+        type: ControlType.Color,
+        title: "Gradient Mid",
+        defaultValue: "#D946A8",
+        hidden: (props: Props) => props.accentStyle !== "gradient",
+    },
+    gradientColor3: {
+        type: ControlType.Color,
+        title: "Gradient End",
+        defaultValue: "#8B5CF6",
+        hidden: (props: Props) => props.accentStyle !== "gradient",
     },
 })
