@@ -12,30 +12,42 @@ type Direction = "up" | "down"
 
 interface VerticalGSAPMarqueeProps {
     items: MarqueeItem[]
-    visibleItems: number
-    itemGap: number
     speed: number
     direction: Direction
-    pauseOnHover: boolean
-    wheelInteractive: boolean
-    wheelStrength: number
-    wheelDecay: number
-    showEdgeFade: boolean
-    edgeFadeSize: number
     background: string
-    textAlign: "left" | "center" | "right"
+    borderRadius: number
     primaryFont: React.CSSProperties
     secondaryFont: React.CSSProperties
-    activeColor: string
-    inactiveColor: string
-    activeScale: number
-    inactiveScale: number
-    inactiveOpacity: number
-    detailColor: string
-    detailMaxWidth: number
-    detailAlign: "left" | "center" | "right"
-    panelGap: number
-    borderRadius: number
+    layout?: {
+        visibleItems: number
+        itemGap: number
+        panelGap: number
+        paddingX: number
+        paddingY: number
+    }
+    titleStyle?: {
+        textAlign: "left" | "center" | "right"
+        activeColor: string
+        inactiveColor: string
+        activeScale: number
+        inactiveScale: number
+        inactiveOpacity: number
+    }
+    detailPanel?: {
+        color: string
+        maxWidth: number
+        align: "left" | "center" | "right"
+    }
+    interaction?: {
+        pauseOnHover: boolean
+        wheelInteractive: boolean
+        wheelStrength: number
+        wheelDecay: number
+    }
+    edgeFade?: {
+        show: boolean
+        size: number
+    }
 }
 
 type GsapWithTicker = GsapApi & {
@@ -154,30 +166,42 @@ function loadScript(src: string, timeoutMs = 10000): Promise<void> {
 export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
     const {
         items = defaultItems,
-        visibleItems = 5,
-        itemGap = 12,
         speed = 70,
         direction = "up",
-        pauseOnHover = false,
-        wheelInteractive = true,
-        wheelStrength = 0.28,
-        wheelDecay = 0.9,
-        showEdgeFade = true,
-        edgeFadeSize = 18,
         background = "#000000",
-        textAlign = "left",
+        borderRadius = 0,
         primaryFont,
         secondaryFont,
-        activeColor = "#ffffff",
-        inactiveColor = "#404247",
-        activeScale = 1,
-        inactiveScale = 0.84,
-        inactiveOpacity = 0.6,
-        detailColor = "#e8e8ea",
-        detailMaxWidth = 520,
-        detailAlign = "left",
-        panelGap = 64,
-        borderRadius = 0,
+        layout: {
+            visibleItems = 5,
+            itemGap = 12,
+            panelGap = 64,
+            paddingX = 48,
+            paddingY = 40,
+        } = {},
+        titleStyle: {
+            textAlign = "left",
+            activeColor = "#ffffff",
+            inactiveColor = "#404247",
+            activeScale = 1,
+            inactiveScale = 0.84,
+            inactiveOpacity = 0.6,
+        } = {},
+        detailPanel: {
+            color: detailColor = "#e8e8ea",
+            maxWidth: detailMaxWidth = 520,
+            align: detailAlign = "left",
+        } = {},
+        interaction: {
+            pauseOnHover = false,
+            wheelInteractive = true,
+            wheelStrength = 0.28,
+            wheelDecay = 0.9,
+        } = {},
+        edgeFade: {
+            show: showEdgeFade = true,
+            size: edgeFadeSize = 18,
+        } = {},
     } = props
 
     const rootRef = React.useRef<HTMLDivElement>(null)
@@ -410,7 +434,7 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
             marqueeWindow.removeEventListener("wheel", onWheel)
             gsap.ticker.remove(tick)
         }
-    }, [count, gsapReady, itemGap, visibleItems])
+    }, [count, gsapReady, itemGap, visibleItems, marqueeHeight])
 
     const safeVisible = clamp(Math.round(visibleItems), 1, 12)
     const safeGap = Math.max(0, itemGap)
@@ -432,18 +456,18 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
                 alignItems: "center",
                 justifyContent: "center",
                 position: "relative",
-                padding: stackedLayout ? "24px" : "40px 48px",
+                padding: `${paddingY}px ${paddingX}px`,
                 boxSizing: "border-box",
             }}
         >
-            <style>{`@keyframes _vmFadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}`}</style>
+            <style>{`@keyframes _vmFadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`}</style>
             <div
                 style={{
                     width: "100%",
                     height: "100%",
                     display: "flex",
                     flexDirection: stackedLayout ? "column" : "row",
-                    alignItems: stackedLayout ? "stretch" : "center",
+                    alignItems: "stretch",
                     justifyContent: "center",
                     gap: `${panelGap}px`,
                     minHeight: 0,
@@ -455,9 +479,10 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
                     onMouseLeave={() => { hoveredRef.current = false }}
                     style={{
                         position: "relative",
-                        flex: stackedLayout ? "0 0 56%" : "0 1 60%",
+                        flex: stackedLayout ? "0 0 56%" : "1 1 60%",
                         width: "100%",
                         minHeight: 0,
+                        height: "100%",
                         overflow: "hidden",
                         maskImage: showEdgeFade
                             ? `linear-gradient(to bottom, transparent 0%, black ${edgeFadeSize}%, black ${100 - edgeFadeSize}%, transparent 100%)`
@@ -499,7 +524,7 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
                                         opacity: isActive ? 1 : inactiveOpacity,
                                         color: isActive ? activeColor : inactiveColor,
                                         transition:
-                                            "transform 240ms ease, opacity 240ms ease, color 240ms ease",
+                                            "transform 500ms cubic-bezier(0.4, 0, 0.15, 1), opacity 500ms cubic-bezier(0.4, 0, 0.15, 1), color 500ms cubic-bezier(0.4, 0, 0.15, 1)",
                                         transformOrigin:
                                             textAlign === "center"
                                                 ? "center center"
@@ -529,6 +554,8 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
                                   ? "flex-end"
                                   : "flex-start",
                         minWidth: 0,
+                        minHeight: 0,
+                        overflow: "hidden",
                     }}
                 >
                     <div
@@ -537,7 +564,7 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
                             maxWidth: `${detailMaxWidth}px`,
                             color: detailColor,
                             textAlign: detailAlign,
-                            animation: "_vmFadeIn 280ms ease",
+                            animation: "_vmFadeIn 450ms cubic-bezier(0.4, 0, 0.15, 1)",
                             ...secondaryFont,
                         }}
                     >
@@ -584,15 +611,6 @@ addPropertyControls(VerticalGSAPMarquee, {
             },
         },
     },
-    visibleItems: {
-        type: ControlType.Number,
-        title: "Visible",
-        defaultValue: 5,
-        min: 1,
-        max: 12,
-        step: 1,
-        displayStepper: true,
-    },
     speed: {
         type: ControlType.Number,
         title: "Speed",
@@ -609,52 +627,6 @@ addPropertyControls(VerticalGSAPMarquee, {
         options: ["up", "down"],
         optionTitles: ["Up", "Down"],
     },
-    itemGap: {
-        type: ControlType.Number,
-        title: "Item Gap",
-        defaultValue: 12,
-        min: 0,
-        max: 60,
-        step: 1,
-        displayStepper: true,
-    },
-    panelGap: {
-        type: ControlType.Number,
-        title: "Panel Gap",
-        defaultValue: 64,
-        min: 0,
-        max: 200,
-        step: 1,
-        displayStepper: true,
-    },
-    pauseOnHover: {
-        type: ControlType.Boolean,
-        title: "Pause Hover",
-        defaultValue: false,
-    },
-    wheelInteractive: {
-        type: ControlType.Boolean,
-        title: "Wheel",
-        defaultValue: true,
-    },
-    wheelStrength: {
-        type: ControlType.Number,
-        title: "Wheel Gain",
-        defaultValue: 0.28,
-        min: 0,
-        max: 1.5,
-        step: 0.01,
-        hidden: (props) => !props.wheelInteractive,
-    },
-    wheelDecay: {
-        type: ControlType.Number,
-        title: "Wheel Decay",
-        defaultValue: 0.9,
-        min: 0.6,
-        max: 0.99,
-        step: 0.01,
-        hidden: (props) => !props.wheelInteractive,
-    },
     background: {
         type: ControlType.Color,
         title: "Background",
@@ -669,28 +641,6 @@ addPropertyControls(VerticalGSAPMarquee, {
         step: 1,
         unit: "px",
     },
-    showEdgeFade: {
-        type: ControlType.Boolean,
-        title: "Edge Fade",
-        defaultValue: true,
-    },
-    edgeFadeSize: {
-        type: ControlType.Number,
-        title: "Fade Size",
-        defaultValue: 18,
-        min: 4,
-        max: 40,
-        step: 1,
-        unit: "%",
-        hidden: (props) => !props.showEdgeFade,
-    },
-    textAlign: {
-        type: ControlType.Enum,
-        title: "Title Align",
-        defaultValue: "left",
-        options: ["left", "center", "right"],
-        optionTitles: ["Left", "Center", "Right"],
-    },
     primaryFont: {
         type: ControlType.Font,
         title: "Title Font",
@@ -703,52 +653,6 @@ addPropertyControls(VerticalGSAPMarquee, {
             lineHeight: 1,
         },
     },
-    activeColor: {
-        type: ControlType.Color,
-        title: "Active",
-        defaultValue: "#ffffff",
-    },
-    inactiveColor: {
-        type: ControlType.Color,
-        title: "Inactive",
-        defaultValue: "#404247",
-    },
-    activeScale: {
-        type: ControlType.Number,
-        title: "Act Scale",
-        defaultValue: 1,
-        min: 0.7,
-        max: 1.2,
-        step: 0.01,
-    },
-    inactiveScale: {
-        type: ControlType.Number,
-        title: "Inact Scale",
-        defaultValue: 0.84,
-        min: 0.5,
-        max: 1,
-        step: 0.01,
-    },
-    inactiveOpacity: {
-        type: ControlType.Number,
-        title: "Inact Opac",
-        defaultValue: 0.6,
-        min: 0,
-        max: 1,
-        step: 0.01,
-    },
-    detailAlign: {
-        type: ControlType.Enum,
-        title: "Detail Align",
-        defaultValue: "left",
-        options: ["left", "center", "right"],
-        optionTitles: ["Left", "Center", "Right"],
-    },
-    detailColor: {
-        type: ControlType.Color,
-        title: "Detail",
-        defaultValue: "#e8e8ea",
-    },
     secondaryFont: {
         type: ControlType.Font,
         title: "Detail Font",
@@ -760,13 +664,207 @@ addPropertyControls(VerticalGSAPMarquee, {
             lineHeight: 1.3,
         },
     },
-    detailMaxWidth: {
-        type: ControlType.Number,
-        title: "Detail Max",
-        defaultValue: 520,
-        min: 120,
-        max: 1200,
-        step: 1,
-        unit: "px",
+    layout: {
+        type: ControlType.Object,
+        title: "Layout",
+        defaultValue: {
+            visibleItems: 5,
+            itemGap: 12,
+            panelGap: 64,
+            paddingX: 48,
+            paddingY: 40,
+        },
+        controls: {
+            visibleItems: {
+                type: ControlType.Number,
+                title: "Visible Items",
+                defaultValue: 5,
+                min: 1,
+                max: 12,
+                step: 1,
+                displayStepper: true,
+            },
+            itemGap: {
+                type: ControlType.Number,
+                title: "Item Gap",
+                defaultValue: 12,
+                min: 0,
+                max: 60,
+                step: 1,
+            },
+            panelGap: {
+                type: ControlType.Number,
+                title: "Panel Gap",
+                defaultValue: 64,
+                min: 0,
+                max: 200,
+                step: 1,
+            },
+            paddingX: {
+                type: ControlType.Number,
+                title: "Padding X",
+                defaultValue: 48,
+                min: 0,
+                max: 120,
+                step: 1,
+            },
+            paddingY: {
+                type: ControlType.Number,
+                title: "Padding Y",
+                defaultValue: 40,
+                min: 0,
+                max: 120,
+                step: 1,
+            },
+        },
+    },
+    titleStyle: {
+        type: ControlType.Object,
+        title: "Title Style",
+        defaultValue: {
+            textAlign: "left",
+            activeColor: "#ffffff",
+            inactiveColor: "#404247",
+            activeScale: 1,
+            inactiveScale: 0.84,
+            inactiveOpacity: 0.6,
+        },
+        controls: {
+            textAlign: {
+                type: ControlType.Enum,
+                title: "Align",
+                defaultValue: "left",
+                options: ["left", "center", "right"],
+                optionTitles: ["Left", "Center", "Right"],
+            },
+            activeColor: {
+                type: ControlType.Color,
+                title: "Active Color",
+                defaultValue: "#ffffff",
+            },
+            inactiveColor: {
+                type: ControlType.Color,
+                title: "Inactive Color",
+                defaultValue: "#404247",
+            },
+            activeScale: {
+                type: ControlType.Number,
+                title: "Active Scale",
+                defaultValue: 1,
+                min: 0.7,
+                max: 1.2,
+                step: 0.01,
+            },
+            inactiveScale: {
+                type: ControlType.Number,
+                title: "Inactive Scale",
+                defaultValue: 0.84,
+                min: 0.5,
+                max: 1,
+                step: 0.01,
+            },
+            inactiveOpacity: {
+                type: ControlType.Number,
+                title: "Inactive Opacity",
+                defaultValue: 0.6,
+                min: 0,
+                max: 1,
+                step: 0.01,
+            },
+        },
+    },
+    detailPanel: {
+        type: ControlType.Object,
+        title: "Detail Panel",
+        defaultValue: {
+            color: "#e8e8ea",
+            maxWidth: 520,
+            align: "left",
+        },
+        controls: {
+            color: {
+                type: ControlType.Color,
+                title: "Color",
+                defaultValue: "#e8e8ea",
+            },
+            align: {
+                type: ControlType.Enum,
+                title: "Align",
+                defaultValue: "left",
+                options: ["left", "center", "right"],
+                optionTitles: ["Left", "Center", "Right"],
+            },
+            maxWidth: {
+                type: ControlType.Number,
+                title: "Max Width",
+                defaultValue: 520,
+                min: 120,
+                max: 1200,
+                step: 1,
+                unit: "px",
+            },
+        },
+    },
+    interaction: {
+        type: ControlType.Object,
+        title: "Interaction",
+        defaultValue: {
+            pauseOnHover: false,
+            wheelInteractive: true,
+            wheelStrength: 0.28,
+            wheelDecay: 0.9,
+        },
+        controls: {
+            pauseOnHover: {
+                type: ControlType.Boolean,
+                title: "Pause on Hover",
+                defaultValue: false,
+            },
+            wheelInteractive: {
+                type: ControlType.Boolean,
+                title: "Wheel Scroll",
+                defaultValue: true,
+            },
+            wheelStrength: {
+                type: ControlType.Number,
+                title: "Wheel Gain",
+                defaultValue: 0.28,
+                min: 0,
+                max: 1.5,
+                step: 0.01,
+            },
+            wheelDecay: {
+                type: ControlType.Number,
+                title: "Wheel Decay",
+                defaultValue: 0.9,
+                min: 0.6,
+                max: 0.99,
+                step: 0.01,
+            },
+        },
+    },
+    edgeFade: {
+        type: ControlType.Object,
+        title: "Edge Fade",
+        defaultValue: {
+            show: true,
+            size: 18,
+        },
+        controls: {
+            show: {
+                type: ControlType.Boolean,
+                title: "Enabled",
+                defaultValue: true,
+            },
+            size: {
+                type: ControlType.Number,
+                title: "Size",
+                defaultValue: 18,
+                min: 4,
+                max: 40,
+                step: 1,
+                unit: "%",
+            },
+        },
     },
 })

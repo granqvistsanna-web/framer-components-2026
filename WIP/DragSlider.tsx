@@ -64,6 +64,7 @@ interface DragSliderProps {
     nextIcon: React.ReactNode
     controlPosition: "bottom" | "top" | "split"
     controlGap: number
+    controlMargin: number
     controlAlignment: Alignment
     buttonStyle: ButtonStyle
     dragBehavior: DragBehavior
@@ -594,6 +595,7 @@ export default function DragSlider({
     nextIcon,
     controlPosition = "bottom",
     controlGap = 16,
+    controlMargin = 0,
     controlAlignment = "center",
     buttonStyle,
     dragBehavior,
@@ -927,6 +929,7 @@ export default function DragSlider({
                 alignItems: "center",
                 justifyContent: controlAlignment,
                 gap: controlGap,
+                margin: `${controlMargin}px 0`,
             }}
         >
             <button
@@ -1019,6 +1022,7 @@ export default function DragSlider({
                         width: "100%",
                         alignItems: "center",
                         justifyContent: controlAlignment,
+                        marginBottom: controlMargin,
                     }}
                 >
                     <button
@@ -1105,6 +1109,7 @@ export default function DragSlider({
                         width: "100%",
                         alignItems: "center",
                         justifyContent: controlAlignment,
+                        marginTop: controlMargin,
                     }}
                 >
                     <button
@@ -1239,6 +1244,17 @@ addPropertyControls(DragSlider, {
         unit: "px",
         displayStepper: true,
         defaultValue: 16,
+        hidden: (props: DragSliderProps) => !props.showControls,
+    },
+    controlMargin: {
+        type: ControlType.Number,
+        title: "Margin",
+        min: 0,
+        max: 80,
+        step: 1,
+        unit: "px",
+        displayStepper: true,
+        defaultValue: 0,
         hidden: (props: DragSliderProps) => !props.showControls,
     },
     buttonStyle: {
