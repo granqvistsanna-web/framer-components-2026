@@ -33,6 +33,7 @@ interface Window {
   gsap?: GsapApi
   Draggable?: DraggableApi
   CustomEase?: CustomEaseApi
+  InertiaPlugin?: unknown
 }
 
 declare module "framer" {

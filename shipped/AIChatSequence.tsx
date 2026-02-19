@@ -112,6 +112,18 @@ interface AdvancedRadiusGroup {
     fileThumbRadiusMobile: number
 }
 
+interface GlowGroup {
+    enableGlow: boolean
+    color1: string
+    color2: string
+    color3: string
+    intensity: number
+    speed: number
+    borderWidth: number
+    spread: number
+    opacity: number
+}
+
 interface AdvancedGroup {
     maxVisibleFiles: number
     files: FileItem[]
@@ -150,6 +162,7 @@ interface Props {
     states?: Partial<StatesGroup>
     advanced?: Partial<AdvancedGroup>
     playback?: Partial<PlaybackGroup>
+    glow?: Partial<GlowGroup>
 
     // Legacy flat props fallback
     prompt1?: string
@@ -237,6 +250,7 @@ export default function AIChatSequence(props: Props) {
     const advancedTiming: Partial<AdvancedTimingGroup> = advanced.timing ?? {}
     const advancedRadius: Partial<AdvancedRadiusGroup> = advanced.radius ?? {}
     const playback = props.playback ?? {}
+    const glowGroup = props.glow ?? {}
     const [typedText, setTypedText] = useState("")
     const [activePromptIndex, setActivePromptIndex] = useState(0)
     const [isMobile, setIsMobile] = useState(false)
@@ -786,6 +800,18 @@ export default function AIChatSequence(props: Props) {
             : "rgba(255, 255, 255, 0.84)"
         : sendButtonBackgroundColor
 
+    const enableGlow = glowGroup.enableGlow ?? false
+    const glowColor1 = glowGroup.color1 ?? "#6366f1"
+    const glowColor2 = glowGroup.color2 ?? "#a855f7"
+    const glowColor3 = glowGroup.color3 ?? "#ec4899"
+    const safeGlowIntensity = Math.max(0, Math.min(80, glowGroup.intensity ?? 24))
+    const safeGlowSpeed = Math.max(1, Math.min(20, glowGroup.speed ?? 4))
+    const safeGlowBorderWidth = Math.max(1, Math.min(8, glowGroup.borderWidth ?? 2))
+    const safeGlowSpread = Math.max(0, Math.min(40, glowGroup.spread ?? 12))
+    const safeGlowOpacity = Math.max(0.1, Math.min(1, glowGroup.opacity ?? 0.55))
+    const composerRadius = isMobile ? safeComposerRadiusMobile : safeComposerRadiusDesktop
+    const glowGradient = `conic-gradient(from var(--${uniqueId}-glow-angle, 0deg), ${glowColor1}, ${glowColor2}, ${glowColor3}, ${glowColor1})`
+
     return (
         <div
             ref={containerRef}
@@ -804,32 +830,63 @@ export default function AIChatSequence(props: Props) {
         >
             <div
                 style={{
+                    position: "relative",
                     width: "100%",
                     maxWidth: `${safeMaxWidth}px`,
-                    minHeight: isMobile ? "168px" : "250px",
-                    borderRadius: isMobile
-                        ? `${safeComposerRadiusMobile}px`
-                        : `${safeComposerRadiusDesktop}px`,
-                    background: composerBackground,
-                    border: `1px solid ${composerBorderColor}`,
-                    boxShadow: composerShadow,
-                    backdropFilter: enableGlassBackground
-                        ? `blur(${safeGlassBlur}px) saturate(${safeGlassSaturation}%)`
-                        : "none",
-                    WebkitBackdropFilter: enableGlassBackground
-                        ? `blur(${safeGlassBlur}px) saturate(${safeGlassSaturation}%)`
-                        : "none",
-                    position: "relative",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "flex-start",
-                    padding: isMobile
-                        ? "18px 20px 20px 20px"
-                        : "28px 34px 28px 34px",
-                    boxSizing: "border-box",
-                    overflow: "hidden",
                 }}
             >
+                {enableGlow && (
+                    <div
+                        aria-hidden="true"
+                        style={{
+                            position: "absolute",
+                            inset: `-${safeGlowSpread}px`,
+                            borderRadius: `${composerRadius + safeGlowSpread + safeGlowBorderWidth}px`,
+                            background: glowGradient,
+                            filter: `blur(${safeGlowIntensity}px)`,
+                            opacity: safeGlowOpacity,
+                            animation: `${uniqueId}-glow-rotate ${safeGlowSpeed}s linear infinite`,
+                        }}
+                    />
+                )}
+                <div
+                    style={{
+                        position: "relative",
+                        padding: enableGlow ? `${safeGlowBorderWidth}px` : "0",
+                        background: enableGlow ? glowGradient : "transparent",
+                        borderRadius: enableGlow
+                            ? `${composerRadius + safeGlowBorderWidth}px`
+                            : "0",
+                        animation: enableGlow
+                            ? `${uniqueId}-glow-rotate ${safeGlowSpeed}s linear infinite`
+                            : "none",
+                    }}
+                >
+                <div
+                    style={{
+                        width: "100%",
+                        minHeight: isMobile ? "168px" : "250px",
+                        borderRadius: `${composerRadius}px`,
+                        background: composerBackground,
+                        border: enableGlow ? "none" : `1px solid ${composerBorderColor}`,
+                        boxShadow: composerShadow,
+                        backdropFilter: enableGlassBackground
+                            ? `blur(${safeGlassBlur}px) saturate(${safeGlassSaturation}%)`
+                            : "none",
+                        WebkitBackdropFilter: enableGlassBackground
+                            ? `blur(${safeGlassBlur}px) saturate(${safeGlassSaturation}%)`
+                            : "none",
+                        position: "relative",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "flex-start",
+                        padding: isMobile
+                            ? "18px 20px 20px 20px"
+                            : "28px 34px 28px 34px",
+                        boxSizing: "border-box",
+                        overflow: "hidden",
+                    }}
+                >
                 <div
                     style={{
                         display: "flex",
@@ -1095,8 +1152,19 @@ export default function AIChatSequence(props: Props) {
                     </button>
                 </div>
             </div>
+            </div>
+            </div>
 
             <style>{`
+                @property --${uniqueId}-glow-angle {
+                    syntax: '<angle>';
+                    initial-value: 0deg;
+                    inherits: false;
+                }
+                @keyframes ${uniqueId}-glow-rotate {
+                    from { --${uniqueId}-glow-angle: 0deg; }
+                    to { --${uniqueId}-glow-angle: 360deg; }
+                }
                 @keyframes ${uniqueId}-cursor {
                     0%, 100% { opacity: 1; }
                     50% { opacity: 0; }
@@ -1107,6 +1175,86 @@ export default function AIChatSequence(props: Props) {
 }
 
 addPropertyControls(AIChatSequence, {
+    glow: {
+        type: ControlType.Object,
+        title: "Glow",
+        controls: {
+            enableGlow: {
+                type: ControlType.Boolean,
+                title: "Enable",
+                defaultValue: false,
+                enabledTitle: "On",
+                disabledTitle: "Off",
+            },
+            color1: {
+                type: ControlType.Color,
+                title: "Color 1",
+                defaultValue: "#6366f1",
+                hidden: (props) => !(props.enableGlow ?? props.glow?.enableGlow),
+            },
+            color2: {
+                type: ControlType.Color,
+                title: "Color 2",
+                defaultValue: "#a855f7",
+                hidden: (props) => !(props.enableGlow ?? props.glow?.enableGlow),
+            },
+            color3: {
+                type: ControlType.Color,
+                title: "Color 3",
+                defaultValue: "#ec4899",
+                hidden: (props) => !(props.enableGlow ?? props.glow?.enableGlow),
+            },
+            intensity: {
+                type: ControlType.Number,
+                title: "Blur",
+                defaultValue: 24,
+                min: 0,
+                max: 80,
+                step: 1,
+                unit: "px",
+                hidden: (props) => !(props.enableGlow ?? props.glow?.enableGlow),
+            },
+            opacity: {
+                type: ControlType.Number,
+                title: "Opacity",
+                defaultValue: 0.55,
+                min: 0.1,
+                max: 1,
+                step: 0.05,
+                hidden: (props) => !(props.enableGlow ?? props.glow?.enableGlow),
+            },
+            speed: {
+                type: ControlType.Number,
+                title: "Speed",
+                defaultValue: 4,
+                min: 1,
+                max: 20,
+                step: 0.5,
+                unit: "s",
+                hidden: (props) => !(props.enableGlow ?? props.glow?.enableGlow),
+            },
+            borderWidth: {
+                type: ControlType.Number,
+                title: "Border",
+                defaultValue: 2,
+                min: 1,
+                max: 8,
+                step: 0.5,
+                unit: "px",
+                hidden: (props) => !(props.enableGlow ?? props.glow?.enableGlow),
+            },
+            spread: {
+                type: ControlType.Number,
+                title: "Spread",
+                defaultValue: 12,
+                min: 0,
+                max: 40,
+                step: 1,
+                unit: "px",
+                hidden: (props) => !(props.enableGlow ?? props.glow?.enableGlow),
+            },
+        },
+    },
     content: {
         type: ControlType.Object,
         title: "Content",

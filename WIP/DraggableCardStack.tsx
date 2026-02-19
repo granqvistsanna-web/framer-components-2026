@@ -20,6 +20,8 @@ interface Props {
     visibleCount: number
     duration: number
     dragThreshold: number
+    appearEffect: boolean
+    appearDuration: number
     showControls: boolean
     controlSize: number
     controlBgColor: string
@@ -153,6 +155,8 @@ export default function DraggableCardStack({
     visibleCount = 4,
     duration = 0.75,
     dragThreshold = 20,
+    appearEffect = true,
+    appearDuration = 0.6,
     showControls = true,
     controlSize = 48,
     controlBgColor = "#1a1a2e",
@@ -163,10 +167,14 @@ export default function DraggableCardStack({
     const safeDuration = clamp(duration, 0.1, 4)
     const safeDragThreshold = clamp(dragThreshold, 1, 95)
     const safeControlSize = clamp(controlSize, 24, 120)
+    const safeAppearDuration = clamp(appearDuration, 0.1, 3)
+
+    const [ready, setReady] = useState(false)
 
     const stackRef = useRef<HTMLDivElement>(null)
     const collectionRef = useRef<HTMLDivElement>(null)
     const listRef = useRef<HTMLDivElement>(null)
+    const controlsRef = useRef<HTMLDivElement>(null)
     const animateNextRef = useRef<() => void>(() => {})
     const animatePrevRef = useRef<() => void>(() => {})
     const uniqueId = "dcs-" + useId().replace(/:/g, "")
@@ -219,6 +227,7 @@ export default function DraggableCardStack({
     const totalCount = displayItems.length
 
     useEffect(() => {
+        setReady(false)
         if (totalCount < 3 || typeof window === "undefined") return
 
         const state = {
@@ -664,11 +673,109 @@ export default function DraggableCardStack({
                 state.keyDown = onKeyDown
 
                 applyState()
+
+                if (appearEffect) {
+                    const frontCard = cardAt(0)
+                    const backCards: Element[] = []
+                    for (let i = 1; i < safeVisibleCount; i++) {
+                        backCards.push(cardAt(i))
+                    }
+                    const frontDuration = Math.max(
+                        0.15,
+                        safeAppearDuration * 0.4
+                    )
+                    const fanDuration = Math.max(
+                        0.2,
+                        safeAppearDuration * 0.6
+                    )
+                    const cardStagger = Math.max(
+                        0.08,
+                        safeAppearDuration * 0.18
+                    )
+
+                    // Save each back card's target position
+                    // before resetting them behind the front
+                    const backTargets = backCards.map((card) => ({
+                        x: gsap.getProperty(card, "x"),
+                        y: gsap.getProperty(card, "y"),
+                    }))
+
+                    gsap.set(frontCard, {
+                        opacity: 0,
+                        y: "+=12",
+                        scale: 0.97,
+                    })
+                    gsap.set(backCards, {
+                        opacity: 0,
+                        x: 0,
+                        y: 0,
+                    })
+                    if (controlsRef.current) {
+                        gsap.set(controlsRef.current, {
+                            opacity: 0,
+                            y: 6,
+                        })
+                    }
+                    setReady(true)
+
+                    const appearTl = gsap.timeline()
+                    state.timelines.push(appearTl)
+
+                    // Front card snaps in
+                    appearTl.to(
+                        frontCard,
+                        {
+                            opacity: 1,
+                            y: "-=12",
+                            scale: 1,
+                            duration: frontDuration,
+                            ease: "power3.out",
+                        },
+                        0
+                    )
+
+                    // Back cards fan out from behind front
+                    // to their stacked positions
+                    backCards.forEach((card, i) => {
+                        appearTl.to(
+                            card,
+                            {
+                                opacity: 1,
+                                x: backTargets[i].x,
+                                y: backTargets[i].y,
+                                duration: fanDuration,
+                                ease: "power3.out",
+                            },
+                            frontDuration + cardStagger * i
+                        )
+                    })
+
+                    if (controlsRef.current) {
+                        const controlsStart =
+                            frontDuration +
+                            cardStagger *
+                                Math.max(0, backCards.length - 1) +
+                            fanDuration * 0.4
+                        appearTl.to(
+                            controlsRef.current,
+                            {
+                                opacity: 1,
+                                y: 0,
+                                duration: 0.3,
+                                ease: "power2.out",
+                            },
+                            controlsStart
+                        )
+                    }
+                } else {
+                    setReady(true)
+                }
             } catch (error) {
                 console.error(
                     "DraggableCardStack: Failed to initialize",
                     error
                 )
+                setReady(true)
             }
         }
 
@@ -685,6 +792,8 @@ export default function DraggableCardStack({
                 window.removeEventListener("keydown", state.keyDown)
             if (state.observer) state.observer.disconnect()
             if (window.gsap) {
+                if (controlsRef.current)
+                    window.gsap.killTweensOf(controlsRef.current)
                 state.cardElements.forEach((el) =>
                     window.gsap.killTweensOf(el)
                 )
@@ -695,6 +804,8 @@ export default function DraggableCardStack({
         safeVisibleCountProp,
         safeDuration,
         safeDragThreshold,
+        appearEffect,
+        safeAppearDuration,
         responsive.stackOffsetX,
         responsive.stackOffsetY,
     ])
@@ -737,6 +848,7 @@ export default function DraggableCardStack({
                 style={{
                     width: "100%",
                     boxSizing: "border-box",
+                    opacity: ready ? 1 : 0,
                     paddingLeft: responsive.stackPaddingLeft
                         ? `${responsive.stackPaddingLeft}px`
                         : undefined,
@@ -784,6 +896,7 @@ export default function DraggableCardStack({
 
             {showControls && (
                 <div
+                    ref={controlsRef}
                     style={{
                         display: "flex",
                         gap: `${responsive.controlGap}px`,
@@ -991,6 +1104,21 @@ addPropertyControls(DraggableCardStack, {
         step: 5,
         unit: "%",
         description: "How far to drag before triggering next card",
+    },
+    appearEffect: {
+        type: ControlType.Boolean,
+        title: "Appear Effect",
+        defaultValue: true,
+    },
+    appearDuration: {
+        type: ControlType.Number,
+        title: "Appear Duration",
+        defaultValue: 0.6,
+        min: 0.1,
+        max: 3,
+        step: 0.1,
+        unit: "s",
+        hidden: (props: Props) => !props.appearEffect,
     },
     showControls: {
         type: ControlType.Boolean,
