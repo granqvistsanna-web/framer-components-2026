@@ -55,6 +55,7 @@ interface DragSliderProps {
     gap: number
     paddingLeft: number
     paddingRight: number
+    maxWidth: number
     alignment: Alignment
     showControls: boolean
     buttonContent: "text" | "arrows" | "custom"
@@ -586,6 +587,7 @@ export default function DragSlider({
     gap = 24,
     paddingLeft = 0,
     paddingRight = 0,
+    maxWidth = 0,
     alignment = "stretch",
     showControls = true,
     buttonContent = "text",
@@ -636,6 +638,15 @@ export default function DragSlider({
 
     const containerWidth = useContainerWidth(rootRef)
     const reducedMotion = useReducedMotion()
+
+    // When maxWidth is set and container is wider, offset the left padding
+    // to simulate centered max-width content — without clipping overflow right
+    const centeringOffset =
+        maxWidth > 0 && containerWidth > maxWidth
+            ? (containerWidth - maxWidth) / 2
+            : 0
+    const effectivePaddingLeft = centeringOffset + paddingLeft
+    const effectivePaddingRight = centeringOffset + paddingRight
 
     const slideNodes = useMemo(
         () => React.Children.toArray(children),
@@ -1053,7 +1064,7 @@ export default function DragSlider({
                 <div
                     ref={trackRef}
                     data-gsap-slider-list=""
-                    style={{ paddingLeft }}
+                    style={{ paddingLeft: effectivePaddingLeft }}
                 >
                     {slideNodes.length > 0 ? (
                         slideNodes.map((child, index) => (
@@ -1088,13 +1099,13 @@ export default function DragSlider({
                             </div>
                         </div>
                     )}
-                    {paddingRight > 0 && (
+                    {effectivePaddingRight > 0 && (
                         <div
                             aria-hidden="true"
                             style={{
                                 flex: "none",
-                                width: paddingRight,
-                                minWidth: paddingRight,
+                                width: effectivePaddingRight,
+                                minWidth: effectivePaddingRight,
                             }}
                         />
                     )}
@@ -1174,6 +1185,17 @@ addPropertyControls(DragSlider, {
         unit: "px",
         displayStepper: true,
         defaultValue: 0,
+    },
+    maxWidth: {
+        type: ControlType.Number,
+        title: "Max Width",
+        min: 0,
+        max: 2400,
+        step: 1,
+        unit: "px",
+        displayStepper: true,
+        defaultValue: 0,
+        description: "Content max width (0 = none). Cards start at this boundary on wide screens but still overflow right.",
     },
     alignment: {
         type: ControlType.Enum,
