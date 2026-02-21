@@ -75,11 +75,7 @@ export default function MarkerTextScrollReveal(props: Props) {
     const isStaticRenderer = useIsStaticRenderer()
     const containerRef = useRef<HTMLElement>(null)
 
-    // In Framer canvas (iframe), start revealed to avoid animation flash
-    const inCanvas =
-        typeof window !== "undefined" && window.self !== window.top
-    const [isInView, setIsInView] = useState(inCanvas)
-    const startRevealed = useRef(isInView).current
+    const [isInView, setIsInView] = useState(false)
     const [reducedMotion, setReducedMotion] = useState(false)
 
     const safeLines =
@@ -222,9 +218,7 @@ export default function MarkerTextScrollReveal(props: Props) {
                             {line}
                             <motion.span
                                 initial={{
-                                    [dirConfig.prop]: startRevealed
-                                        ? 0
-                                        : 1,
+                                    [dirConfig.prop]: 1,
                                 }}
                                 animate={
                                     isInView

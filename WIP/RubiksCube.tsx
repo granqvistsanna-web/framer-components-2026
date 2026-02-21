@@ -966,7 +966,6 @@ export default function RubiksCube(props: RubiksCubeProps) {
                     for (const z of cells) {
                         const cubie = new THREE.Group()
                         const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial)
-                        
                         cubie.add(bodyMesh)
 
                         if (surfaceStyle === "sticker" && stickerGeometry && stickerMaterials) {
@@ -1179,28 +1178,28 @@ export default function RubiksCube(props: RubiksCubeProps) {
             }
         }
 
-        // Auto rotation
+        // Auto rotation — X oscillates gently tied to Y spin to stay at a good viewing angle
         if (autoRotateRef.current && (!pauseOnHover || !isHoveringRef.current) && !isDraggingRef.current) {
             const speed = rotationSpeed * 0.008
             switch (rotationAxis) {
                 case "xyz":
-                    targetRotationRef.current.x = clamp(targetRotationRef.current.x + speed, -MAX_TILT_X, MAX_TILT_X)
                     targetRotationRef.current.y += speed * 0.7
+                    targetRotationRef.current.x += (Math.sin(targetRotationRef.current.y * 1.2) * 0.3 - targetRotationRef.current.x) * 0.02
                     break
                 case "xy":
-                    targetRotationRef.current.x = clamp(targetRotationRef.current.x + speed, -MAX_TILT_X, MAX_TILT_X)
                     targetRotationRef.current.y += speed * 0.8
+                    targetRotationRef.current.x += (Math.sin(targetRotationRef.current.y * 1.2) * 0.3 - targetRotationRef.current.x) * 0.02
                     break
                 case "xz":
-                    targetRotationRef.current.x = clamp(targetRotationRef.current.x + speed, -MAX_TILT_X, MAX_TILT_X)
                     targetRotationRef.current.z += speed * 0.8
+                    targetRotationRef.current.x += (Math.sin(targetRotationRef.current.z * 1.2) * 0.3 - targetRotationRef.current.x) * 0.02
                     break
                 case "yz":
                     targetRotationRef.current.y += speed
                     targetRotationRef.current.z += speed * 0.8
                     break
                 case "x":
-                    targetRotationRef.current.x = clamp(targetRotationRef.current.x + speed, -MAX_TILT_X, MAX_TILT_X)
+                    targetRotationRef.current.x += (Math.sin(now * 0.0008 * rotationSpeed) * 0.3 - targetRotationRef.current.x) * 0.02
                     break
                 case "y":
                     targetRotationRef.current.y += speed
