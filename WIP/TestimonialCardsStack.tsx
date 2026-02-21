@@ -1,17 +1,15 @@
+/**
+ * Testimonial Cards Stack
+ *
+ * @framerSupportedLayoutWidth any-prefer-fixed
+ * @framerSupportedLayoutHeight any-prefer-fixed
+ * @framerIntrinsicWidth 500
+ * @framerIntrinsicHeight 500
+ */
+
 import * as React from "react"
 import { useEffect, useRef, useId, useMemo, useState } from "react"
-import { addPropertyControls, ControlType } from "framer"
-
-type GsapTimeline = { kill: () => void }
-type DraggableInstance = { kill: () => void }
-
-declare global {
-    interface Window {
-        gsap: any
-        Draggable: any
-        CustomEase: any
-    }
-}
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 interface CardData {
     quote: string
@@ -163,20 +161,20 @@ function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number 
     return width
 }
 
-export default function TestimonialCardsStack({
+function TestimonialCardsStack({
     cards = DEFAULT_CARDS,
     font = {} as Record<string, any>,
     quoteSize = 28,
     borderRadius = 20,
     cardPadding = 48,
     cardAspectRatio = 62.5,
-    stackOffsetX = 7.5,
-    stackOffsetY = 7.5,
+    stackOffsetX = 120,
+    stackOffsetY = 120,
     visibleCount = 4,
     duration = 0.75,
     dragThreshold = 20,
     showControls = true,
-    controlSize = 3,
+    controlSize = 48,
     controlBgColor = "#1a1a2e",
     controlColor = "#ffffff",
     controlIcon = "",
@@ -187,12 +185,26 @@ export default function TestimonialCardsStack({
     decorativeElement = "quote",
     decorativeIcon = "",
 }: Props) {
+    const isStatic = useIsStaticRenderer()
     const stackRef = useRef<HTMLDivElement>(null)
     const collectionRef = useRef<HTMLDivElement>(null)
     const listRef = useRef<HTMLDivElement>(null)
     const animateNextRef = useRef<() => void>(() => {})
     const animatePrevRef = useRef<() => void>(() => {})
     const uniqueId = "dcs-" + useId().replace(/:/g, "")
+
+    // ── Prefers-reduced-motion ──
+    const [reducedMotion, setReducedMotion] = useState(false)
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+        setReducedMotion(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches)
+        mq.addEventListener("change", handler)
+        return () => mq.removeEventListener("change", handler)
+    }, [])
+
+    const effectiveDuration = reducedMotion ? 0 : duration
 
     // ── Responsive scaling (measures own container, not window) ──
     const containerWidth = useContainerWidth(stackRef)
@@ -240,6 +252,7 @@ export default function TestimonialCardsStack({
     const cardsKey = JSON.stringify(displayCards)
 
     useEffect(() => {
+        if (isStatic) return
         if (displayCards.length < 3) return
 
         const state = {
@@ -472,7 +485,7 @@ export default function TestimonialCardsStack({
                                     x: 0,
                                     y: 0,
                                     opacity: 1,
-                                    duration: 1,
+                                    duration: reducedMotion ? 0 : 1,
                                     ease: "elastic.out(1, 0.7)",
                                     onComplete: () => applyState(),
                                 })
@@ -492,7 +505,7 @@ export default function TestimonialCardsStack({
                     const outgoing = cardAt(0)
                     const incomingBack = cardAt(safeVisibleCount)
                     const tl = gsap.timeline({
-                        defaults: { duration, ease: mainEase },
+                        defaults: { duration: effectiveDuration, ease: mainEase },
                         onComplete: () => {
                             activeIndex = mod(
                                 activeIndex + 1,
@@ -519,10 +532,10 @@ export default function TestimonialCardsStack({
                         outgoing,
                         {
                             opacity: 0,
-                            duration: duration * 0.2,
+                            duration: effectiveDuration * 0.2,
                             ease: "none",
                         },
-                        duration * 0.4
+                        effectiveDuration * 0.4
                     )
 
                     for (
@@ -596,7 +609,7 @@ export default function TestimonialCardsStack({
                     const incomingTop = cardAt(-1)
                     const leavingBack = cardAt(safeVisibleCount - 1)
                     const tl = gsap.timeline({
-                        defaults: { duration, ease: mainEase },
+                        defaults: { duration: effectiveDuration, ease: mainEase },
                         onComplete: () => {
                             activeIndex = mod(
                                 activeIndex - 1,
@@ -621,10 +634,10 @@ export default function TestimonialCardsStack({
                         incomingTop,
                         {
                             opacity: 1,
-                            duration: duration * 0.2,
+                            duration: effectiveDuration * 0.2,
                             ease: "none",
                         },
-                        duration * 0.3
+                        effectiveDuration * 0.3
                     )
 
                     for (
@@ -748,17 +761,19 @@ export default function TestimonialCardsStack({
             if (state.resize)
                 window.removeEventListener("resize", state.resize)
             if (state.observer) state.observer.disconnect()
-            if (window.gsap) {
+            if (typeof window !== "undefined" && window.gsap) {
                 state.cardElements.forEach((el) =>
-                    window.gsap.killTweensOf(el)
+                    window.gsap?.killTweensOf(el)
                 )
             }
         }
     }, [
+        isStatic,
+        reducedMotion,
         cardsKey,
         visibleCount,
 
-        duration,
+        effectiveDuration,
         dragThreshold,
         responsive.quoteSize,
         responsive.stackOffsetX,
@@ -782,6 +797,116 @@ export default function TestimonialCardsStack({
                 }}
             >
                 Add cards to get started
+            </div>
+        )
+    }
+
+    // Static renderer fallback — show a stacked preview without GSAP
+    if (isStatic) {
+        const previewCards = displayCards.slice(0, Math.min(visibleCount, displayCards.length))
+        return (
+            <div
+                style={{
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    ...fontStyle,
+                    boxSizing: "border-box",
+                }}
+            >
+                <div
+                    style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        paddingRight: `${responsive.stackOffsetX}px`,
+                        paddingBottom: `${responsive.stackOffsetY}px`,
+                    }}
+                >
+                    <div
+                        style={{
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            position: "relative",
+                        }}
+                    >
+                        {previewCards.map((card, i) => (
+                            <div
+                                key={i}
+                                style={{
+                                    width: "100%",
+                                    display: "flex",
+                                    justifyContent: "center",
+                                    position: i === 0 ? "relative" : "absolute",
+                                    transform: `translate(${(responsive.stackOffsetX / Math.max(1, visibleCount - 1)) * i}px, ${(responsive.stackOffsetY / Math.max(1, visibleCount - 1)) * i}px)`,
+                                    zIndex: 999 - i,
+                                    opacity: 1,
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        color: card.textColor,
+                                        backgroundColor: card.bgColor,
+                                        borderRadius: `${responsive.borderRadius}px`,
+                                        width: "100%",
+                                        maxWidth: responsive.cardMaxWidth,
+                                        margin: "0 auto",
+                                        position: "relative",
+                                        overflow: "hidden",
+                                        boxShadow: "0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06), inset 0 0.5px 0 0 rgba(255,255,255,0.8)",
+                                        border: "1px solid rgba(0,0,0,0.06)",
+                                    }}
+                                >
+                                    <div style={{ paddingTop: `${responsive.cardAspectRatio}%` }} />
+                                    <div
+                                        style={{
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            justifyContent: "space-between",
+                                            width: "100%",
+                                            height: "100%",
+                                            padding: `${responsive.cardPadding}px`,
+                                            position: "absolute",
+                                            top: 0,
+                                            left: 0,
+                                            boxSizing: "border-box",
+                                        }}
+                                    >
+                                        <div
+                                            style={{
+                                                fontSize: `${responsive.quoteSize}px`,
+                                                ...fontStyle,
+                                                fontWeight: 400,
+                                                lineHeight: 1.4,
+                                                letterSpacing: "-0.015em",
+                                                flex: 1,
+                                                display: "flex",
+                                                alignItems: "center",
+                                            }}
+                                        >
+                                            {card.quote}
+                                        </div>
+                                        <div>
+                                            <div style={{ display: "flex", alignItems: "center", gap: `${responsive.attributionGap}px` }}>
+                                                <div>
+                                                    <div style={{ fontSize: `${responsive.nameSize}px`, fontWeight: 600, letterSpacing: "-0.01em", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+                                                        {card.name}
+                                                    </div>
+                                                    <div style={{ fontSize: `${responsive.roleSize}px`, opacity: 0.5, letterSpacing: "0.01em", marginTop: 2, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+                                                        {card.role}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             </div>
         )
     }
@@ -1449,3 +1574,7 @@ addPropertyControls(TestimonialCardsStack, {
         hidden: (props: Props) => props.accentStyle !== "gradient",
     },
 })
+
+TestimonialCardsStack.displayName = "Testimonial Cards Stack"
+
+export default TestimonialCardsStack

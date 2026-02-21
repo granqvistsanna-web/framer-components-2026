@@ -192,7 +192,7 @@ const PRESETS: Record<Preset, Partial<RubiksCubeProps>> = {
         roughness: 0.1,
         clearcoat: 1,
         clearcoatRoughness: 0.05,
-        ambientIntensity: 0.22,
+        ambientIntensity: 0.34,
         pointLightIntensity: 165,
         rimLightIntensity: 28,
         bloom: true,
@@ -258,7 +258,7 @@ const PRESETS: Record<Preset, Partial<RubiksCubeProps>> = {
         roughness: 0.2,
         clearcoat: 0.82,
         clearcoatRoughness: 0.12,
-        ambientIntensity: 0.28,
+        ambientIntensity: 0.38,
         pointLightIntensity: 145,
         rimLightIntensity: 24,
         bloom: true,
@@ -287,7 +287,7 @@ const PRESETS: Record<Preset, Partial<RubiksCubeProps>> = {
         roughness: 0.02,
         clearcoat: 1,
         clearcoatRoughness: 0.01,
-        ambientIntensity: 0.18,
+        ambientIntensity: 0.3,
         pointLightIntensity: 220,
         rimLightIntensity: 35,
         bloom: true,
@@ -336,9 +336,9 @@ function generateEnvironmentMap(renderer: THREE.WebGLRenderer): THREE.Texture {
     const envMat = new THREE.ShaderMaterial({
         side: THREE.BackSide,
         uniforms: {
-            topColor: { value: new THREE.Color(0x6688bb) },
-            bottomColor: { value: new THREE.Color(0x112244) },
-            horizonColor: { value: new THREE.Color(0x8899aa) },
+            topColor: { value: new THREE.Color(0x7a9ccc) },
+            bottomColor: { value: new THREE.Color(0x1e3355) },
+            horizonColor: { value: new THREE.Color(0x9daabb) },
         },
         vertexShader: `
             varying vec3 vWorldPosition;
@@ -621,8 +621,10 @@ export default function RubiksCube(props: RubiksCubeProps) {
     const isCustom = preset === "custom"
     const presetConfig = PRESETS[preset]
 
-    // Surface style & sticker props work independently of preset
-    const surfaceStyle = styleGroup.surfaceStyle ?? props.surfaceStyle ?? "solid"
+    // Surface style & sticker props — only active in custom mode
+    const surfaceStyle = isCustom
+        ? (styleGroup.surfaceStyle ?? props.surfaceStyle ?? "solid")
+        : "solid"
     const stickerShape = styleGroup.stickerShape ?? props.stickerShape ?? "rounded"
     const stickerRoundness = styleGroup.stickerRoundness ?? props.stickerRoundness ?? 0.22
 
@@ -631,7 +633,9 @@ export default function RubiksCube(props: RubiksCubeProps) {
     const cubeColor = isCustom
         ? (styleGroup.cubeColor ?? props.cubeColor ?? "#1a1a1a")
         : (presetConfig.cubeColor ?? "#1a1a1a")
-    const transparentBg = styleGroup.transparentBg ?? props.transparentBg ?? false
+    const transparentBg = isCustom
+        ? (styleGroup.transparentBg ?? props.transparentBg ?? false)
+        : false
     const backgroundColor = isCustom
         ? (styleGroup.backgroundColor ?? props.backgroundColor ?? "#000000")
         : (presetConfig.backgroundColor ?? "#000000")
@@ -667,8 +671,8 @@ export default function RubiksCube(props: RubiksCubeProps) {
     const cubeSize = styleGroup.cubeSize ?? props.cubeSize ?? 0.85
     const cameraDistance = props.cameraDistance ?? 6
     const perspective = props.perspective ?? 50
-    const metalness = isCustom ? (styleGroup.metalness ?? props.metalness ?? 1) : (presetConfig.metalness ?? 1)
-    const roughness = isCustom ? (styleGroup.roughness ?? props.roughness ?? 0.18) : (presetConfig.roughness ?? 0.18)
+    const metalness = isCustom ? (styleGroup.metalness ?? props.metalness ?? 0.45) : (presetConfig.metalness ?? 1)
+    const roughness = isCustom ? (styleGroup.roughness ?? props.roughness ?? 0.28) : (presetConfig.roughness ?? 0.18)
     const clearcoat = isCustom ? (styleGroup.clearcoat ?? props.clearcoat ?? 0.55) : (presetConfig.clearcoat ?? 0.55)
     const clearcoatRoughness = isCustom ? (props.clearcoatRoughness ?? 0.18) : (presetConfig.clearcoatRoughness ?? 0.18)
     const cornerRadius = isCustom ? (styleGroup.cornerRadius ?? props.cornerRadius ?? 0.12) : (presetConfig.cornerRadius ?? 0.12)
@@ -875,7 +879,7 @@ export default function RubiksCube(props: RubiksCubeProps) {
             renderer.setSize(rect.width, rect.height)
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
             renderer.toneMapping = THREE.ACESFilmicToneMapping
-            renderer.toneMappingExposure = 1.0
+            renderer.toneMappingExposure = 1.2
             container.appendChild(renderer.domElement)
             rendererRef.current = renderer
 
@@ -907,7 +911,7 @@ export default function RubiksCube(props: RubiksCubeProps) {
             
             const baseColor = new THREE.Color(cubeColor)
             if (surfaceStyle === "sticker") {
-                baseColor.lerp(new THREE.Color("#050505"), 0.64)
+                baseColor.lerp(new THREE.Color("#050505"), 0.35)
             }
             const emissiveTone = new THREE.Color(emissiveColor)
             const bodyMaterial = new THREE.MeshPhysicalMaterial({
@@ -1036,7 +1040,7 @@ export default function RubiksCube(props: RubiksCubeProps) {
             setError("Failed to load 3D scene")
             setLoaded(false)
         }
-    }, [backgroundColor, transparentBg, perspective, cameraDistance, ambientIntensity, pointLightIntensity, rimLightIntensity, bloom, bloomStrength, bloomRadius, bloomThreshold, cubeColor, surfaceStyle, stickerShape, stickerRoundness, cubeSize, gap, cornerRadius, stickerInset, stickerDepth, stickerBevel, preset, cleanup, gridSize, positionScale])
+    }, [backgroundColor, transparentBg, perspective, cameraDistance, ambientIntensity, pointLightIntensity, rimLightIntensity, bloom, bloomStrength, bloomRadius, bloomThreshold, surfaceStyle, stickerShape, stickerRoundness, cubeSize, gap, cornerRadius, stickerInset, stickerDepth, stickerBevel, preset, cleanup, gridSize, positionScale])
 
     // Animation loop
     const animate = useCallback(() => {
@@ -1308,20 +1312,6 @@ export default function RubiksCube(props: RubiksCubeProps) {
     const onMouseUp = () => handlePointerUp()
     const onMouseEnter = () => { isHoveringRef.current = true }
     const onMouseLeave = () => { isHoveringRef.current = false; handlePointerUp() }
-    const onTouchStart = (e: React.TouchEvent) => {
-        if (e.touches.length === 1) {
-            handlePointerDown(e.touches[0].clientX, e.touches[0].clientY)
-        }
-    }
-
-    const onTouchMove = (e: React.TouchEvent) => {
-        if (e.touches.length === 1) {
-            e.preventDefault()
-            handlePointerMove(e.touches[0].clientX, e.touches[0].clientY)
-        }
-    }
-
-    const onTouchEnd = () => handlePointerUp()
 
     const handleResize = useCallback(() => {
         const container = containerRef.current
@@ -1353,7 +1343,7 @@ export default function RubiksCube(props: RubiksCubeProps) {
         if (body) {
             const baseColor = new THREE.Color(cubeColor)
             if (surfaceStyle === "sticker") {
-                baseColor.lerp(new THREE.Color("#050505"), 0.64)
+                baseColor.lerp(new THREE.Color("#050505"), 0.35)
             }
             body.color.copy(baseColor)
             body.metalness = metalness
@@ -1422,6 +1412,36 @@ export default function RubiksCube(props: RubiksCubeProps) {
         }
     }, [handlePointerUp, isStaticRenderer])
 
+    // Native touch listeners — must use { passive: false } so preventDefault works on mobile
+    useEffect(() => {
+        if (isStaticRenderer || !dragEnabled) return
+        const el = containerRef.current
+        if (!el) return
+
+        const onTouchStart = (e: TouchEvent) => {
+            if (e.touches.length === 1) {
+                handlePointerDown(e.touches[0].clientX, e.touches[0].clientY)
+            }
+        }
+        const onTouchMove = (e: TouchEvent) => {
+            if (e.touches.length === 1) {
+                e.preventDefault()
+                handlePointerMove(e.touches[0].clientX, e.touches[0].clientY)
+            }
+        }
+        const onTouchEnd = () => handlePointerUp()
+
+        el.addEventListener("touchstart", onTouchStart, { passive: true })
+        el.addEventListener("touchmove", onTouchMove, { passive: false })
+        el.addEventListener("touchend", onTouchEnd, { passive: true })
+
+        return () => {
+            el.removeEventListener("touchstart", onTouchStart)
+            el.removeEventListener("touchmove", onTouchMove)
+            el.removeEventListener("touchend", onTouchEnd)
+        }
+    }, [isStaticRenderer, dragEnabled, handlePointerDown, handlePointerMove, handlePointerUp])
+
     // Start/stop animation loop
     useEffect(() => {
         if (isStaticRenderer) return
@@ -1451,9 +1471,6 @@ export default function RubiksCube(props: RubiksCubeProps) {
             onMouseUp={onMouseUp}
             onMouseEnter={onMouseEnter}
             onMouseLeave={onMouseLeave}
-            onTouchStart={onTouchStart}
-            onTouchMove={onTouchMove}
-            onTouchEnd={onTouchEnd}
             style={{
                 width: "100%",
                 height: "100%",
@@ -1542,6 +1559,7 @@ addPropertyControls(RubiksCube, {
                 options: ["solid", "sticker"],
                 optionTitles: ["Solid", "Sticker"],
                 defaultValue: "solid",
+                hidden: (props) => (props.preset ?? "pearl") !== "custom",
             },
             stickerShape: {
                 type: ControlType.Enum,
@@ -1549,7 +1567,7 @@ addPropertyControls(RubiksCube, {
                 options: ["square", "rounded", "circle"],
                 optionTitles: ["Square", "Rounded", "Circle"],
                 defaultValue: "rounded",
-                hidden: (props) => (props.surfaceStyle ?? "solid") !== "sticker",
+                hidden: (props) => (props.preset ?? "pearl") !== "custom" || (props.surfaceStyle ?? "solid") !== "sticker",
             },
             stickerRoundness: {
                 type: ControlType.Number,
@@ -1558,12 +1576,13 @@ addPropertyControls(RubiksCube, {
                 min: 0.05,
                 max: 0.48,
                 step: 0.01,
-                hidden: (props) => (props.surfaceStyle ?? "solid") !== "sticker" || (props.stickerShape ?? "rounded") !== "rounded",
+                hidden: (props) => (props.preset ?? "pearl") !== "custom" || (props.surfaceStyle ?? "solid") !== "sticker" || (props.stickerShape ?? "rounded") !== "rounded",
             },
             transparentBg: {
                 type: ControlType.Boolean,
                 title: "Transparent BG",
                 defaultValue: false,
+                hidden: (props) => (props.preset ?? "pearl") !== "custom",
             },
             bloom: {
                 type: ControlType.Boolean,
@@ -1580,7 +1599,7 @@ addPropertyControls(RubiksCube, {
             metalness: {
                 type: ControlType.Number,
                 title: "Metalness",
-                defaultValue: 1,
+                defaultValue: 0.45,
                 min: 0,
                 max: 1,
                 step: 0.05,
@@ -1589,7 +1608,7 @@ addPropertyControls(RubiksCube, {
             roughness: {
                 type: ControlType.Number,
                 title: "Roughness",
-                defaultValue: 0.18,
+                defaultValue: 0.28,
                 min: 0,
                 max: 1,
                 step: 0.05,

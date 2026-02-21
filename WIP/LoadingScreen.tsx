@@ -1,6 +1,15 @@
+/**
+ * Loading Screen
+ *
+ * @framerSupportedLayoutWidth any
+ * @framerSupportedLayoutHeight any
+ * @framerIntrinsicWidth 800
+ * @framerIntrinsicHeight 600
+ */
+
 import { useEffect, useState } from "react"
 import { motion, useAnimation } from "framer-motion"
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 interface Props {
     // Colors
@@ -8,8 +17,7 @@ interface Props {
     progressColor: string
     textColor: string
     // Typography
-    fontFamily: string
-    fontWeight: number
+    font: Record<string, unknown>
     // Animation
     duration: number
     easing: "expo" | "ease" | "spring" | "linear"
@@ -28,12 +36,33 @@ interface Props {
     onComplete?: () => void
 }
 
-export default function LoadingScreen({
+const easingMap = {
+    expo: [0.87, 0, 0.13, 1],
+    ease: [0.25, 0.1, 0.25, 1],
+    spring: [0.43, 0.13, 0.23, 0.96],
+    linear: [0, 0, 1, 1],
+}
+
+const positionMap = {
+    "bottom-left": { bottom: "0.1em", left: "0.23em", top: "auto", right: "auto" },
+    "bottom-right": { bottom: "0.1em", right: "0.23em", top: "auto", left: "auto" },
+    "center": { top: "50%", left: "50%", transform: "translate(-50%, -50%)", bottom: "auto", right: "auto" },
+    "top-left": { top: "0.1em", left: "0.23em", bottom: "auto", right: "auto" },
+}
+
+const exitAnimations = {
+    fade: { opacity: 0 },
+    slideUp: { y: "-100%" },
+    slideDown: { y: "100%" },
+    scale: { scale: 0, opacity: 0 },
+    none: {},
+}
+
+function LoadingScreen({
     backgroundColor = "#E2E1DF",
     progressColor = "#ff4c24",
     textColor = "#000000",
-    fontFamily = "Inter, Arial, sans-serif",
-    fontWeight = 700,
+    font = { fontSize: 48, fontWeight: 700 },
     duration = 1.2,
     easing = "expo",
     autoPlay = true,
@@ -47,9 +76,21 @@ export default function LoadingScreen({
     numberPosition = "bottom-left",
     onComplete,
 }: Props) {
+    const isStatic = useIsStaticRenderer()
+
     const [key, setKey] = useState(0)
     const [isVisible, setIsVisible] = useState(true)
     const [isExiting, setIsExiting] = useState(false)
+
+    const [reducedMotion, setReducedMotion] = useState(false)
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+        setReducedMotion(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches)
+        mq.addEventListener("change", handler)
+        return () => mq.removeEventListener("change", handler)
+    }, [])
 
     const containerControls = useAnimation()
     const progressControls = useAnimation()
@@ -58,30 +99,8 @@ export default function LoadingScreen({
     const secondGroupControls = useAnimation()
     const thirdGroupControls = useAnimation()
 
-    const easingMap = {
-        expo: [0.87, 0, 0.13, 1],
-        ease: [0.25, 0.1, 0.25, 1],
-        spring: [0.43, 0.13, 0.23, 0.96],
-        linear: [0, 0, 1, 1],
-    }
-
-    const positionMap = {
-        "bottom-left": { bottom: "0.1em", left: "0.23em", top: "auto", right: "auto" },
-        "bottom-right": { bottom: "0.1em", right: "0.23em", top: "auto", left: "auto" },
-        "center": { top: "50%", left: "50%", transform: "translate(-50%, -50%)", bottom: "auto", right: "auto" },
-        "top-left": { top: "0.1em", left: "0.23em", bottom: "auto", right: "auto" },
-    }
-
-    const exitAnimations = {
-        fade: { opacity: 0 },
-        slideUp: { y: "-100%" },
-        slideDown: { y: "100%" },
-        scale: { scale: 0, opacity: 0 },
-        none: {},
-    }
-
     useEffect(() => {
-        if (!autoPlay) return
+        if (!autoPlay || reducedMotion) return
 
         let cancelled = false
         const timeoutIds: ReturnType<typeof setTimeout>[] = []
@@ -164,7 +183,31 @@ export default function LoadingScreen({
             cancelled = true
             timeoutIds.forEach((id) => clearTimeout(id))
         }
-    }, [key, autoPlay, duration, easing, loop, loopDelay, exitAnimation, exitDuration, exitDelay, onComplete])
+    }, [key, autoPlay, reducedMotion, duration, easing, loop, loopDelay, exitAnimation, exitDuration, exitDelay, onComplete])
+
+    // Static fallback for Framer canvas / static renders
+    if (isStatic || reducedMotion) {
+        return (
+            <div
+                role="status"
+                aria-label="Loading complete"
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    overflow: "hidden",
+                    backgroundColor,
+                    zIndex: 9999,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                }}
+            >
+                <span style={{ ...font, color: textColor, fontSize: numberSize }}>
+                    100%
+                </span>
+            </div>
+        )
+    }
 
     if (!isVisible) return null
 
@@ -174,6 +217,10 @@ export default function LoadingScreen({
         <motion.div
             key={key}
             animate={containerControls}
+            role="status"
+            aria-live="polite"
+            aria-busy={!isExiting}
+            aria-label="Loading progress"
             style={{
                 position: "absolute",
                 inset: 0,
@@ -222,7 +269,7 @@ export default function LoadingScreen({
                 {/* First digit (1 for 100) */}
                 <div style={styles.numberGroup}>
                     <motion.div animate={firstGroupControls} style={styles.numberWrap}>
-                        <span style={{ ...styles.number, color: textColor, fontFamily, fontWeight }}>1</span>
+                        <span style={{ ...styles.number, ...font, color: textColor }}>1</span>
                     </motion.div>
                 </div>
 
@@ -230,7 +277,7 @@ export default function LoadingScreen({
                 <div style={styles.numberGroup}>
                     <motion.div animate={secondGroupControls} style={styles.numberWrap}>
                         {numbers.map((num, i) => (
-                            <span key={i} style={{ ...styles.number, color: textColor, fontFamily, fontWeight }}>
+                            <span key={i} style={{ ...styles.number, ...font, color: textColor }}>
                                 {num}
                             </span>
                         ))}
@@ -241,7 +288,7 @@ export default function LoadingScreen({
                 <div style={styles.numberGroup}>
                     <motion.div animate={thirdGroupControls} style={styles.numberWrap}>
                         {numbers.map((num, i) => (
-                            <span key={i} style={{ ...styles.number, color: textColor, fontFamily, fontWeight }}>
+                            <span key={i} style={{ ...styles.number, ...font, color: textColor }}>
                                 {num}
                             </span>
                         ))}
@@ -252,7 +299,7 @@ export default function LoadingScreen({
                 <div style={styles.percentageWrap}>
                     <motion.span
                         animate={percentageControls}
-                        style={{ ...styles.percentage, color: textColor, fontFamily, fontWeight }}
+                        style={{ ...styles.percentage, ...font, color: textColor }}
                     >
                         %
                     </motion.span>
@@ -320,18 +367,11 @@ addPropertyControls(LoadingScreen, {
     // ─────────────────────────────────────
     // TYPOGRAPHY
     // ─────────────────────────────────────
-    fontFamily: {
-        type: ControlType.String,
-        title: "Font Family",
-        defaultValue: "Inter, Arial, sans-serif",
-        placeholder: "Enter font name...",
-    },
-    fontWeight: {
-        type: ControlType.Enum,
-        title: "Font Weight",
-        defaultValue: 700,
-        options: [400, 500, 600, 700, 800, 900],
-        optionTitles: ["Regular", "Medium", "Semibold", "Bold", "Extrabold", "Black"],
+    font: {
+        type: ControlType.Font,
+        title: "Font",
+        controls: "extended",
+        defaultValue: { fontSize: 48, fontWeight: 700 },
     },
 
     // ─────────────────────────────────────
@@ -437,3 +477,7 @@ addPropertyControls(LoadingScreen, {
         placeholder: "calc(10vw + 10vh)",
     },
 })
+
+LoadingScreen.displayName = "Loading Screen"
+
+export default LoadingScreen

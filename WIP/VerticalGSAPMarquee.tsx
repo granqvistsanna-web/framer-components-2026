@@ -1,5 +1,5 @@
 import * as React from "react"
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 type ScriptStatus = "loading" | "loaded" | "error"
 
@@ -163,7 +163,7 @@ function loadScript(src: string, timeoutMs = 10000): Promise<void> {
  * @framerIntrinsicWidth 1200
  * @framerIntrinsicHeight 600
  */
-export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
+function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
     const {
         items = defaultItems,
         speed = 70,
@@ -204,6 +204,8 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
         } = {},
     } = props
 
+    const isStatic = useIsStaticRenderer()
+
     const rootRef = React.useRef<HTMLDivElement>(null)
     const marqueeWindowRef = React.useRef<HTMLDivElement>(null)
     const trackRef = React.useRef<HTMLDivElement>(null)
@@ -214,11 +216,27 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
     const [marqueeHeight, setMarqueeHeight] = React.useState(320)
     const [gsapReady, setGsapReady] = React.useState(false)
     const [loadingError, setLoadingError] = React.useState(false)
+    const [focused, setFocused] = React.useState(false)
     const activeIndexRef = React.useRef(0)
     const activeRenderIndexRef = React.useRef(0)
 
+    // Prefers reduced motion
+    const [reducedMotion, setReducedMotion] = React.useState(false)
+    React.useEffect(() => {
+        if (typeof window === "undefined") return
+        const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+        setReducedMotion(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches)
+        mq.addEventListener("change", handler)
+        return () => mq.removeEventListener("change", handler)
+    }, [])
+
+    const reducedMotionRef = React.useRef(reducedMotion)
+    reducedMotionRef.current = reducedMotion
+
     // Refs for props read inside the ticker — avoids effect teardown on change
     const hoveredRef = React.useRef(false)
+    const focusedRef = React.useRef(false)
     const speedRef = React.useRef(speed)
     const directionRef = React.useRef(direction)
     const pauseOnHoverRef = React.useRef(pauseOnHover)
@@ -232,6 +250,7 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
     wheelDecayRef.current = wheelDecay
     wheelStrengthRef.current = wheelStrength
     wheelInteractiveRef.current = wheelInteractive
+    focusedRef.current = focused
 
     const safeItems = React.useMemo(() => {
         const sanitized = items
@@ -267,6 +286,7 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
     }, [count])
 
     React.useEffect(() => {
+        if (isStatic) return
         let cancelled = false
 
         loadScript(GSAP_CDN)
@@ -286,9 +306,10 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
         return () => {
             cancelled = true
         }
-    }, [])
+    }, [isStatic])
 
     React.useEffect(() => {
+        if (isStatic) return
         if (typeof ResizeObserver === "undefined") return
         const node = rootRef.current
         if (!node) return
@@ -318,9 +339,10 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
         }
 
         return () => ro.disconnect()
-    }, [])
+    }, [isStatic])
 
     React.useEffect(() => {
+        if (isStatic) return
         if (typeof ResizeObserver === "undefined") return
         const node = marqueeWindowRef.current
         if (!node) return
@@ -343,9 +365,10 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
         }
 
         return () => ro.disconnect()
-    }, [stackedLayout, panelGap])
+    }, [isStatic, stackedLayout, panelGap])
 
     React.useEffect(() => {
+        if (isStatic) return
         if (!gsapReady || !window.gsap) return
         const track = trackRef.current
         const marqueeWindow = marqueeWindowRef.current
@@ -369,7 +392,9 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
 
         const tick = (_time: number, deltaTime: number) => {
             const deltaSeconds = Math.max(0.001, deltaTime / 1000)
-            const paused = pauseOnHoverRef.current && hoveredRef.current
+            const paused =
+                reducedMotionRef.current ||
+                (pauseOnHoverRef.current && hoveredRef.current)
             const baseVelocity =
                 speedRef.current * (directionRef.current === "up" ? -1 : 1)
             const targetVelocity = paused ? 0 : baseVelocity
@@ -422,7 +447,11 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
 
         const onWheel = (event: WheelEvent) => {
             if (!wheelInteractiveRef.current) return
-            event.preventDefault()
+            // Only preventDefault when the component has focus to avoid
+            // hijacking page scroll when the cursor is merely over the marquee
+            if (focusedRef.current) {
+                event.preventDefault()
+            }
             wheelVelocity += event.deltaY * wheelStrengthRef.current
             wheelVelocity = clamp(wheelVelocity, -1600, 1600)
         }
@@ -434,7 +463,65 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
             marqueeWindow.removeEventListener("wheel", onWheel)
             gsap.ticker.remove(tick)
         }
-    }, [count, gsapReady, itemGap, visibleItems, marqueeHeight])
+    }, [isStatic, count, gsapReady, itemGap, visibleItems, marqueeHeight])
+
+    // Static renderer: show a simple column of items on the Framer canvas
+    if (isStatic) {
+        return (
+            <div
+                style={{
+                    width: "100%",
+                    height: "100%",
+                    background,
+                    borderRadius,
+                    overflow: "hidden",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: `${paddingY}px ${paddingX}px`,
+                    boxSizing: "border-box",
+                }}
+            >
+                <div
+                    style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: `${itemGap}px`,
+                        width: "100%",
+                    }}
+                >
+                    {safeItems.map((item, index) => (
+                        <div
+                            key={`${item.title}-${index}`}
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent:
+                                    textAlign === "center"
+                                        ? "center"
+                                        : textAlign === "right"
+                                          ? "flex-end"
+                                          : "flex-start",
+                                color: index === 0 ? activeColor : inactiveColor,
+                                opacity: index === 0 ? 1 : inactiveOpacity,
+                                transform: `scale(${index === 0 ? activeScale : inactiveScale})`,
+                                transformOrigin:
+                                    textAlign === "center"
+                                        ? "center center"
+                                        : textAlign === "right"
+                                          ? "right center"
+                                          : "left center",
+                                whiteSpace: "nowrap",
+                                ...primaryFont,
+                            }}
+                        >
+                            {item.title}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )
+    }
 
     const safeVisible = clamp(Math.round(visibleItems), 1, 12)
     const safeGap = Math.max(0, itemGap)
@@ -475,8 +562,11 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
             >
                 <div
                     ref={marqueeWindowRef}
+                    tabIndex={wheelInteractive ? 0 : undefined}
                     onMouseEnter={() => { hoveredRef.current = true }}
                     onMouseLeave={() => { hoveredRef.current = false }}
+                    onFocus={() => setFocused(true)}
+                    onBlur={() => setFocused(false)}
                     style={{
                         position: "relative",
                         flex: stackedLayout ? "0 0 56%" : "1 1 60%",
@@ -484,6 +574,7 @@ export default function VerticalGSAPMarquee(props: VerticalGSAPMarqueeProps) {
                         minHeight: 0,
                         height: "100%",
                         overflow: "hidden",
+                        outline: "none",
                         maskImage: showEdgeFade
                             ? `linear-gradient(to bottom, transparent 0%, black ${edgeFadeSize}%, black ${100 - edgeFadeSize}%, transparent 100%)`
                             : undefined,
@@ -868,3 +959,7 @@ addPropertyControls(VerticalGSAPMarquee, {
         },
     },
 })
+
+VerticalGSAPMarquee.displayName = "Vertical GSAP Marquee"
+
+export default VerticalGSAPMarquee

@@ -14,6 +14,7 @@ import { motion } from "framer-motion"
 
 type Direction = "left" | "right" | "up" | "down"
 type StaggerFrom = "first" | "last"
+type TextAlign = "left" | "center" | "right"
 type WrapperTag = "div" | "h1" | "h2" | "h3" | "h4" | "p"
 
 const DIRECTION_CONFIG: Record<
@@ -42,6 +43,7 @@ interface Props {
         barOverflow?: number
         threshold?: number
     }
+    textAlign?: TextAlign
     as?: WrapperTag
     style?: React.CSSProperties
 }
@@ -57,6 +59,7 @@ export default function MarkerTextScrollReveal(props: Props) {
         textColor = "#000000",
         marker = {},
         animation = {},
+        textAlign = "left",
         as: Tag = "div",
         style: containerStyle,
     } = props
@@ -124,11 +127,21 @@ export default function MarkerTextScrollReveal(props: Props) {
         return () => mq.removeEventListener("change", handler)
     }, [])
 
+    const alignItems =
+        textAlign === "center"
+            ? "center"
+            : textAlign === "right"
+              ? "flex-end"
+              : "flex-start"
+
     const fontStyle: React.CSSProperties = {
         ...font,
         color: textColor,
         margin: 0,
         padding: 0,
+        display: "flex",
+        flexDirection: "column",
+        alignItems,
     }
 
     const srText = safeLines.join(" ")
@@ -195,7 +208,14 @@ export default function MarkerTextScrollReveal(props: Props) {
             style={{ ...containerStyle, ...fontStyle }}
         >
             <span style={srOnly}>{srText}</span>
-            <span aria-hidden="true">
+            <span
+                aria-hidden="true"
+                style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems,
+                }}
+            >
                 {safeLines.map((line, i) => {
                     const staggerIndex =
                         staggerFrom === "last"
@@ -364,6 +384,14 @@ addPropertyControls(MarkerTextScrollReveal, {
                 step: 0.05,
             },
         },
+    },
+    textAlign: {
+        type: ControlType.Enum,
+        title: "Align",
+        options: ["left", "center", "right"],
+        optionTitles: ["Left", "Center", "Right"],
+        defaultValue: "left",
+        displaySegmentedControl: true,
     },
     as: {
         type: ControlType.Enum,

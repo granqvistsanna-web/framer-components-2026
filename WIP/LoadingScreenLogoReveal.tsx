@@ -1,28 +1,43 @@
+/**
+ * Loading Screen Logo Reveal
+ *
+ * @framerSupportedLayoutWidth any
+ * @framerSupportedLayoutHeight any
+ * @framerIntrinsicWidth 800
+ * @framerIntrinsicHeight 600
+ */
+
 import * as React from "react"
 import { useEffect, useRef, useState } from "react"
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 // Sanitize SVG to prevent XSS from user-supplied markup
 function sanitizeSvg(html: string): string {
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(html, "image/svg+xml")
+    // Guard for SSR environments
+    if (typeof DOMParser === "undefined") return html
+    try {
+        const parser = new DOMParser()
+        const doc = parser.parseFromString(html, "image/svg+xml")
 
-    // Remove dangerous elements
-    const dangerousTags = ["script", "iframe", "object", "embed", "foreignObject"]
-    dangerousTags.forEach((tag) => {
-        doc.querySelectorAll(tag).forEach((el) => el.remove())
-    })
-
-    // Remove event handler attributes from all elements
-    doc.querySelectorAll("*").forEach((el) => {
-        Array.from(el.attributes).forEach((attr) => {
-            if (attr.name.startsWith("on") || attr.value.trim().toLowerCase().startsWith("javascript:")) {
-                el.removeAttribute(attr.name)
-            }
+        // Remove dangerous elements
+        const dangerousTags = ["script", "iframe", "object", "embed", "foreignObject"]
+        dangerousTags.forEach((tag) => {
+            doc.querySelectorAll(tag).forEach((el) => el.remove())
         })
-    })
 
-    return doc.documentElement.outerHTML
+        // Remove event handler attributes from all elements
+        doc.querySelectorAll("*").forEach((el) => {
+            Array.from(el.attributes).forEach((attr) => {
+                if (attr.name.startsWith("on") || attr.value.trim().toLowerCase().startsWith("javascript:")) {
+                    el.removeAttribute(attr.name)
+                }
+            })
+        })
+
+        return doc.documentElement.outerHTML
+    } catch {
+        return html
+    }
 }
 
 interface Props {
@@ -33,13 +48,10 @@ interface Props {
     logoColor: string
     logoOpacity: number
     // Typography
-    fontFamily: string
-    fontSize: string
-    letterSpacing: string
+    font: Record<string, unknown>
     // Animation
     duration: number
     autoPlay: boolean
-    previewInCanvas: boolean
     loop: boolean
     loopDelay: number
     triggerOnView: boolean
@@ -63,18 +75,15 @@ interface Props {
     onComplete?: () => void
 }
 
-export default function LoadingScreenLogoReveal({
+function LoadingScreenLogoReveal({
     backgroundColor = "#0a0a0a",
     progressColor = "#ffffff",
     textColor = "#ffffff",
     logoColor = "#ffffff",
     logoOpacity = 0.2,
-    fontFamily = "monospace",
-    fontSize = "0.875rem",
-    letterSpacing = "0.1em",
+    font = {},
     duration = 3,
     autoPlay = true,
-    previewInCanvas = true,
     loop = false,
     loopDelay = 1,
     triggerOnView = false,
@@ -107,6 +116,8 @@ export default function LoadingScreenLogoReveal({
         top: "center top",
         bottom: "center bottom",
     }
+    const isStatic = useIsStaticRenderer()
+
     const [key, setKey] = useState(0)
     const [isVisible, setIsVisible] = useState(true)
     const [isExiting, setIsExiting] = useState(false)
@@ -120,8 +131,13 @@ export default function LoadingScreenLogoReveal({
     const firstTextRef = useRef<HTMLSpanElement>(null)
     const secondTextRef = useRef<HTMLSpanElement>(null)
 
+    // Stable ref for onComplete to avoid effect re-runs
+    const onCompleteRef = useRef(onComplete)
+    useEffect(() => { onCompleteRef.current = onComplete }, [onComplete])
+
     // Check for reduced motion preference
     useEffect(() => {
+        if (typeof window === "undefined") return
         const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
         setPrefersReducedMotion(mediaQuery.matches)
         const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches)
@@ -225,7 +241,7 @@ export default function LoadingScreenLogoReveal({
 
         loadGSAP().then(() => {
             if (cancelled) return
-            if (!autoPlay || !previewInCanvas || !isInView) return
+            if (!autoPlay || isStatic || !isInView) return
             if (!wrapEl) return
 
             const gsap = window.gsap
@@ -238,7 +254,7 @@ export default function LoadingScreenLogoReveal({
                     timeoutIds.push(tid)
                 } else {
                     setIsVisible(false)
-                    if (onComplete) onComplete()
+                    onCompleteRef.current?.()
                 }
                 return
             }
@@ -248,7 +264,7 @@ export default function LoadingScreenLogoReveal({
                 try {
                     gsap.registerPlugin(window.CustomEase)
                     window.CustomEase.create("loader", "0.65, 0.01, 0.05, 0.99")
-                } catch (e) {
+                } catch {
                     console.warn("CustomEase registration failed, using fallback ease")
                 }
             }
@@ -293,7 +309,7 @@ export default function LoadingScreenLogoReveal({
                         timeoutIds.push(tid)
                     } else {
                         setIsVisible(false)
-                        if (onComplete) onComplete()
+                        onCompleteRef.current?.()
                     }
                 },
             })
@@ -394,10 +410,41 @@ export default function LoadingScreenLogoReveal({
                 elements.forEach((el) => window.gsap.killTweensOf(el))
             }
         }
-    }, [key, autoPlay, previewInCanvas, isInView, prefersReducedMotion, duration, loop, loopDelay, logoFillDirection, showProgressBar, onComplete, firstText, secondText])
+    }, [key, autoPlay, isStatic, isInView, prefersReducedMotion, duration, loop, loopDelay, logoFillDirection, showProgressBar, firstText, secondText])
 
     if (!isVisible && !loop) return null
-    if (!previewInCanvas) return null
+
+    // Static renderer fallback: show logo centered on background
+    if (isStatic) {
+        const logoContent = logoSvg ? sanitizeSvg(logoSvg) : defaultLogo
+        return (
+            <div
+                role="status"
+                aria-label={loadingLabel}
+                style={{
+                    position: "relative",
+                    width: "100%",
+                    height: "100%",
+                    backgroundColor: backgroundColor,
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                }}
+            >
+                <div
+                    role="img"
+                    aria-label="Logo"
+                    style={{
+                        width: logoWidth,
+                        height: logoHeight,
+                        minHeight: "3em",
+                        color: logoColor,
+                    }}
+                    dangerouslySetInnerHTML={{ __html: logoContent }}
+                />
+            </div>
+        )
+    }
 
     const logoContent = logoSvg ? sanitizeSvg(logoSvg) : defaultLogo
 
@@ -523,9 +570,7 @@ export default function LoadingScreenLogoReveal({
                         ref={firstTextRef}
                         style={{
                             position: "absolute",
-                            fontFamily: fontFamily,
-                            fontSize: fontSize,
-                            letterSpacing: letterSpacing,
+                            ...font,
                             color: textColor,
                             textTransform: "uppercase",
                             whiteSpace: "nowrap",
@@ -539,9 +584,7 @@ export default function LoadingScreenLogoReveal({
                         ref={secondTextRef}
                         style={{
                             position: "absolute",
-                            fontFamily: fontFamily,
-                            fontSize: fontSize,
-                            letterSpacing: letterSpacing,
+                            ...font,
                             color: textColor,
                             textTransform: "uppercase",
                             whiteSpace: "nowrap",
@@ -606,20 +649,15 @@ addPropertyControls(LoadingScreenLogoReveal, {
     },
 
     // Typography
-    fontFamily: {
-        type: ControlType.String,
-        title: "Font Family",
-        defaultValue: "monospace",
-    },
-    fontSize: {
-        type: ControlType.String,
-        title: "Font Size",
-        defaultValue: "0.875rem",
-    },
-    letterSpacing: {
-        type: ControlType.String,
-        title: "Letter Spacing",
-        defaultValue: "0.1em",
+    font: {
+        type: ControlType.Font,
+        title: "Font",
+        controls: "extended",
+        defaultFontType: "monospace",
+        defaultValue: {
+            fontSize: 14,
+            letterSpacing: "0.1em",
+        },
     },
 
     // Animation
@@ -627,13 +665,6 @@ addPropertyControls(LoadingScreenLogoReveal, {
         type: ControlType.Boolean,
         title: "Auto Play",
         defaultValue: true,
-    },
-    previewInCanvas: {
-        type: ControlType.Boolean,
-        title: "Preview in Canvas",
-        defaultValue: true,
-        enabledTitle: "On",
-        disabledTitle: "Off",
     },
     triggerOnView: {
         type: ControlType.Boolean,
@@ -747,3 +778,7 @@ addPropertyControls(LoadingScreenLogoReveal, {
         description: "Screen reader announcement",
     },
 })
+
+LoadingScreenLogoReveal.displayName = "Loading Screen Logo Reveal"
+
+export default LoadingScreenLogoReveal

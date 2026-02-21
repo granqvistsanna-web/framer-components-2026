@@ -1,8 +1,10 @@
 // Waveform Sound Animation
 // @framerSupportedLayoutWidth any-prefer-fixed
 // @framerSupportedLayoutHeight any-prefer-fixed
+// @framerIntrinsicWidth 400
+// @framerIntrinsicHeight 200
 import * as React from "react"
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 interface WaveformSoundProps {
     barCount?: number
@@ -48,7 +50,7 @@ function colorWithAlpha(color: string, alpha: number): string {
     return color
 }
 
-export default function WaveformSound(props: WaveformSoundProps) {
+function WaveformSound(props: WaveformSoundProps) {
     const {
         barCount = 34,
         barWidth = 4,
@@ -70,6 +72,20 @@ export default function WaveformSound(props: WaveformSoundProps) {
         glassBorderOpacity = 0.18,
     } = props
 
+    const isStatic = useIsStaticRenderer()
+
+    const [reducedMotion, setReducedMotion] = React.useState(false)
+    React.useEffect(() => {
+        if (typeof window === "undefined") return
+        const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+        setReducedMotion(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches)
+        mq.addEventListener("change", handler)
+        return () => mq.removeEventListener("change", handler)
+    }, [])
+
+    const showStatic = isStatic || reducedMotion
+
     const canvasRef = React.useRef<HTMLCanvasElement>(null)
     const frameRef = React.useRef<number>(0)
     const timeRef = React.useRef<number>(0)
@@ -78,6 +94,8 @@ export default function WaveformSound(props: WaveformSoundProps) {
     const sizeRef = React.useRef({ width: 0, height: 0, dpr: 1 })
 
     React.useEffect(() => {
+        if (showStatic) return
+
         const canvas = canvasRef.current
         if (!canvas) return
 
@@ -86,7 +104,12 @@ export default function WaveformSound(props: WaveformSoundProps) {
 
         const resize = () => {
             const rect = canvas.getBoundingClientRect()
-            const dpr = Math.min(window.devicePixelRatio || 1, 2)
+            const dpr = Math.min(
+                typeof window !== "undefined"
+                    ? window.devicePixelRatio || 1
+                    : 1,
+                2
+            )
 
             canvas.width = Math.max(1, Math.floor(rect.width * dpr))
             canvas.height = Math.max(1, Math.floor(rect.height * dpr))
@@ -195,7 +218,7 @@ export default function WaveformSound(props: WaveformSoundProps) {
             observer.disconnect()
             cancelAnimationFrame(frameRef.current)
         }
-    }, [barCount, barWidth, gap, minHeight, maxHeight, speed, smoothness, color, color2, opacity, glow, mirror])
+    }, [showStatic, barCount, barWidth, gap, minHeight, maxHeight, speed, smoothness, color, color2, opacity, glow, mirror])
 
     const glassShadow = [
         `inset 0 0.5px 0 rgba(255,255,255,0.45)`,
@@ -228,7 +251,48 @@ export default function WaveformSound(props: WaveformSoundProps) {
                 boxShadow: liquidGlass ? glassShadow : "none",
             }}
         >
-            <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
+            {showStatic ? (
+                <div
+                    role="img"
+                    aria-label="Audio waveform visualization"
+                    style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: gap,
+                    }}
+                >
+                    {Array.from({ length: Math.max(4, Math.floor(barCount)) }).map((_, i) => {
+                        const count = Math.max(4, Math.floor(barCount))
+                        const n = count <= 1 ? 0 : i / (count - 1)
+                        const envelope = 1 - Math.abs(n - 0.5) * 2
+                        const variation = Math.sin(i * 1.8 + 0.5) * 0.3 + 0.7
+                        const h = minHeight + (maxHeight - minHeight) * envelope * variation
+                        return (
+                            <div
+                                key={i}
+                                style={{
+                                    width: barWidth,
+                                    height: mirror ? h * 2 : h,
+                                    borderRadius: barWidth / 2,
+                                    background: `linear-gradient(to right, ${color}, ${color2})`,
+                                    opacity: opacity,
+                                    flexShrink: 0,
+                                }}
+                            />
+                        )
+                    })}
+                </div>
+            ) : (
+                <canvas
+                    ref={canvasRef}
+                    role="img"
+                    aria-label="Audio waveform visualization"
+                    style={{ width: "100%", height: "100%", display: "block" }}
+                />
+            )}
 
             {liquidGlass && (
                 <div
@@ -402,3 +466,7 @@ addPropertyControls(WaveformSound, {
         hidden: (props: WaveformSoundProps) => !props.liquidGlass,
     },
 })
+
+WaveformSound.displayName = "Waveform Sound"
+
+export default WaveformSound

@@ -1,6 +1,15 @@
+/**
+ * Draggable Card Stack
+ *
+ * @framerSupportedLayoutWidth any-prefer-fixed
+ * @framerSupportedLayoutHeight any-prefer-fixed
+ * @framerIntrinsicWidth 500
+ * @framerIntrinsicHeight 600
+ */
+
 import * as React from "react"
 import { useEffect, useRef, useId, useMemo, useState } from "react"
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 type ScriptStatus = "loading" | "loaded" | "error"
 
@@ -148,7 +157,7 @@ function useContainerWidth(
     return width
 }
 
-export default function DraggableCardStack({
+function DraggableCardStack({
     children,
     stackOffsetX = 120,
     stackOffsetY = 120,
@@ -163,6 +172,18 @@ export default function DraggableCardStack({
     controlColor = "#ffffff",
     controlIcon = "",
 }: Props) {
+    const isStatic = useIsStaticRenderer()
+
+    const [reducedMotion, setReducedMotion] = useState(false)
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+        setReducedMotion(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches)
+        mq.addEventListener("change", handler)
+        return () => mq.removeEventListener("change", handler)
+    }, [])
+
     const safeVisibleCountProp = clamp(Math.round(visibleCount), 2, 20)
     const safeDuration = clamp(duration, 0.1, 4)
     const safeDragThreshold = clamp(dragThreshold, 1, 95)
@@ -170,6 +191,7 @@ export default function DraggableCardStack({
     const safeAppearDuration = clamp(appearDuration, 0.1, 3)
 
     const [ready, setReady] = useState(false)
+    const [liveText, setLiveText] = useState("")
 
     const stackRef = useRef<HTMLDivElement>(null)
     const collectionRef = useRef<HTMLDivElement>(null)
@@ -273,7 +295,12 @@ export default function DraggableCardStack({
                         /* ease may already exist */
                     }
                 }
-                const mainEase = CustomEasePlugin ? "stackEase" : "power2.out"
+                const mainEase = reducedMotion
+                    ? "none"
+                    : CustomEasePlugin
+                      ? "stackEase"
+                      : "power2.out"
+                const animDuration = reducedMotion ? 0 : safeDuration
 
                 const list = listRef.current
                 const stackEl = stackRef.current
@@ -357,6 +384,9 @@ export default function DraggableCardStack({
                     dragCard = cardAt(0)
                     gsap.set(dragCard, { touchAction: "none" })
                     updateDragLimits()
+                    setLiveText(
+                        `Showing card ${(activeIndex % childCount) + 1} of ${childCount}`
+                    )
 
                     if (state.draggable) {
                         state.draggable.kill()
@@ -426,8 +456,10 @@ export default function DraggableCardStack({
                                     x: 0,
                                     y: 0,
                                     opacity: 1,
-                                    duration: 1,
-                                    ease: "elastic.out(1, 0.7)",
+                                    duration: reducedMotion ? 0 : 1,
+                                    ease: reducedMotion
+                                        ? "none"
+                                        : "elastic.out(1, 0.7)",
                                     onComplete: () => applyState(),
                                 })
                             },
@@ -453,7 +485,7 @@ export default function DraggableCardStack({
                     const outgoing = cardAt(0)
                     const incomingBack = cardAt(safeVisibleCount)
                     const tl = gsap.timeline({
-                        defaults: { duration: safeDuration, ease: mainEase },
+                        defaults: { duration: animDuration, ease: mainEase },
                         onComplete: () => {
                             pruneTimeline(tl)
                             activeIndex = mod(
@@ -481,10 +513,10 @@ export default function DraggableCardStack({
                         outgoing,
                         {
                             opacity: 0,
-                            duration: safeDuration * 0.2,
+                            duration: animDuration * 0.2,
                             ease: "none",
                         },
-                        safeDuration * 0.4
+                        animDuration * 0.4
                     )
 
                     for (
@@ -558,7 +590,7 @@ export default function DraggableCardStack({
                     const incomingTop = cardAt(-1)
                     const leavingBack = cardAt(safeVisibleCount - 1)
                     const tl = gsap.timeline({
-                        defaults: { duration: safeDuration, ease: mainEase },
+                        defaults: { duration: animDuration, ease: mainEase },
                         onComplete: () => {
                             pruneTimeline(tl)
                             activeIndex = mod(
@@ -584,10 +616,10 @@ export default function DraggableCardStack({
                         incomingTop,
                         {
                             opacity: 1,
-                            duration: safeDuration * 0.2,
+                            duration: animDuration * 0.2,
                             ease: "none",
                         },
-                        safeDuration * 0.3
+                        animDuration * 0.3
                     )
 
                     for (
@@ -674,7 +706,7 @@ export default function DraggableCardStack({
 
                 applyState()
 
-                if (appearEffect) {
+                if (appearEffect && !reducedMotion) {
                     const frontCard = cardAt(0)
                     const backCards: Element[] = []
                     for (let i = 1; i < safeVisibleCount; i++) {
@@ -806,6 +838,7 @@ export default function DraggableCardStack({
         safeDragThreshold,
         appearEffect,
         safeAppearDuration,
+        reducedMotion,
         responsive.stackOffsetX,
         responsive.stackOffsetY,
     ])
@@ -829,9 +862,71 @@ export default function DraggableCardStack({
         )
     }
 
+    if (isStatic) {
+        const staticCount = Math.min(safeVisibleCountProp, displayItems.length)
+        const offsetSteps = Math.max(1, staticCount - 1)
+        const stepX = responsive.stackOffsetX / offsetSteps
+        const stepY = responsive.stackOffsetY / offsetSteps
+        return (
+            <div
+                role="region"
+                aria-roledescription="carousel"
+                aria-label="Draggable Card Stack"
+                style={{
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxSizing: "border-box",
+                }}
+            >
+                <div
+                    style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        paddingRight: `${responsive.stackOffsetX}px`,
+                        paddingBottom: `${responsive.stackOffsetY}px`,
+                    }}
+                >
+                    <div
+                        style={{
+                            justifyContent: "center",
+                            alignItems: "center",
+                            display: "flex",
+                            position: "relative",
+                        }}
+                    >
+                        {displayItems.slice(0, staticCount).map((child, i) => (
+                            <div
+                                key={i}
+                                aria-label={`Card ${i + 1} of ${staticCount}`}
+                                style={{
+                                    width: "100%",
+                                    display: "flex",
+                                    justifyContent: "center",
+                                    position: i === 0 ? "relative" : "absolute",
+                                    transform: `translate(${stepX * i}px, ${stepY * i}px)`,
+                                    zIndex: 999 - i,
+                                    opacity: 1,
+                                }}
+                            >
+                                {child}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
     return (
         <div
             ref={stackRef}
+            role="region"
+            aria-roledescription="carousel"
+            aria-label="Draggable Card Stack"
             style={{
                 width: "100%",
                 height: "100%",
@@ -869,6 +964,11 @@ export default function DraggableCardStack({
                         <div
                             key={i}
                             data-card-item=""
+                            aria-label={
+                                i < childCount
+                                    ? `Card ${(i % childCount) + 1} of ${childCount}`
+                                    : undefined
+                            }
                             aria-hidden={
                                 i >= childCount ? "true" : undefined
                             }
@@ -1037,6 +1137,22 @@ export default function DraggableCardStack({
                 </div>
             )}
 
+            <div
+                aria-live="polite"
+                aria-atomic="true"
+                style={{
+                    position: "absolute",
+                    width: 1,
+                    height: 1,
+                    overflow: "hidden",
+                    clip: "rect(0 0 0 0)",
+                    clipPath: "inset(50%)",
+                    whiteSpace: "nowrap",
+                }}
+            >
+                {liveText}
+            </div>
+
             <style>{`
                 .${uniqueId}-control:hover .${uniqueId}-circle {
                     transform: translateY(-2px) scale(1.05) rotate(0.001deg) !important;
@@ -1154,3 +1270,7 @@ addPropertyControls(DraggableCardStack, {
         hidden: (props: Props) => !props.showControls,
     },
 })
+
+DraggableCardStack.displayName = "Draggable Card Stack"
+
+export default DraggableCardStack

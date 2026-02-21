@@ -2,10 +2,21 @@
 // A Framer component based on three.js webgl_interactive_cubes_ortho example
 // @framerSupportedLayoutWidth any-prefer-fixed
 // @framerSupportedLayoutHeight any-prefer-fixed
+// @framerIntrinsicWidth 600
+// @framerIntrinsicHeight 400
 import React, { useEffect, useRef, useState, useCallback } from "react"
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 type THREE = typeof import("three")
+
+interface CubeData {
+    id: number
+    position: THREE.Vector3
+    rotation: THREE.Euler
+    scale: THREE.Vector3
+    originalColor: THREE.Color
+    originalColorStored?: boolean
+}
 
 interface Props {
     // Cube settings
@@ -13,26 +24,24 @@ interface Props {
     cubeSize?: number
     cubeColor?: string
     randomColors?: boolean
-    hoverColor?: string
-    
+
     // Layout
     spreadX?: number
     spreadY?: number
     spreadZ?: number
-    
+
     // Camera
     cameraRadius?: number
-    orbitSpeed?: number
     frustumSize?: number
-    
+
     // Animation
     autoRotate?: boolean
     rotationSpeed?: number
-    
+
     // Interaction
     hoverEffect?: boolean
     highlightColor?: string
-    
+
     // Style
     backgroundColor?: string
 }
@@ -43,12 +52,10 @@ function InteractiveCubesOrtho(props: Props) {
         cubeSize = 1,
         cubeColor = "#60a5fa",
         randomColors = true,
-        hoverColor = "#ff0000",
         spreadX = 40,
         spreadY = 40,
         spreadZ = 40,
         cameraRadius = 25,
-        orbitSpeed = 0.5,
         frustumSize = 50,
         autoRotate = true,
         rotationSpeed = 0.1,
@@ -57,12 +64,15 @@ function InteractiveCubesOrtho(props: Props) {
         backgroundColor = "#f0f0f0",
     } = props
 
+    const isStatic = useIsStaticRenderer()
+
     const containerRef = useRef<HTMLDivElement>(null)
+    const reducedMotionRef = useRef(false)
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
     const sceneRef = useRef<THREE.Scene | null>(null)
     const cameraRef = useRef<THREE.OrthographicCamera | null>(null)
     const raycasterRef = useRef<THREE.Raycaster | null>(null)
-    const cubesRef = useRef<THREE.Mesh[]>([])
+    const cubesRef = useRef<CubeData[]>([])
     const instancedMeshRef = useRef<THREE.InstancedMesh | null>(null)
     const dummyRef = useRef<THREE.Object3D | null>(null)
     const colorRef = useRef<THREE.Color | null>(null)
@@ -71,8 +81,23 @@ function InteractiveCubesOrtho(props: Props) {
     const pointerRef = useRef({ x: 0, y: 0 })
     const intersectedRef = useRef<THREE.Mesh | null>(null)
     const originalColorRef = useRef<THREE.Color | null>(null)
+    const geometryRef = useRef<THREE.BufferGeometry | null>(null)
+    const materialRef = useRef<THREE.Material | null>(null)
+    const lightsRef = useRef<THREE.Light[]>([])
     const [isLoaded, setIsLoaded] = useState(false)
     const [error, setError] = useState<string | null>(null)
+
+    // Track prefers-reduced-motion (keep RAF running, disable interactions)
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const mql = window.matchMedia("(prefers-reduced-motion: reduce)")
+        reducedMotionRef.current = mql.matches
+        const handler = (e: MediaQueryListEvent) => {
+            reducedMotionRef.current = e.matches
+        }
+        mql.addEventListener("change", handler)
+        return () => mql.removeEventListener("change", handler)
+    }, [])
 
     // Initialize Three.js scene
     const initScene = useCallback(async () => {
@@ -103,7 +128,8 @@ function InteractiveCubesOrtho(props: Props) {
 
             // Renderer
             const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+            const dpr = typeof window !== "undefined" ? window.devicePixelRatio : 1
+            renderer.setPixelRatio(Math.min(dpr, 2))
             renderer.setSize(rect.width, rect.height)
             container.appendChild(renderer.domElement)
             rendererRef.current = renderer
@@ -112,9 +138,10 @@ function InteractiveCubesOrtho(props: Props) {
             const light = new THREE.DirectionalLight(0xffffff, 3)
             light.position.set(1, 1, 1).normalize()
             scene.add(light)
-            
+
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.4)
             scene.add(ambientLight)
+            lightsRef.current = [light, ambientLight]
 
             // Raycaster
             const raycaster = new THREE.Raycaster()
@@ -122,9 +149,11 @@ function InteractiveCubesOrtho(props: Props) {
 
             // Geometry and Material
             const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize)
-            const material = new THREE.MeshLambertMaterial({ 
-                color: randomColors ? 0xffffff : cubeColor 
+            const material = new THREE.MeshLambertMaterial({
+                color: randomColors ? 0xffffff : cubeColor
             })
+            geometryRef.current = geometry
+            materialRef.current = material
 
             // Create InstancedMesh for better performance with many cubes
             const count = Math.min(Math.max(1, cubeCount), 5000)
@@ -136,7 +165,7 @@ function InteractiveCubesOrtho(props: Props) {
             const baseColor = new THREE.Color(cubeColor)
             
             // Store cube data for interaction
-            const cubes: THREE.Mesh[] = []
+            const cubes: CubeData[] = []
             
             for (let i = 0; i < count; i++) {
                 // Position
@@ -170,14 +199,14 @@ function InteractiveCubesOrtho(props: Props) {
                 instancedMesh.setColorAt(i, color)
 
                 // Store individual cube data for raycasting
-                const cubeData = {
+                const cubeData: CubeData = {
                     id: i,
                     position: dummy.position.clone(),
                     rotation: dummy.rotation.clone(),
                     scale: dummy.scale.clone(),
                     originalColor: color.clone(),
                 }
-                cubes.push(cubeData as any)
+                cubes.push(cubeData)
             }
 
             instancedMesh.instanceMatrix.needsUpdate = true
@@ -226,8 +255,8 @@ function InteractiveCubesOrtho(props: Props) {
         camera.lookAt(scene.position)
         camera.updateMatrixWorld()
 
-        // Raycasting for hover effect
-        if (hoverEffect && raycaster && instancedMesh && color) {
+        // Raycasting for hover effect (disabled when reduced motion is preferred)
+        if (hoverEffect && !reducedMotionRef.current && raycaster && instancedMesh && color) {
             raycaster.setFromCamera(pointerRef.current, camera)
             
             // For InstancedMesh, we need to raycast against the mesh
@@ -283,8 +312,9 @@ function InteractiveCubesOrtho(props: Props) {
         rafRef.current = requestAnimationFrame(animate)
     }, [autoRotate, rotationSpeed, cameraRadius, hoverEffect, highlightColor])
 
-    // Handle pointer move
+    // Handle pointer move (disabled when reduced motion is preferred)
     const handlePointerMove = useCallback((e: React.PointerEvent) => {
+        if (reducedMotionRef.current) return
         const container = containerRef.current
         if (!container) return
 
@@ -321,9 +351,33 @@ function InteractiveCubesOrtho(props: Props) {
             if (rafRef.current) {
                 cancelAnimationFrame(rafRef.current)
             }
-            if (rendererRef.current && containerRef.current) {
-                containerRef.current.removeChild(rendererRef.current.domElement)
+
+            // Dispose Three.js geometries, materials, and lights
+            if (geometryRef.current) {
+                geometryRef.current.dispose()
+                geometryRef.current = null
+            }
+            if (materialRef.current) {
+                materialRef.current.dispose()
+                materialRef.current = null
+            }
+            for (const light of lightsRef.current) {
+                sceneRef.current?.remove(light)
+                if ("dispose" in light && typeof light.dispose === "function") {
+                    light.dispose()
+                }
+            }
+            lightsRef.current = []
+
+            if (instancedMeshRef.current) {
+                instancedMeshRef.current.dispose()
+                instancedMeshRef.current = null
+            }
+
+            if (rendererRef.current) {
+                rendererRef.current.domElement.remove()
                 rendererRef.current.dispose()
+                rendererRef.current = null
             }
         }
     }, [initScene])
@@ -354,6 +408,27 @@ function InteractiveCubesOrtho(props: Props) {
             resizeObserver.disconnect()
         }
     }, [handleResize])
+
+    // Static renderer fallback for Framer canvas thumbnails
+    if (isStatic) {
+        return (
+            <div
+                style={{
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor,
+                    color: "#666",
+                    fontSize: 14,
+                    fontFamily: "sans-serif",
+                }}
+            >
+                Interactive Cubes
+            </div>
+        )
+    }
 
     return (
         <div
@@ -452,14 +527,6 @@ addPropertyControls(InteractiveCubesOrtho, {
         min: 10,
         max: 100,
         step: 5,
-    },
-    orbitSpeed: {
-        type: ControlType.Number,
-        title: "Orbit Speed",
-        defaultValue: 0.5,
-        min: 0,
-        max: 5,
-        step: 0.1,
     },
     frustumSize: {
         type: ControlType.Number,

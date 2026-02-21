@@ -9,7 +9,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 import { motion, AnimatePresence } from "framer-motion"
 
 // =============================================================================
@@ -19,6 +19,73 @@ type ThemePreset = "ocean" | "neon" | "sunset" | "monochrome" | "forest" | "cybe
 type LayoutType = "orbit" | "cluster" | "scatter" | "grid"
 type QualityLevel = "low" | "medium" | "high" | "ultra"
 
+// Local Three.js interfaces for CDN-loaded modules
+interface ThreeDisposable {
+    dispose: () => void
+}
+
+interface ThreeScene extends ThreeDisposable {
+    add: (obj: ThreeObject3D) => void
+    remove: (obj: ThreeObject3D) => void
+    background: unknown
+    children: ThreeObject3D[]
+    traverse: (callback: (obj: ThreeObject3D) => void) => void
+}
+
+interface ThreeObject3D {
+    position: { x: number; y: number; z: number; set: (x: number, y: number, z: number) => void; copy: (p: { x: number; y: number; z: number }) => void }
+    rotation: { x: number; y: number; z: number; copy: (r: { x: number; y: number; z: number }) => void }
+    scale: { setScalar: (s: number) => void }
+    castShadow: boolean
+    receiveShadow: boolean
+    geometry: ThreeGeometry
+    material: ThreeMaterial
+}
+
+interface ThreeGeometry extends ThreeDisposable {
+    attributes: { position: { array: Float32Array; needsUpdate: boolean } }
+    computeVertexNormals: () => void
+    clone: () => ThreeGeometry
+    setAttribute: (name: string, attr: unknown) => void
+}
+
+interface ThreeMaterial extends ThreeDisposable {
+    color: unknown
+    wireframe: boolean
+}
+
+interface ThreeCamera {
+    aspect: number
+    position: { x: number; y: number; z: number; set: (x: number, y: number, z: number) => void }
+    updateProjectionMatrix: () => void
+}
+
+interface ThreeRenderer extends ThreeDisposable {
+    domElement: HTMLCanvasElement
+    setSize: (w: number, h: number) => void
+    setPixelRatio: (r: number) => void
+    render: (scene: ThreeScene, camera: ThreeCamera) => void
+    toneMapping: unknown
+    toneMappingExposure: number
+    shadowMap: { enabled: boolean }
+}
+
+interface ThreeComposer extends ThreeDisposable {
+    addPass: (pass: unknown) => void
+    render: () => void
+}
+
+interface BubbleData {
+    mesh: ThreeObject3D
+    original: Float32Array
+    velocities: Float32Array
+    orbitRadius: number
+    orbitSpeed: number
+    orbitAngle: number
+    offset: number
+    wireframe?: ThreeObject3D
+}
+
 interface BubbleAnimation3DProps {
     // Appearance
     preset?: ThemePreset
@@ -26,13 +93,13 @@ interface BubbleAnimation3DProps {
     secondaryColor?: string
     backgroundColor?: string
     gradientBackground?: boolean
-    
+
     // Geometry
     bubbleCount?: number
     layout?: LayoutType
     bubbleSize?: number
     detail?: number
-    
+
     // Animation
     morphSpeed?: number
     morphIntensity?: number
@@ -40,7 +107,7 @@ interface BubbleAnimation3DProps {
     autoRotate?: boolean
     idleFloat?: boolean
     syncAnimations?: boolean
-    
+
     // Interaction
     mouseTracking?: boolean
     trackSpeed?: number
@@ -48,19 +115,18 @@ interface BubbleAnimation3DProps {
     velocityAmount?: number
     clickToExplode?: boolean
     magneticCursor?: boolean
-    
+
     // Effects
     bloom?: boolean
     bloomIntensity?: number
     wireframe?: boolean
     wireframeOpacity?: number
     showParticles?: boolean
-    
+
     // Advanced
     audioReactive?: boolean
     quality?: QualityLevel
     maxFrameRate?: number
-    reducedMotion?: boolean
 }
 
 // =============================================================================
@@ -87,13 +153,13 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
         secondaryColor = "#a78bfa",
         backgroundColor = "#0f172a",
         gradientBackground = true,
-        
+
         // Geometry
         bubbleCount = 1,
         layout = "orbit",
         bubbleSize = 2,
         detail = 64,
-        
+
         // Animation
         morphSpeed = 0.8,
         morphIntensity = 0.3,
@@ -101,7 +167,7 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
         autoRotate = false,
         idleFloat = true,
         syncAnimations = false,
-        
+
         // Interaction
         mouseTracking = true,
         trackSpeed = 1.5,
@@ -109,44 +175,59 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
         velocityAmount = 0.5,
         clickToExplode = false,
         magneticCursor = false,
-        
+
         // Effects
         bloom = false,
         bloomIntensity = 1.5,
         wireframe = false,
         wireframeOpacity = 0.3,
         showParticles = true,
-        
+
         // Advanced
         audioReactive = false,
         quality = "medium",
         maxFrameRate = 60,
-        reducedMotion = false,
     } = props
+
+    // Static renderer check for Framer canvas
+    const isStatic = useIsStaticRenderer()
+
+    // System-aware reduced motion detection
+    const [reducedMotion, setReducedMotion] = useState(false)
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+        setReducedMotion(mq.matches)
+        const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches)
+        mq.addEventListener("change", handler)
+        return () => mq.removeEventListener("change", handler)
+    }, [])
 
     // =========================================================================
     // REFS & STATE
     // =========================================================================
     const containerRef = useRef<HTMLDivElement>(null)
-    const sceneRef = useRef<any>(null)
-    const cameraRef = useRef<any>(null)
-    const rendererRef = useRef<any>(null)
-    const composerRef = useRef<any>(null)
-    const bubblesRef = useRef<any[]>([])
+    const sceneRef = useRef<ThreeScene | null>(null)
+    const cameraRef = useRef<ThreeCamera | null>(null)
+    const rendererRef = useRef<ThreeRenderer | null>(null)
+    const composerRef = useRef<ThreeComposer | null>(null)
+    const bubblesRef = useRef<BubbleData[]>([])
+    const wireframeMeshRef = useRef<ThreeObject3D | null>(null)
+    const particlePointsRef = useRef<ThreeObject3D | null>(null)
     const frameRef = useRef<number>(0)
     const timeRef = useRef(0)
     const lastFrameRef = useRef(0)
-    
+
     const [loaded, setLoaded] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    
+
     // Mouse tracking
     const mouseRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0, vx: 0, vy: 0 })
     const idleRef = useRef(false)
     const idleTimerRef = useRef(0)
-    
+
     // Effects
-    const ripplesRef = useRef<any[]>([])
+    const ripplesRef = useRef<Array<{ x: number; y: number; z: number; strength: number; time: number }>>([])
     const explodeRef = useRef({ active: false, time: 0 })
     const audioRef = useRef(0)
     
@@ -163,12 +244,12 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
     // =========================================================================
     const init = useCallback(async () => {
         if (!containerRef.current) return
-        
+
         try {
             const THREE = await import("https://unpkg.com/three@0.160.0/build/three.module.js")
-            
+
             // Dynamic imports for post-processing
-            let EffectComposer: any, RenderPass: any, UnrealBloomPass: any
+            let EffectComposer: unknown, RenderPass: unknown, UnrealBloomPass: unknown
             if (bloom && quality !== "low") {
                 const pp = await import("https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js")
                 const rp = await import("https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/RenderPass.js")
@@ -191,10 +272,11 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
             camera.position.z = 6
             cameraRef.current = camera
 
-            // Renderer
-            const pixelRatio = Math.min(window.devicePixelRatio, 
+            // Renderer — guard devicePixelRatio for SSR
+            const dpr = typeof window !== "undefined" ? window.devicePixelRatio : 1
+            const pixelRatio = Math.min(dpr,
                 quality === "ultra" ? 2 : quality === "high" ? 1.5 : 1)
-            
+
             const renderer = new THREE.WebGLRenderer({
                 antialias: quality !== "low",
                 alpha: true,
@@ -210,9 +292,12 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
 
             // Post-processing
             if (bloom && EffectComposer) {
-                const composer = new EffectComposer(renderer)
-                composer.addPass(new RenderPass(scene, camera))
-                composer.addPass(new UnrealBloomPass(
+                const Composer = EffectComposer as new (...args: unknown[]) => ThreeComposer
+                const RPass = RenderPass as new (...args: unknown[]) => unknown
+                const BPass = UnrealBloomPass as new (...args: unknown[]) => unknown
+                const composer = new Composer(renderer)
+                composer.addPass(new RPass(scene, camera))
+                composer.addPass(new BPass(
                     new THREE.Vector2(rect.width, rect.height),
                     bloomIntensity,
                     0.5,
@@ -221,197 +306,206 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
                 composerRef.current = composer
             }
 
-            // Lighting
-            setupLighting(THREE, scene, colors, quality)
+            // -----------------------------------------------------------------
+            // Lighting (inlined to avoid stale closure)
+            // -----------------------------------------------------------------
+            scene.add(new THREE.AmbientLight(0xffffff, 0.4))
 
-            // Create bubbles
-            createBubbles(THREE, scene, colors, quality)
+            const mainLight = new THREE.DirectionalLight(0xffffff, 1.5)
+            mainLight.position.set(5, 5, 5)
+            mainLight.castShadow = quality !== "low"
+            scene.add(mainLight)
+
+            const fillLight = new THREE.DirectionalLight(colors.secondary, 0.75)
+            fillLight.position.set(-5, -5, 3)
+            scene.add(fillLight)
+
+            const rimLight = new THREE.PointLight(colors.primary, 1.2)
+            rimLight.position.set(0, 5, -5)
+            scene.add(rimLight)
+
+            // -----------------------------------------------------------------
+            // Create bubbles (inlined to avoid stale closure)
+            // -----------------------------------------------------------------
+            // Clean up existing bubbles
+            bubblesRef.current.forEach(b => {
+                scene.remove(b.mesh)
+                b.mesh.geometry.dispose()
+                b.mesh.material.dispose()
+            })
+            bubblesRef.current = []
+
+            // Clean up existing wireframe mesh
+            if (wireframeMeshRef.current) {
+                scene.remove(wireframeMeshRef.current)
+                wireframeMeshRef.current.geometry.dispose()
+                wireframeMeshRef.current.material.dispose()
+                wireframeMeshRef.current = null
+            }
+
+            // Clean up existing particle Points
+            if (particlePointsRef.current) {
+                scene.remove(particlePointsRef.current)
+                particlePointsRef.current.geometry.dispose()
+                particlePointsRef.current.material.dispose()
+                particlePointsRef.current = null
+            }
+
+            const count = Math.min(8, Math.max(1, bubbleCount))
+            const actualDetail = quality === "low" ? 32 : quality === "ultra" ? 128 : detail
+
+            const geometry = new THREE.SphereGeometry(bubbleSize, actualDetail, actualDetail)
+
+            for (let i = 0; i < count; i++) {
+                const material = new THREE.MeshPhysicalMaterial({
+                    color: new THREE.Color(colors.primary),
+                    metalness: 0.1,
+                    roughness: 0.1,
+                    transmission: 0.6,
+                    thickness: 0.5,
+                    clearcoat: 1,
+                    clearcoatRoughness: 0.1,
+                    ior: 1.5,
+                    shininess: 100,
+                    transparent: true,
+                    opacity: 0.9,
+                    wireframe: wireframe && i === 0
+                })
+
+                // Color variation for multi-bubble
+                if (i > 0) {
+                    const c = new THREE.Color(colors.primary)
+                    c.offsetHSL(i * 0.06, 0, 0)
+                    material.color = c
+                }
+
+                const mesh = new THREE.Mesh(geometry.clone(), material)
+                mesh.castShadow = true
+                mesh.receiveShadow = true
+
+                // Position based on layout
+                let orbitRadius = 0, orbitSpeed = 0, orbitAngle = 0
+
+                if (count > 1) {
+                    switch (layout) {
+                        case "orbit":
+                            orbitRadius = 2.5 + i * 0.8
+                            orbitSpeed = 0.3 + i * 0.08
+                            orbitAngle = (i / count) * Math.PI * 2
+                            mesh.position.set(
+                                Math.cos(orbitAngle) * orbitRadius,
+                                Math.sin(orbitAngle) * orbitRadius * 0.4,
+                                Math.sin(orbitAngle) * orbitRadius * 0.3
+                            )
+                            mesh.scale.setScalar(0.4 + (count - i) * 0.12)
+                            break
+                        case "cluster":
+                            mesh.position.set(
+                                (Math.random() - 0.5) * 3.5,
+                                (Math.random() - 0.5) * 2.5,
+                                (Math.random() - 0.5) * 2
+                            )
+                            mesh.scale.setScalar(0.35 + Math.random() * 0.35)
+                            break
+                        case "scatter":
+                            mesh.position.set(
+                                (Math.random() - 0.5) * 7,
+                                (Math.random() - 0.5) * 5,
+                                (Math.random() - 0.5) * 4 - 1
+                            )
+                            mesh.scale.setScalar(0.25 + Math.random() * 0.45)
+                            break
+                        case "grid": {
+                            const cols = Math.ceil(Math.sqrt(count))
+                            mesh.position.set(
+                                ((i % cols) - (cols - 1) / 2) * 2.5,
+                                (Math.floor(i / cols) - (Math.ceil(count / cols) - 1) / 2) * 2.5,
+                                0
+                            )
+                            mesh.scale.setScalar(0.5)
+                            break
+                        }
+                    }
+                }
+
+                scene.add(mesh)
+
+                // Store original positions
+                const pos = mesh.geometry.attributes.position.array
+                const original = new Float32Array(pos.length)
+                for (let j = 0; j < pos.length; j++) original[j] = pos[j]
+
+                bubblesRef.current.push({
+                    mesh,
+                    original,
+                    velocities: new Float32Array(pos.length),
+                    orbitRadius,
+                    orbitSpeed,
+                    orbitAngle,
+                    offset: i * 800
+                })
+            }
+
+            // Dispose the original shared geometry (clones were made above)
+            geometry.dispose()
+
+            // Wireframe overlay
+            if (wireframe) {
+                const wireGeo = new THREE.SphereGeometry(bubbleSize * 1.01, actualDetail, actualDetail)
+                const wireMat = new THREE.MeshBasicMaterial({
+                    color: new THREE.Color(colors.primary),
+                    wireframe: true,
+                    transparent: true,
+                    opacity: wireframeOpacity
+                })
+                const wireMesh = new THREE.Mesh(wireGeo, wireMat)
+                scene.add(wireMesh)
+                bubblesRef.current[0].wireframe = wireMesh
+                wireframeMeshRef.current = wireMesh
+            }
+
+            // Ambient particles
+            if (showParticles && quality !== "low") {
+                const particleCount = quality === "ultra" ? 40 : 20
+                const pGeo = new THREE.BufferGeometry()
+                const pPos = new Float32Array(particleCount * 3)
+                const pCol = new Float32Array(particleCount * 3)
+
+                const c1 = new THREE.Color(colors.primary)
+                const c2 = new THREE.Color(colors.secondary)
+
+                for (let i = 0; i < particleCount; i++) {
+                    pPos[i * 3] = (Math.random() - 0.5) * 10
+                    pPos[i * 3 + 1] = (Math.random() - 0.5) * 10
+                    pPos[i * 3 + 2] = (Math.random() - 0.5) * 8
+
+                    const mix = c1.clone().lerp(c2, Math.random())
+                    pCol[i * 3] = mix.r
+                    pCol[i * 3 + 1] = mix.g
+                    pCol[i * 3 + 2] = mix.b
+                }
+
+                pGeo.setAttribute("position", new THREE.BufferAttribute(pPos, 3))
+                pGeo.setAttribute("color", new THREE.BufferAttribute(pCol, 3))
+
+                const pMat = new THREE.PointsMaterial({
+                    size: 0.05,
+                    vertexColors: true,
+                    transparent: true,
+                    opacity: 0.6
+                })
+
+                const points = new THREE.Points(pGeo, pMat)
+                scene.add(points)
+                particlePointsRef.current = points
+            }
 
             setLoaded(true)
         } catch (err) {
             console.error("Init error:", err)
             setError("Failed to initialize 3D scene")
         }
-    }, [colors, quality, bloom, bloomIntensity, detail, bubbleCount, layout, bubbleSize, wireframe, showParticles])
-
-    // =========================================================================
-    // LIGHTING SETUP
-    // =========================================================================
-    const setupLighting = (THREE: any, scene: any, colors: any, quality: string) => {
-        // Ambient
-        scene.add(new THREE.AmbientLight(0xffffff, 0.4))
-        
-        // Main directional
-        const mainLight = new THREE.DirectionalLight(0xffffff, 1.5)
-        mainLight.position.set(5, 5, 5)
-        mainLight.castShadow = quality !== "low"
-        scene.add(mainLight)
-        
-        // Fill light (colored)
-        const fillLight = new THREE.DirectionalLight(colors.secondary, 0.75)
-        fillLight.position.set(-5, -5, 3)
-        scene.add(fillLight)
-        
-        // Rim light (colored)
-        const rimLight = new THREE.PointLight(colors.primary, 1.2)
-        rimLight.position.set(0, 5, -5)
-        scene.add(rimLight)
-    }
-
-    // =========================================================================
-    // BUBBLE CREATION
-    // =========================================================================
-    const createBubbles = (THREE: any, scene: any, colors: any, quality: string) => {
-        // Clean up existing
-        bubblesRef.current.forEach(b => {
-            scene.remove(b.mesh)
-            b.mesh.geometry.dispose()
-            b.mesh.material.dispose()
-        })
-        bubblesRef.current = []
-
-        const count = Math.min(8, Math.max(1, bubbleCount))
-        const actualDetail = quality === "low" ? 32 : quality === "ultra" ? 128 : detail
-        
-        const geometry = new THREE.SphereGeometry(bubbleSize, actualDetail, actualDetail)
-
-        for (let i = 0; i < count; i++) {
-            const material = new THREE.MeshPhysicalMaterial({
-                color: new THREE.Color(colors.primary),
-                metalness: 0.1,
-                roughness: 0.1,
-                transmission: 0.6,
-                thickness: 0.5,
-                clearcoat: 1,
-                clearcoatRoughness: 0.1,
-                ior: 1.5,
-                shininess: 100,
-                transparent: true,
-                opacity: 0.9,
-                wireframe: wireframe && i === 0
-            })
-
-            // Color variation for multi-bubble
-            if (i > 0) {
-                const c = new THREE.Color(colors.primary)
-                c.offsetHSL(i * 0.06, 0, 0)
-                material.color = c
-            }
-
-            const mesh = new THREE.Mesh(geometry.clone(), material)
-            mesh.castShadow = true
-            mesh.receiveShadow = true
-
-            // Position based on layout
-            let orbitRadius = 0, orbitSpeed = 0, orbitAngle = 0
-            
-            if (count > 1) {
-                switch (layout) {
-                    case "orbit":
-                        orbitRadius = 2.5 + i * 0.8
-                        orbitSpeed = 0.3 + i * 0.08
-                        orbitAngle = (i / count) * Math.PI * 2
-                        mesh.position.set(
-                            Math.cos(orbitAngle) * orbitRadius,
-                            Math.sin(orbitAngle) * orbitRadius * 0.4,
-                            Math.sin(orbitAngle) * orbitRadius * 0.3
-                        )
-                        mesh.scale.setScalar(0.4 + (count - i) * 0.12)
-                        break
-                    case "cluster":
-                        mesh.position.set(
-                            (Math.random() - 0.5) * 3.5,
-                            (Math.random() - 0.5) * 2.5,
-                            (Math.random() - 0.5) * 2
-                        )
-                        mesh.scale.setScalar(0.35 + Math.random() * 0.35)
-                        break
-                    case "scatter":
-                        mesh.position.set(
-                            (Math.random() - 0.5) * 7,
-                            (Math.random() - 0.5) * 5,
-                            (Math.random() - 0.5) * 4 - 1
-                        )
-                        mesh.scale.setScalar(0.25 + Math.random() * 0.45)
-                        break
-                    case "grid":
-                        const cols = Math.ceil(Math.sqrt(count))
-                        mesh.position.set(
-                            ((i % cols) - (cols - 1) / 2) * 2.5,
-                            (Math.floor(i / cols) - (Math.ceil(count / cols) - 1) / 2) * 2.5,
-                            0
-                        )
-                        mesh.scale.setScalar(0.5)
-                        break
-                }
-            }
-
-            scene.add(mesh)
-
-            // Store original positions
-            const pos = mesh.geometry.attributes.position.array
-            const original = new Float32Array(pos.length)
-            for (let j = 0; j < pos.length; j++) original[j] = pos[j]
-
-            bubblesRef.current.push({
-                mesh,
-                original,
-                velocities: new Float32Array(pos.length),
-                orbitRadius,
-                orbitSpeed,
-                orbitAngle,
-                offset: i * 800
-            })
-        }
-
-        // Wireframe overlay
-        if (wireframe) {
-            const wireGeo = new THREE.SphereGeometry(bubbleSize * 1.01, actualDetail, actualDetail)
-            const wireMat = new THREE.MeshBasicMaterial({
-                color: new THREE.Color(colors.primary),
-                wireframe: true,
-                transparent: true,
-                opacity: wireframeOpacity
-            })
-            const wireMesh = new THREE.Mesh(wireGeo, wireMat)
-            scene.add(wireMesh)
-            bubblesRef.current[0].wireframe = wireMesh
-        }
-
-        // Ambient particles
-        if (showParticles && quality !== "low") {
-            const particleCount = quality === "ultra" ? 40 : 20
-            const pGeo = new THREE.BufferGeometry()
-            const pPos = new Float32Array(particleCount * 3)
-            const pCol = new Float32Array(particleCount * 3)
-
-            const c1 = new THREE.Color(colors.primary)
-            const c2 = new THREE.Color(colors.secondary)
-
-            for (let i = 0; i < particleCount; i++) {
-                pPos[i * 3] = (Math.random() - 0.5) * 10
-                pPos[i * 3 + 1] = (Math.random() - 0.5) * 10
-                pPos[i * 3 + 2] = (Math.random() - 0.5) * 8
-
-                const mix = c1.clone().lerp(c2, Math.random())
-                pCol[i * 3] = mix.r
-                pCol[i * 3 + 1] = mix.g
-                pCol[i * 3 + 2] = mix.b
-            }
-
-            pGeo.setAttribute("position", new THREE.BufferAttribute(pPos, 3))
-            pGeo.setAttribute("color", new THREE.BufferAttribute(pCol, 3))
-
-            const pMat = new THREE.PointsMaterial({
-                size: 0.05,
-                vertexColors: true,
-                transparent: true,
-                opacity: 0.6
-            })
-
-            scene.add(new THREE.Points(pGeo, pMat))
-        }
-    }
+    }, [colors, quality, bloom, bloomIntensity, detail, bubbleCount, layout, bubbleSize, wireframe, wireframeOpacity, showParticles])
 
     // =========================================================================
     // ANIMATION LOOP
@@ -436,20 +530,17 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
         timeRef.current += 0.016
         const time = timeRef.current
 
-        // Reduced motion mode
-        if (reducedMotion) {
-            bubblesRef.current.forEach((b, i) => {
-                b.mesh.rotation.y += 0.002 * (i + 1)
-            })
-            composer ? composer.render() : renderer.render(scene, camera)
-            return
-        }
-
-        // Update mouse
+        // Update mouse smoothing (always run, but disable interactive input in reduced motion)
         const m = mouseRef.current
+        if (reducedMotion) {
+            // In reduced motion: zero out mouse targets so interactive effects fade out
+            m.targetX = 0
+            m.targetY = 0
+        }
         m.vx = m.targetX - m.x
         m.vy = m.targetY - m.y
         m.x += m.vx * 0.05
+        m.y += m.vy * 0.05
 
         // Idle detection
         if (Math.abs(m.vx) > 0.001 || Math.abs(m.vy) > 0.001) {
@@ -460,14 +551,14 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
             if (idleTimerRef.current > 2) idleRef.current = true
         }
 
-        // Auto-rotate
-        if (autoRotate && idleRef.current) {
+        // Auto-rotate (skip in reduced motion)
+        if (autoRotate && idleRef.current && !reducedMotion) {
             m.targetX = Math.sin(time * 0.5) * 0.5
         }
 
         // Velocity multiplier
-        const velMult = velocityReaction 
-            ? 1 + Math.sqrt(m.vx * m.vx + m.vy * m.vy) * velocityAmount 
+        const velMult = velocityReaction
+            ? 1 + Math.sqrt(m.vx * m.vx + m.vy * m.vy) * velocityAmount
             : 1
 
         // Audio simulation
@@ -568,11 +659,12 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
     // EVENT HANDLERS
     // =========================================================================
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
+        if (reducedMotion) return
         const rect = containerRef.current?.getBoundingClientRect()
         if (!rect) return
         mouseRef.current.targetX = ((e.clientX - rect.left) / rect.width) * 2 - 1
         mouseRef.current.targetY = -((e.clientY - rect.top) / rect.height) * 2 + 1
-    }, [])
+    }, [reducedMotion])
 
     const handleMouseLeave = useCallback(() => {
         mouseRef.current.targetX = 0
@@ -599,32 +691,36 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
         explodeRef.current = { active: true, time: timeRef.current }
     }, [clickToExplode])
 
-    const handleResize = useCallback(() => {
-        const container = containerRef.current
-        const camera = cameraRef.current
-        const renderer = rendererRef.current
-        if (!container || !camera || !renderer) return
-
-        const rect = container.getBoundingClientRect()
-        camera.aspect = rect.width / rect.height
-        camera.updateProjectionMatrix()
-        renderer.setSize(rect.width, rect.height)
-    }, [])
-
     // =========================================================================
     // EFFECTS
     // =========================================================================
     useEffect(() => {
         init()
-        window.addEventListener("resize", handleResize)
+
+        // Use ResizeObserver for container-aware resizing
+        const container = containerRef.current
+        let resizeObserver: ResizeObserver | null = null
+        if (container) {
+            resizeObserver = new ResizeObserver(() => {
+                const camera = cameraRef.current
+                const renderer = rendererRef.current
+                if (!camera || !renderer) return
+                const rect = container.getBoundingClientRect()
+                camera.aspect = rect.width / rect.height
+                camera.updateProjectionMatrix()
+                renderer.setSize(rect.width, rect.height)
+            })
+            resizeObserver.observe(container)
+        }
+
         return () => {
-            window.removeEventListener("resize", handleResize)
+            resizeObserver?.disconnect()
             cancelAnimationFrame(frameRef.current)
             if (rendererRef.current && containerRef.current) {
                 containerRef.current.removeChild(rendererRef.current.domElement)
             }
         }
-    }, [init, handleResize])
+    }, [init])
 
     useEffect(() => {
         if (loaded) {
@@ -636,6 +732,22 @@ export default function BubbleAnimation3D(props: BubbleAnimation3DProps) {
     // =========================================================================
     // RENDER
     // =========================================================================
+
+    // Static fallback for Framer canvas preview
+    if (isStatic) {
+        return (
+            <div
+                style={{
+                    width: "100%",
+                    height: "100%",
+                    background: gradientBackground
+                        ? `radial-gradient(ellipse at center, ${colors.secondary}20 0%, ${colors.bg} 70%)`
+                        : colors.bg,
+                }}
+            />
+        )
+    }
+
     return (
         <motion.div
             ref={containerRef}
@@ -953,10 +1065,5 @@ addPropertyControls(BubbleAnimation3D, {
         min: 30,
         max: 120,
         step: 30,
-    },
-    reducedMotion: {
-        type: ControlType.Boolean,
-        title: "Reduced Motion",
-        defaultValue: false,
     },
 })

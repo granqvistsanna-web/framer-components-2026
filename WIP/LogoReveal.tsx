@@ -3,7 +3,7 @@
 // @framerSupportedLayoutHeight any-prefer-fixed
 import * as React from "react"
 import { useEffect, useRef, useState } from "react"
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 // Clip-path values for different fill directions - defined outside component to avoid recreating on each render
 const clipPathMap = {
@@ -77,7 +77,6 @@ interface Props {
     logoDimOpacity?: number
     // States
     enableAutoPlay?: boolean
-    showPreview?: boolean
     enableLoop?: boolean
     loopDelay?: number
     enableScrollTrigger?: boolean
@@ -102,7 +101,6 @@ export default function LogoReveal({
     logoDimOpacity = 0.2,
     // States
     enableAutoPlay = true,
-    showPreview = true,
     enableLoop = false,
     loopDelay = 1,
     enableScrollTrigger = false,
@@ -113,6 +111,7 @@ export default function LogoReveal({
     loadingLabel = "Loading",
     onComplete,
 }: Props) {
+    const isStatic = useIsStaticRenderer()
     const [key, setKey] = useState(0)
     const [isVisible, setIsVisible] = useState(true)
     const [isExiting, setIsExiting] = useState(false)
@@ -129,6 +128,7 @@ export default function LogoReveal({
 
     // Check for reduced motion preference
     useEffect(() => {
+        if (typeof window === "undefined") return
         const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
         setPrefersReducedMotion(mediaQuery.matches)
         const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches)
@@ -155,7 +155,7 @@ export default function LogoReveal({
     }, [enableScrollTrigger, scrollThreshold])
 
     useEffect(() => {
-        let loadTimeline: any = null
+        let loadTimeline: GsapTimeline | null = null
         let cancelled = false
         const timeoutIds: ReturnType<typeof setTimeout>[] = []
 
@@ -201,7 +201,7 @@ export default function LogoReveal({
 
         loadGSAP().then(() => {
             if (cancelled) return
-            if (!enableAutoPlay || !showPreview || !isInView) return
+            if (!enableAutoPlay || isStatic || !isInView) return
             if (!wrapEl) return
 
             const gsap = window.gsap
@@ -277,13 +277,37 @@ export default function LogoReveal({
                 elements.forEach((el) => window.gsap.killTweensOf(el))
             }
         }
-    }, [key, enableAutoPlay, showPreview, isInView, prefersReducedMotion, duration, enableLoop, loopDelay, logoFillDirection])
+    }, [key, enableAutoPlay, isStatic, isInView, prefersReducedMotion, duration, enableLoop, loopDelay, logoFillDirection])
 
     if (!isVisible && !enableLoop) return null
-    if (!showPreview) return null
 
     const logoContent = logoSvg ? sanitizeSvg(logoSvg) : defaultLogo
     const logoWidth = logoSizeMap[logoSize]
+
+    // Static fallback for Framer canvas (non-interactive preview)
+    if (isStatic) {
+        return (
+            <div
+                style={{
+                    position: "relative",
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    backgroundColor,
+                }}
+            >
+                <div
+                    style={{
+                        width: logoWidth,
+                        color: logoColor,
+                    }}
+                    dangerouslySetInnerHTML={{ __html: logoContent }}
+                />
+            </div>
+        )
+    }
 
     // Background style based on variant
     const getBackgroundStyle = (): React.CSSProperties => {
@@ -393,31 +417,6 @@ export default function LogoReveal({
 
 LogoReveal.displayName = "Logo Reveal"
 
-// Presets for demo examples
-LogoReveal.defaultProps = {
-    // Content
-    logoSvg: "",
-    logoSize: "M",
-    // Style
-    variant: "simple",
-    backgroundColor: "#0a0a0a",
-    gradientStart: "#6366f1",
-    gradientEnd: "#a855f7",
-    logoColor: "#ffffff",
-    logoDimOpacity: 0.2,
-    // States
-    enableAutoPlay: true,
-    showPreview: true,
-    enableLoop: false,
-    loopDelay: 1,
-    enableScrollTrigger: false,
-    scrollThreshold: 0.5,
-    duration: 3,
-    logoFillDirection: "left",
-    // Advanced
-    loadingLabel: "Loading",
-}
-
 addPropertyControls(LogoReveal, {
     // Content Group
     logoSvg: {
@@ -479,13 +478,6 @@ addPropertyControls(LogoReveal, {
         type: ControlType.Boolean,
         title: "Enable Auto Play",
         defaultValue: true,
-    },
-    showPreview: {
-        type: ControlType.Boolean,
-        title: "Show Preview",
-        defaultValue: true,
-        enabledTitle: "On",
-        disabledTitle: "Off",
     },
     enableScrollTrigger: {
         type: ControlType.Boolean,

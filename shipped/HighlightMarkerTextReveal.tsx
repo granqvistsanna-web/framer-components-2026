@@ -34,6 +34,7 @@ interface Props {
     textBefore?: string
     textAfter?: string
     words?: string[]
+    textAlign?: "left" | "center" | "right"
     font?: Record<string, any>
     textColor?: string
     marker?: MarkerProps
@@ -76,6 +77,7 @@ export default function HighlightMarkerTextReveal(props: Props) {
         textBefore = "We help you rethink",
         textAfter = "",
         words = ["workflows", "handovers", "marketing"],
+        textAlign = "left",
         font = {},
         textColor = "#000000",
         marker = {},
@@ -241,7 +243,7 @@ export default function HighlightMarkerTextReveal(props: Props) {
 
     if (isStaticRenderer) {
         return (
-            <Tag style={{ width: "100%", ...fontStyle }}>
+            <Tag style={{ width: "100%", textAlign, ...fontStyle }}>
                 {textBefore && <span>{textBefore} </span>}
                 <span
                     style={{
@@ -269,7 +271,7 @@ export default function HighlightMarkerTextReveal(props: Props) {
 
     if (reducedMotion) {
         return (
-            <Tag aria-live="polite" style={{ width: "100%", ...fontStyle }}>
+            <Tag aria-live="polite" style={{ width: "100%", textAlign, ...fontStyle }}>
                 {textBefore && <span>{textBefore} </span>}
                 <span>{safeWords[safeIndex]}</span>
                 {textAfter && <span> {textAfter}</span>}
@@ -280,7 +282,7 @@ export default function HighlightMarkerTextReveal(props: Props) {
     return (
         <Tag
             ref={containerRef as any}
-            style={{ width: "100%", position: "relative", ...fontStyle }}
+            style={{ width: "100%", position: "relative", textAlign, ...fontStyle }}
         >
             {/* Appear bar — full-width marker wipe on scroll into view */}
             {appearEffect && !hasAppeared && (
@@ -375,6 +377,13 @@ addPropertyControls(HighlightMarkerTextReveal, {
         type: ControlType.String,
         title: "Text After",
         defaultValue: "",
+    },
+    textAlign: {
+        type: ControlType.Enum,
+        title: "Align",
+        defaultValue: "left",
+        options: ["left", "center", "right"],
+        optionTitles: ["Left", "Center", "Right"],
     },
     font: {
         type: ControlType.Font,

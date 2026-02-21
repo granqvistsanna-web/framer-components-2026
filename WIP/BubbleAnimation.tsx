@@ -1,8 +1,10 @@
 // Bubble Animation
 // @framerSupportedLayoutWidth any-prefer-fixed
 // @framerSupportedLayoutHeight any-prefer-fixed
+// @framerIntrinsicWidth 600
+// @framerIntrinsicHeight 400
 import React, { useEffect, useRef, useState, useCallback } from "react"
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 import { motion } from "framer-motion"
 
 interface Bubble {
@@ -69,6 +71,77 @@ function BubbleAnimation(props: Props) {
         backgroundColor = "#0f172a",
     } = props
 
+    const isStatic = useIsStaticRenderer()
+
+    // Static fallback for Framer canvas/thumbnails
+    if (isStatic) {
+        return (
+            <div
+                style={{
+                    width: "100%",
+                    height: "100%",
+                    background: backgroundColor,
+                    position: "relative",
+                    overflow: "hidden",
+                }}
+            />
+        )
+    }
+
+    return (
+        <BubbleAnimationCanvas
+            bubbleCount={bubbleCount}
+            minRadius={minRadius}
+            maxRadius={maxRadius}
+            bubbleColor={bubbleColor}
+            colorVariation={colorVariation}
+            baseOpacity={baseOpacity}
+            mouseRadius={mouseRadius}
+            mouseForce={mouseForce}
+            returnSpeed={returnSpeed}
+            friction={friction}
+            floatSpeed={floatSpeed}
+            floatAmplitude={floatAmplitude}
+            enablePulse={enablePulse}
+            pulseSpeed={pulseSpeed}
+            pulseAmount={pulseAmount}
+            enableConnections={enableConnections}
+            connectionDistance={connectionDistance}
+            connectionOpacity={connectionOpacity}
+            enableGlow={enableGlow}
+            glowStrength={glowStrength}
+            backgroundColor={backgroundColor}
+        />
+    )
+}
+
+// Inner component that handles the actual canvas animation
+// Separated so hooks are not called conditionally after the early return
+function BubbleAnimationCanvas(props: Required<Props>) {
+    const {
+        bubbleCount,
+        minRadius,
+        maxRadius,
+        bubbleColor,
+        colorVariation,
+        baseOpacity,
+        mouseRadius,
+        mouseForce,
+        returnSpeed,
+        friction,
+        floatSpeed,
+        floatAmplitude,
+        enablePulse,
+        pulseSpeed,
+        pulseAmount,
+        enableConnections,
+        connectionDistance,
+        connectionOpacity,
+        enableGlow,
+        glowStrength,
+        backgroundColor,
+    } = props
+
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
     const bubblesRef = useRef<Bubble[]>([])
@@ -77,7 +150,46 @@ function BubbleAnimation(props: Props) {
     const dprRef = useRef(1)
     const dimensionsRef = useRef({ width: 0, height: 0 })
     const timeRef = useRef(0)
+    const lastFrameTimeRef = useRef(0)
     const [isLoaded, setIsLoaded] = useState(false)
+
+    // Config ref — keeps animation loop stable while props change
+    const configRef = useRef({
+        mouseRadius,
+        mouseForce,
+        returnSpeed,
+        friction,
+        floatSpeed,
+        floatAmplitude,
+        enablePulse,
+        pulseSpeed,
+        pulseAmount,
+        enableConnections,
+        connectionDistance,
+        connectionOpacity,
+        enableGlow,
+        glowStrength,
+        backgroundColor,
+    })
+    useEffect(() => {
+        configRef.current = {
+            mouseRadius,
+            mouseForce,
+            returnSpeed,
+            friction,
+            floatSpeed,
+            floatAmplitude,
+            enablePulse,
+            pulseSpeed,
+            pulseAmount,
+            enableConnections,
+            connectionDistance,
+            connectionOpacity,
+            enableGlow,
+            glowStrength,
+            backgroundColor,
+        }
+    })
 
     // Parse hex color to rgb
     const hexToRgb = useCallback((hex: string) => {
@@ -152,7 +264,10 @@ function BubbleAnimation(props: Props) {
         if (!canvas) return
 
         const rect = canvas.getBoundingClientRect()
-        const dpr = Math.min(window.devicePixelRatio || 1, 2)
+        const dpr = Math.min(
+            typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
+            2
+        )
         dprRef.current = dpr
 
         canvas.width = rect.width * dpr
@@ -170,21 +285,29 @@ function BubbleAnimation(props: Props) {
         setIsLoaded(true)
     }, [initBubbles])
 
-    // Animation loop
-    const animate = useCallback(() => {
+    // Animation loop — reads from configRef so it never recreates
+    const animate = useCallback((timestamp: number) => {
         const canvas = canvasRef.current
         const ctx = ctxRef.current
         if (!canvas || !ctx) return
 
         const { width, height } = dimensionsRef.current
-        const dpr = dprRef.current
-        timeRef.current += 0.016
+
+        // Calculate actual delta time from RAF timestamp
+        if (lastFrameTimeRef.current === 0) {
+            lastFrameTimeRef.current = timestamp
+        }
+        const dt = Math.min((timestamp - lastFrameTimeRef.current) / 1000, 0.1)
+        lastFrameTimeRef.current = timestamp
+        timeRef.current += dt
+
+        const cfg = configRef.current
 
         // Clear canvas
         ctx.clearRect(0, 0, width, height)
 
         // Draw background
-        ctx.fillStyle = backgroundColor
+        ctx.fillStyle = cfg.backgroundColor
         ctx.fillRect(0, 0, width, height)
 
         const bubbles = bubblesRef.current
@@ -192,7 +315,7 @@ function BubbleAnimation(props: Props) {
         const time = timeRef.current
 
         // Update and draw connections first (behind bubbles)
-        if (enableConnections) {
+        if (cfg.enableConnections) {
             ctx.lineWidth = 1
             for (let i = 0; i < bubbles.length; i++) {
                 for (let j = i + 1; j < bubbles.length; j++) {
@@ -202,9 +325,9 @@ function BubbleAnimation(props: Props) {
                     const dy = b1.y - b2.y
                     const dist = Math.sqrt(dx * dx + dy * dy)
 
-                    if (dist < connectionDistance) {
+                    if (dist < cfg.connectionDistance) {
                         const opacity =
-                            (1 - dist / connectionDistance) * connectionOpacity
+                            (1 - dist / cfg.connectionDistance) * cfg.connectionOpacity
                         ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`
                         ctx.beginPath()
                         ctx.moveTo(b1.x, b1.y)
@@ -222,8 +345,8 @@ function BubbleAnimation(props: Props) {
             const dy = mouse.y - bubble.y
             const dist = Math.sqrt(dx * dx + dy * dy)
 
-            if (dist < mouseRadius && dist > 0) {
-                const force = (1 - dist / mouseRadius) * mouseForce
+            if (dist < cfg.mouseRadius && dist > 0) {
+                const force = (1 - dist / cfg.mouseRadius) * cfg.mouseForce
                 const angle = Math.atan2(dy, dx)
                 bubble.vx -= Math.cos(angle) * force * 2
                 bubble.vy -= Math.sin(angle) * force * 2
@@ -231,23 +354,23 @@ function BubbleAnimation(props: Props) {
 
             // Floating motion
             const floatX =
-                Math.sin(time * floatSpeed + bubble.pulseOffset) *
-                floatAmplitude *
+                Math.sin(time * cfg.floatSpeed + bubble.pulseOffset) *
+                cfg.floatAmplitude *
                 0.3
             const floatY =
-                Math.cos(time * floatSpeed * 0.7 + bubble.pulseOffset) *
-                floatAmplitude *
+                Math.cos(time * cfg.floatSpeed * 0.7 + bubble.pulseOffset) *
+                cfg.floatAmplitude *
                 0.3
 
             // Return to base position
             const homeX = bubble.baseX + floatX
             const homeY = bubble.baseY + floatY
-            bubble.vx += (homeX - bubble.x) * returnSpeed
-            bubble.vy += (homeY - bubble.y) * returnSpeed
+            bubble.vx += (homeX - bubble.x) * cfg.returnSpeed
+            bubble.vy += (homeY - bubble.y) * cfg.returnSpeed
 
             // Apply friction
-            bubble.vx *= friction
-            bubble.vy *= friction
+            bubble.vx *= cfg.friction
+            bubble.vy *= cfg.friction
 
             // Update position
             bubble.x += bubble.vx
@@ -261,10 +384,10 @@ function BubbleAnimation(props: Props) {
 
             // Calculate radius with pulse
             let currentRadius = bubble.baseRadius
-            if (enablePulse) {
+            if (cfg.enablePulse) {
                 const pulse =
-                    Math.sin(time * pulseSpeed + bubble.pulseOffset) *
-                    pulseAmount *
+                    Math.sin(time * cfg.pulseSpeed + bubble.pulseOffset) *
+                    cfg.pulseAmount *
                     0.5 +
                     1
                 currentRadius *= pulse
@@ -297,9 +420,9 @@ function BubbleAnimation(props: Props) {
             }
 
             // Draw glow
-            if (enableGlow) {
+            if (cfg.enableGlow) {
                 ctx.shadowColor = bubble.color
-                ctx.shadowBlur = glowStrength
+                ctx.shadowBlur = cfg.glowStrength
             } else {
                 ctx.shadowBlur = 0
             }
@@ -324,23 +447,7 @@ function BubbleAnimation(props: Props) {
         })
 
         rafRef.current = requestAnimationFrame(animate)
-    }, [
-        mouseRadius,
-        mouseForce,
-        returnSpeed,
-        friction,
-        floatSpeed,
-        floatAmplitude,
-        enablePulse,
-        pulseSpeed,
-        pulseAmount,
-        enableConnections,
-        connectionDistance,
-        connectionOpacity,
-        enableGlow,
-        glowStrength,
-        backgroundColor,
-    ])
+    }, [])
 
     // Mouse move handler
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
@@ -376,10 +483,15 @@ function BubbleAnimation(props: Props) {
     // Initialize
     useEffect(() => {
         handleResize()
-        window.addEventListener("resize", handleResize)
+
+        if (typeof window !== "undefined") {
+            window.addEventListener("resize", handleResize)
+        }
 
         return () => {
-            window.removeEventListener("resize", handleResize)
+            if (typeof window !== "undefined") {
+                window.removeEventListener("resize", handleResize)
+            }
             if (rafRef.current) {
                 cancelAnimationFrame(rafRef.current)
             }
@@ -390,6 +502,7 @@ function BubbleAnimation(props: Props) {
     useEffect(() => {
         if (!isLoaded) return
 
+        lastFrameTimeRef.current = 0
         rafRef.current = requestAnimationFrame(animate)
 
         return () => {
