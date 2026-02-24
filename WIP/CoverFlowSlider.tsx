@@ -68,6 +68,10 @@ interface CoverFlowSliderProps {
     controlMargin: number
     controlAlignment: "flex-start" | "center" | "flex-end"
     buttonStyle: ButtonStyle
+    loop: boolean
+    autoplay: boolean
+    autoplayInterval: number
+    pauseOnHover: boolean
     showDots: boolean
     dotSize: number
     dotGap: number
@@ -83,8 +87,6 @@ type RuntimeState = {
     draggable: DraggableInstance | null
     activeIndex: number
     itemCount: number
-    isVisible: boolean
-    observer: IntersectionObserver | null
     keyHandler: ((e: KeyboardEvent) => void) | null
     navigateTo: ((index: number) => void) | null
     didDrag: boolean
@@ -242,7 +244,6 @@ interface CoverFlowTransform {
     rotY: number
     z: number
     scale: number
-    opacity: number
     zIndex: number
 }
 
@@ -258,7 +259,7 @@ function getCoverFlowTransform(
     const diff = index - activeIndex
 
     if (diff === 0) {
-        return { x: 0, rotY: 0, z: 0, scale: 1, opacity: 1, zIndex: count }
+        return { x: 0, rotY: 0, z: 0, scale: 1, zIndex: count }
     }
 
     const direction = diff > 0 ? 1 : -1
@@ -269,7 +270,6 @@ function getCoverFlowTransform(
         rotY: -direction * rotationY,
         z: depthOffset,
         scale: Math.max(0.4, sideScale - (absDiff - 1) * 0.05),
-        opacity: 1,
         zIndex: count - absDiff,
     }
 }
@@ -305,7 +305,6 @@ function applyCoverFlowTransforms(
             rotationY: t.rotY,
             z: t.z,
             scale: t.scale,
-            opacity: t.opacity,
             zIndex: t.zIndex,
             transformPerspective: perspective,
             transformOrigin: "center center",
@@ -352,7 +351,6 @@ function lerpTransforms(
             rotationY: lerp(from.rotY, to.rotY),
             z: lerp(from.z, to.z),
             scale: lerp(from.scale, to.scale),
-            opacity: lerp(from.opacity, to.opacity),
             zIndex: progress > 0.5 ? to.zIndex : from.zIndex,
             transformPerspective: perspective,
             transformOrigin: "center center",
@@ -393,6 +391,10 @@ function CoverFlowSlider({
     controlMargin = 0,
     controlAlignment = "center",
     buttonStyle,
+    loop = false,
+    autoplay = false,
+    autoplayInterval = 3,
+    pauseOnHover = true,
     showDots = false,
     dotSize = 8,
     dotGap = 8,
@@ -418,6 +420,8 @@ function CoverFlowSlider({
     const stageRef = useRef<HTMLDivElement>(null)
     const dragProxyRef = useRef<HTMLDivElement>(null)
     const containerWidth = useContainerWidth(rootRef)
+    const containerWidthRef = useRef(containerWidth)
+    useEffect(() => { containerWidthRef.current = containerWidth }, [containerWidth])
     const liveRegionRef = useRef<HTMLDivElement>(null)
     const [engineReady, setEngineReady] = useState(false)
     const [displayIndex, setDisplayIndex] = useState(0)
@@ -425,8 +429,6 @@ function CoverFlowSlider({
         draggable: null,
         activeIndex: 0,
         itemCount: 0,
-        isVisible: false,
-        observer: null,
         keyHandler: null,
         navigateTo: null,
         didDrag: false,
@@ -537,7 +539,12 @@ function CoverFlowSlider({
 
         // Navigation function
         const navigateTo = (targetIndex: number) => {
-            const idx = clamp(targetIndex, 0, itemCount - 1)
+            let idx: number
+            if (loop) {
+                idx = ((targetIndex % itemCount) + itemCount) % itemCount
+            } else {
+                idx = clamp(targetIndex, 0, itemCount - 1)
+            }
             if (idx === state.activeIndex) return
 
             state.activeIndex = idx
@@ -579,34 +586,41 @@ function CoverFlowSlider({
         const dragProxy = dragProxyRef.current
         if (!dragProxy) return
 
-        const dragThreshold = 50
+        const dragThreshold = 30
+        let dragStartTime = 0
 
         const [draggable] = Draggable.create(dragProxy, {
             type: "x",
             inertia: false,
-            edgeResistance: 0.9,
+            edgeResistance: 0.85,
             bounds: {
-                minX: -containerWidth * 0.5,
-                maxX: containerWidth * 0.5,
+                minX: -containerWidthRef.current * 0.5,
+                maxX: containerWidthRef.current * 0.5,
             },
             onPress(this: DraggableInstance & { pointerEvent: PointerEvent }) {
                 dragProxy.style.cursor = "grabbing"
                 state.didDrag = false
+                dragStartTime = Date.now()
             },
             onDrag(this: DraggableInstance) {
                 const delta = this.x
                 if (Math.abs(delta) > 4) state.didDrag = true
 
-                // Interpolated drag preview
-                const progress = clamp(
-                    Math.abs(delta) / (containerWidth * 0.25),
+                // Eased drag preview — cubic ease-out for natural resistance feel
+                const raw = clamp(
+                    Math.abs(delta) / (containerWidthRef.current * 0.2),
                     0,
                     1
                 )
-                if (progress > 0.01) {
-                    const targetIdx = delta < 0
-                        ? Math.min(state.activeIndex + 1, itemCount - 1)
-                        : Math.max(state.activeIndex - 1, 0)
+                const progress = 1 - Math.pow(1 - raw, 3)
+
+                if (progress > 0.005) {
+                    const getTarget = (dir: number) =>
+                        loop
+                            ? ((state.activeIndex + dir) % itemCount + itemCount) % itemCount
+                            : clamp(state.activeIndex + dir, 0, itemCount - 1)
+
+                    const targetIdx = delta < 0 ? getTarget(1) : getTarget(-1)
 
                     if (targetIdx !== state.activeIndex) {
                         lerpTransforms(
@@ -621,13 +635,21 @@ function CoverFlowSlider({
             onRelease(this: DraggableInstance & { pointerEvent: PointerEvent }) {
                 dragProxy.style.cursor = "grab"
                 const delta = this.x
+                const elapsed = Date.now() - dragStartTime
+                // Velocity-based: fast flick (< 250ms) with small distance still triggers
+                const velocity = Math.abs(delta) / Math.max(elapsed, 1)
+                const shouldNavigate =
+                    Math.abs(delta) > dragThreshold || (velocity > 0.4 && Math.abs(delta) > 10)
 
-                if (Math.abs(delta) > dragThreshold) {
+                if (shouldNavigate) {
                     const nextIdx = delta < 0
                         ? state.activeIndex + 1
                         : state.activeIndex - 1
                     navigateTo(nextIdx)
-                    updateCursors(clamp(nextIdx, 0, itemCount - 1))
+                    updateCursors(loop
+                        ? ((nextIdx % itemCount) + itemCount) % itemCount
+                        : clamp(nextIdx, 0, itemCount - 1)
+                    )
                 } else {
                     // Snap back to current position
                     applyCoverFlowTransforms(
@@ -641,62 +663,24 @@ function CoverFlowSlider({
                 // Reset drag proxy position
                 gsap.set(dragProxy, { x: 0 })
 
-                // Pass through clicks for small drags (click-to-navigate)
+                // Pass through taps to slides underneath
                 if (!state.didDrag) {
-                    const clientX = this.pointerEvent.clientX
-                    const clientY = this.pointerEvent.clientY
+                    const { clientX, clientY } = this.pointerEvent
                     dragProxy.style.pointerEvents = "none"
-                    const raf1 = requestAnimationFrame(() => {
-                        const raf2 = requestAnimationFrame(() => {
-                            const el = document.elementFromPoint(clientX, clientY)
-                            if (el) {
-                                el.dispatchEvent(
-                                    new MouseEvent("click", {
-                                        view: window,
-                                        bubbles: true,
-                                        cancelable: true,
-                                    })
-                                )
-                            }
-                            dragProxy.style.pointerEvents = "auto"
-                        })
-                        state.pendingRafs.push(raf2)
+                    const raf = requestAnimationFrame(() => {
+                        const el = document.elementFromPoint(clientX, clientY)
+                        if (el instanceof HTMLElement) el.click()
+                        dragProxy.style.pointerEvents = "auto"
                     })
-                    state.pendingRafs.push(raf1)
+                    state.pendingRafs.push(raf)
                 }
             },
         })
 
         state.draggable = draggable
 
-        // IntersectionObserver for keyboard gating
-        const observer = new IntersectionObserver(
-            (entries) => {
-                for (const entry of entries) {
-                    state.isVisible =
-                        entry.isIntersecting &&
-                        entry.intersectionRatio >= 0.25
-                }
-            },
-            { threshold: [0, 0.25, 1] }
-        )
-        observer.observe(root)
-        state.observer = observer
-
-        // Keyboard handler
+        // Keyboard handler — scoped to root so multiple sliders don't conflict
         const onKeyDown = (e: KeyboardEvent) => {
-            if (!state.isVisible) return
-            const tag = (
-                e.target as HTMLElement
-            )?.tagName?.toLowerCase()
-            if (
-                tag === "input" ||
-                tag === "textarea" ||
-                tag === "select"
-            )
-                return
-            if ((e.target as HTMLElement)?.isContentEditable) return
-
             if (e.key === "ArrowRight") {
                 e.preventDefault()
                 navigateTo(state.activeIndex + 1)
@@ -705,7 +689,7 @@ function CoverFlowSlider({
                 navigateTo(state.activeIndex - 1)
             }
         }
-        window.addEventListener("keydown", onKeyDown)
+        root.addEventListener("keydown", onKeyDown)
         state.keyHandler = onKeyDown
 
         // Initial notification
@@ -722,12 +706,8 @@ function CoverFlowSlider({
                 el.removeEventListener("click", handler)
             })
             if (state.keyHandler) {
-                window.removeEventListener("keydown", state.keyHandler)
+                root.removeEventListener("keydown", state.keyHandler)
                 state.keyHandler = null
-            }
-            if (state.observer) {
-                state.observer.disconnect()
-                state.observer = null
             }
             state.pendingRafs.forEach(cancelAnimationFrame)
             state.pendingRafs = []
@@ -743,7 +723,6 @@ function CoverFlowSlider({
         isStatic,
         engineReady,
         reducedMotion,
-        containerWidth,
         maxWidth,
         borderRadius,
         perspective,
@@ -752,8 +731,58 @@ function CoverFlowSlider({
         sideScale,
         depthOffset,
         duration,
+        loop,
         slidesSignature,
     ])
+
+    // --- Autoplay ---
+    useEffect(() => {
+        if (!autoplay || isStatic || !engineReady) return
+        if (slideNodes.length <= 1) return
+
+        const state = runtimeRef.current
+        let paused = false
+        let timer: number
+
+        const advance = () => {
+            if (paused) return
+            if (state.navigateTo) {
+                if (loop) {
+                    state.navigateTo(state.activeIndex + 1)
+                } else if (state.activeIndex < state.itemCount - 1) {
+                    state.navigateTo(state.activeIndex + 1)
+                }
+            }
+            timer = window.setTimeout(advance, autoplayInterval * 1000)
+        }
+
+        timer = window.setTimeout(advance, autoplayInterval * 1000)
+
+        const root = rootRef.current
+        if (!root || !pauseOnHover) {
+            return () => { window.clearTimeout(timer) }
+        }
+
+        const pause = () => { paused = true }
+        const resume = () => {
+            paused = false
+            window.clearTimeout(timer)
+            timer = window.setTimeout(advance, autoplayInterval * 1000)
+        }
+
+        root.addEventListener("mouseenter", pause)
+        root.addEventListener("mouseleave", resume)
+        root.addEventListener("focusin", pause)
+        root.addEventListener("focusout", resume)
+
+        return () => {
+            window.clearTimeout(timer)
+            root.removeEventListener("mouseenter", pause)
+            root.removeEventListener("mouseleave", resume)
+            root.removeEventListener("focusin", pause)
+            root.removeEventListener("focusout", resume)
+        }
+    }, [autoplay, autoplayInterval, pauseOnHover, loop, isStatic, engineReady, slidesSignature])
 
     // --- Button setup ---
     const isArrows = buttonContent === "arrows"
@@ -763,8 +792,8 @@ function CoverFlowSlider({
     const prevContent = isCustom ? prevIcon : isArrows ? <ArrowLeft /> : prevLabel
     const nextContent = isCustom ? nextIcon : isArrows ? <ArrowRight /> : nextLabel
 
-    const canPrev = displayIndex > 0
-    const canNext = displayIndex < slideNodes.length - 1
+    const canPrev = loop || displayIndex > 0
+    const canNext = loop || displayIndex < slideNodes.length - 1
 
     const onPrev = () => runtimeRef.current.navigateTo?.(runtimeRef.current.activeIndex - 1)
     const onNext = () => runtimeRef.current.navigateTo?.(runtimeRef.current.activeIndex + 1)
@@ -851,7 +880,7 @@ function CoverFlowSlider({
                     height: "100%",
                     display: "flex",
                     flexDirection: "column",
-                    gap: showControls ? controlGap : 0,
+                    gap: (showControls || showDots) ? controlGap : 0,
                 }}
             >
                 {controlPosition === "top" && staticControlsBlock}
@@ -883,7 +912,6 @@ function CoverFlowSlider({
                                         borderRadius,
                                         overflow: "hidden",
                                         transform: `perspective(${perspective}px) translateX(${t.x}px) rotateY(${t.rotY}deg) translateZ(${t.z}px) scale(${t.scale})`,
-                                        opacity: t.opacity,
                                         zIndex: t.zIndex,
                                     }}
                                 >
@@ -969,7 +997,7 @@ function CoverFlowSlider({
                 boxSizing: "border-box",
                 display: "flex",
                 flexDirection: "column",
-                gap: showControls ? controlGap : 0,
+                gap: (showControls || showDots) ? controlGap : 0,
                 outline: "none",
             }}
         >
@@ -1031,7 +1059,7 @@ function CoverFlowSlider({
                                     width: "100%",
                                     borderRadius,
                                     overflow: "hidden",
-                                    willChange: "transform, opacity",
+                                    willChange: "transform",
                                     backfaceVisibility: "hidden",
                                 }}
                             >
@@ -1173,6 +1201,35 @@ addPropertyControls(CoverFlowSlider, {
                 defaultValue: -200,
             },
         },
+    },
+
+    // --- Behavior ---
+    loop: {
+        type: ControlType.Boolean,
+        title: "Loop",
+        defaultValue: false,
+    },
+    autoplay: {
+        type: ControlType.Boolean,
+        title: "Autoplay",
+        defaultValue: false,
+    },
+    autoplayInterval: {
+        type: ControlType.Number,
+        title: "Interval",
+        min: 1,
+        max: 15,
+        step: 0.5,
+        unit: "s",
+        displayStepper: true,
+        defaultValue: 3,
+        hidden: (props: CoverFlowSliderProps) => !props.autoplay,
+    },
+    pauseOnHover: {
+        type: ControlType.Boolean,
+        title: "Pause on Hover",
+        defaultValue: true,
+        hidden: (props: CoverFlowSliderProps) => !props.autoplay,
     },
 
     // --- Controls ---
