@@ -725,6 +725,7 @@ export default function RubiksCube(props: RubiksCubeProps) {
     const cubiesRef = useRef<THREE.Group[]>([])
     const bodyMaterialRef = useRef<THREE.MeshPhysicalMaterial | null>(null)
     const stickerMaterialsRef = useRef<Record<string, THREE.MeshPhysicalMaterial> | null>(null)
+    const stickerGeometryRef = useRef<THREE.BufferGeometry | null>(null)
     const moveQueueRef = useRef<CubeMove[]>([])
     const pendingSnapRef = useRef(false)
     const lastUserInteractionAtRef = useRef(0)
@@ -818,6 +819,10 @@ export default function RubiksCube(props: RubiksCubeProps) {
         cameraRef.current = null
         bodyMaterialRef.current = null
         stickerMaterialsRef.current = null
+        if (stickerGeometryRef.current) {
+            stickerGeometryRef.current.dispose()
+            stickerGeometryRef.current = null
+        }
         cubiesRef.current = []
         rowTwistRef.current = {
             active: false,
@@ -936,6 +941,7 @@ export default function RubiksCube(props: RubiksCubeProps) {
             const stickerGeometry = surfaceStyle === "sticker"
                 ? createStickerGeometry({ cubeSize, stickerDepth, stickerBevel, stickerShape, stickerRoundness })
                 : null
+            stickerGeometryRef.current = stickerGeometry
             const stickerPalette = STICKER_PALETTES[preset] ?? STICKER_PALETTES.obsidian
             const sm = createStickerMaterial
             const stickerMaterials = surfaceStyle === "sticker" ? {
@@ -1024,7 +1030,7 @@ export default function RubiksCube(props: RubiksCubeProps) {
                 }
             }
 
-            if (gridSize === 3) {
+            if (cubiesRef.current.length > 8) {
                 group.scale.setScalar(0.67)
             }
             scene.add(group)
@@ -1114,6 +1120,9 @@ export default function RubiksCube(props: RubiksCubeProps) {
                 if (twist.axis === "z") twist.pivot.rotation.z = angle
 
                 if (t >= 1) {
+                    // Read current position scale based on actual cubie count
+                    const cubieCount = cubiesRef.current.length
+                    const currentPositionScale = cubieCount <= 8 ? 0.5 : 1
                     for (const cubie of cubiesRef.current) {
                         const data = cubie.userData as { gx?: number; gy?: number; gz?: number }
                         const coord = twist.axis === "x" ? data.gx : twist.axis === "y" ? data.gy : data.gz
@@ -1142,9 +1151,9 @@ export default function RubiksCube(props: RubiksCubeProps) {
                         data.gy = nextY
                         data.gz = nextZ
                         cubie.position.set(
-                            (cubeSize + gap) * positionScale * nextX,
-                            (cubeSize + gap) * positionScale * nextY,
-                            (cubeSize + gap) * positionScale * nextZ
+                            (cubeSize + gap) * currentPositionScale * nextX,
+                            (cubeSize + gap) * currentPositionScale * nextY,
+                            (cubeSize + gap) * currentPositionScale * nextZ
                         )
                     }
 
@@ -1336,6 +1345,19 @@ export default function RubiksCube(props: RubiksCubeProps) {
             cleanup()
         }
     }, [init, cleanup, isStaticRenderer])
+
+    // Update sticker colors when preset changes (materials exist but colors need update)
+    useEffect(() => {
+        const stickers = stickerMaterialsRef.current
+        if (!stickers) return
+        const palette = STICKER_PALETTES[preset] ?? STICKER_PALETTES.obsidian
+        stickers.px.color.set(palette.px)
+        stickers.nx.color.set(palette.nx)
+        stickers.py.color.set(palette.py)
+        stickers.ny.color.set(palette.ny)
+        stickers.pz.color.set(palette.pz)
+        stickers.nz.color.set(palette.nz)
+    }, [preset])
 
     // Update materials in-place without rebuilding the scene
     useEffect(() => {

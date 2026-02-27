@@ -1,5 +1,5 @@
 /**
- * Overlapping Slider
+ * Foldover Slider
  * A horizontal draggable slider where passed cards overlap, scale down,
  * and rotate into a stack — creating a "deck of cards" feel.
  *
@@ -37,16 +37,38 @@ interface OverlapEffect {
     minScale?: number
     maxRotation?: number
     transformOrigin?: string
+    minOpacity?: number
 }
 
-interface OverlappingSliderProps {
+interface ButtonStyle {
+    font?: React.CSSProperties
+    color?: string
+    background?: string
+    borderColor?: string
+    borderRadius?: number
+}
+
+interface FoldoverSliderProps {
     children: React.ReactNode
     gap: number
-    slideWidth: number
+    maxWidth: number
+    borderRadius: number
     paddingLeft: number
     paddingRight: number
     snapToSlide: boolean
     overlapEffect: OverlapEffect
+    showControls: boolean
+    buttonContent: "text" | "arrows" | "custom"
+    prevLabel: string
+    nextLabel: string
+    prevIcon: React.ReactNode
+    nextIcon: React.ReactNode
+    controlPosition: "bottom" | "top"
+    controlGap: number
+    controlMargin: number
+    controlAlignment: "flex-start" | "center" | "flex-end"
+    buttonStyle: ButtonStyle
+    onSlideChange?: (index: number) => void
 }
 
 // --- Runtime state ---
@@ -59,6 +81,8 @@ type RuntimeState = {
     isVisible: boolean
     observer: IntersectionObserver | null
     keyHandler: ((e: KeyboardEvent) => void) | null
+    navigateTo: ((index: number) => void) | null
+    didDrag: boolean
 }
 
 // --- Utilities ---
@@ -141,9 +165,7 @@ function loadScript(src: string, timeoutMs = 10000): Promise<void> {
 function useContainerWidth(
     ref: React.RefObject<HTMLDivElement | null>
 ): number {
-    const [width, setWidth] = useState(() =>
-        typeof window !== "undefined" ? window.innerWidth : 1024
-    )
+    const [width, setWidth] = useState(1024)
 
     useEffect(() => {
         if (typeof ResizeObserver === "undefined") return
@@ -214,7 +236,8 @@ function applyOverlapTransforms(
     spacing: number,
     minScale: number,
     maxRotation: number,
-    transformOrigin: string
+    transformOrigin: string,
+    minOpacity: number
 ) {
     const scrollOffset = Math.max(0, -trackX)
 
@@ -227,33 +250,69 @@ function applyOverlapTransforms(
             x: passedBy,
             scale: 1 - (1 - minScale) * t,
             rotation: maxRotation * t,
+            opacity: 1 - (1 - minOpacity) * t,
             transformOrigin,
             zIndex: items.length - Math.round(t * items.length),
         })
     }
 }
 
+// --- Arrow icons ---
+
+const ArrowLeft = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+)
+
+const ArrowRight = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+)
+
 // --- Component ---
 
-function OverlappingSlider({
+function FoldoverSlider({
     children,
     gap = 24,
-    slideWidth = 384,
+    maxWidth = 400,
+    borderRadius = 12,
     paddingLeft = 0,
     paddingRight = 0,
     snapToSlide = true,
     overlapEffect,
-}: OverlappingSliderProps) {
+    showControls = false,
+    buttonContent = "arrows",
+    prevLabel = "Prev",
+    nextLabel = "Next",
+    prevIcon,
+    nextIcon,
+    controlPosition = "bottom",
+    controlGap = 16,
+    controlMargin = 0,
+    controlAlignment = "center",
+    buttonStyle,
+    onSlideChange,
+}: FoldoverSliderProps) {
     const minScale = overlapEffect?.minScale ?? 0.45
     const maxRotation = overlapEffect?.maxRotation ?? -8
     const transformOrigin = overlapEffect?.transformOrigin ?? "75% center"
+    const minOpacity = overlapEffect?.minOpacity ?? 0.4
+    const btnFont = buttonStyle?.font ?? {}
+    const btnColor = buttonStyle?.color ?? "#efeeec"
+    const btnBg = buttonStyle?.background ?? "#131313"
+    const btnBorderColor = buttonStyle?.borderColor ?? "#2c2c2c"
+    const btnRadius = buttonStyle?.borderRadius ?? 8
     const isStatic = useIsStaticRenderer()
     const reducedMotion = useReducedMotion()
     const rootRef = useRef<HTMLDivElement>(null)
     const trackRef = useRef<HTMLDivElement>(null)
     const containerWidth = useContainerWidth(rootRef)
     const liveRegionRef = useRef<HTMLDivElement>(null)
+    const updateLiveRegionRef = useRef<(idx: number) => void>(() => {})
     const [engineReady, setEngineReady] = useState(false)
+    const [displayIndex, setDisplayIndex] = useState(0)
     const runtimeRef = useRef<RuntimeState>({
         draggable: null,
         activeIndex: 0,
@@ -262,7 +321,15 @@ function OverlappingSlider({
         isVisible: false,
         observer: null,
         keyHandler: null,
+        navigateTo: null,
+        didDrag: false,
     })
+
+    // Stable ref for onSlideChange callback
+    const onSlideChangeRef = useRef(onSlideChange)
+    useEffect(() => {
+        onSlideChangeRef.current = onSlideChange
+    }, [onSlideChange])
 
     const slideNodes = useMemo(() => {
         return React.Children.toArray(children).filter(
@@ -327,7 +394,8 @@ function OverlappingSlider({
         const itemCount = items.length
         if (itemCount === 0) return
 
-        const spacing = slideWidth + gap
+        const measuredWidth = items[0]?.getBoundingClientRect().width ?? 300
+        const spacing = measuredWidth + gap
         const maxDrag = spacing * (itemCount - 1)
         const state = runtimeRef.current
         state.spacing = spacing
@@ -346,13 +414,14 @@ function OverlappingSlider({
             spacing,
             minScale,
             maxRotation,
-            transformOrigin
+            transformOrigin,
+            minOpacity
         )
 
         // ARIA setup
         root.setAttribute("role", "region")
         root.setAttribute("aria-roledescription", "carousel")
-        root.setAttribute("aria-label", "Overlapping Slider")
+        root.setAttribute("aria-label", "Foldover Slider")
 
         items.forEach((item, i) => {
             item.setAttribute("role", "group")
@@ -368,12 +437,22 @@ function OverlappingSlider({
                 liveRegionRef.current.textContent = `Slide ${idx + 1} of ${itemCount}`
             }
         }
+        updateLiveRegionRef.current = updateLiveRegion
 
-        // Keyboard navigation helper
+        const notifyChange = (idx: number) => {
+            setDisplayIndex(idx)
+            onSlideChangeRef.current?.(idx)
+        }
+
+        // Navigation helper
         const navigateTo = (targetIndex: number) => {
             const idx = clamp(targetIndex, 0, itemCount - 1)
             if (idx === state.activeIndex) return
             const targetX = -idx * spacing
+
+            // Eagerly update so rapid clicks advance correctly
+            state.activeIndex = idx
+            notifyChange(idx)
 
             gsap.to(track, {
                 x: targetX,
@@ -389,15 +468,30 @@ function OverlappingSlider({
                         spacing,
                         minScale,
                         maxRotation,
-                        transformOrigin
+                        transformOrigin,
+                        minOpacity
                     )
                 },
                 onComplete() {
-                    state.activeIndex = idx
-                    updateLiveRegion(idx)
+                    updateLiveRegionRef.current?.(idx)
                 },
             })
         }
+
+        state.navigateTo = navigateTo
+
+        // Click-to-navigate on non-active slides
+        const clickHandlers: Array<[HTMLElement, () => void]> = []
+        items.forEach((item, i) => {
+            const handler = () => {
+                if (state.didDrag) return
+                if (i !== state.activeIndex) {
+                    navigateTo(i)
+                }
+            }
+            item.addEventListener("click", handler)
+            clickHandlers.push([item, handler])
+        })
 
         // Create Draggable
         const snapFn = snapToSlide
@@ -417,8 +511,10 @@ function OverlappingSlider({
             minDuration: reducedMotion ? 0 : 0.2,
             onPress() {
                 track.style.cursor = "grabbing"
+                state.didDrag = false
             },
             onDrag(this: DraggableInstance) {
+                state.didDrag = true
                 applyOverlapTransforms(
                     gsap,
                     items,
@@ -426,7 +522,8 @@ function OverlappingSlider({
                     spacing,
                     minScale,
                     maxRotation,
-                    transformOrigin
+                    transformOrigin,
+                    minOpacity
                 )
             },
             onThrowUpdate(this: DraggableInstance) {
@@ -437,19 +534,32 @@ function OverlappingSlider({
                     spacing,
                     minScale,
                     maxRotation,
-                    transformOrigin
+                    transformOrigin,
+                    minOpacity
                 )
             },
             onThrowComplete(this: DraggableInstance) {
                 track.style.cursor = "grab"
                 const finalX = this.x
-                state.activeIndex = spacing > 0
+                const newIdx = spacing > 0
                     ? clamp(Math.round(-finalX / spacing), 0, itemCount - 1)
                     : 0
-                updateLiveRegion(state.activeIndex)
+                if (newIdx !== state.activeIndex) {
+                    state.activeIndex = newIdx
+                    updateLiveRegion(newIdx)
+                    notifyChange(newIdx)
+                }
             },
-            onRelease() {
+            onRelease(this: DraggableInstance) {
+                if (!state.didDrag) return
                 track.style.cursor = "grab"
+                const finalX = this.x
+                const newIdx = spacing > 0
+                    ? clamp(Math.round(-finalX / spacing), 0, itemCount - 1)
+                    : 0
+                if (newIdx !== state.activeIndex) {
+                    navigateTo(newIdx)
+                }
             },
         }
 
@@ -499,12 +609,19 @@ function OverlappingSlider({
         window.addEventListener("keydown", onKeyDown)
         state.keyHandler = onKeyDown
 
+        // Initial notification
+        notifyChange(state.activeIndex)
+
         // Cleanup
         return () => {
             if (state.draggable) {
                 state.draggable.kill()
                 state.draggable = null
             }
+            state.navigateTo = null
+            clickHandlers.forEach(([el, handler]) => {
+                el.removeEventListener("click", handler)
+            })
             if (state.keyHandler) {
                 window.removeEventListener("keydown", state.keyHandler)
                 state.keyHandler = null
@@ -524,15 +641,64 @@ function OverlappingSlider({
         reducedMotion,
         containerWidth,
         gap,
-        slideWidth,
+        maxWidth,
+        borderRadius,
         paddingLeft,
         paddingRight,
         minScale,
         maxRotation,
         transformOrigin,
+        minOpacity,
         snapToSlide,
         slidesSignature,
     ])
+
+    // --- Button setup ---
+    const isArrows = buttonContent === "arrows"
+    const isCustom = buttonContent === "custom"
+    const isIconMode = isArrows || isCustom
+
+    const prevContent = isCustom ? prevIcon : isArrows ? <ArrowLeft /> : prevLabel
+    const nextContent = isCustom ? nextIcon : isArrows ? <ArrowRight /> : nextLabel
+
+    const canPrev = displayIndex > 0
+    const canNext = displayIndex < slideNodes.length - 1
+
+    const onPrev = () => runtimeRef.current.navigateTo?.(runtimeRef.current.activeIndex - 1)
+    const onNext = () => runtimeRef.current.navigateTo?.(runtimeRef.current.activeIndex + 1)
+
+    const btnBase: React.CSSProperties = {
+        color: btnColor,
+        background: isCustom ? "transparent" : btnBg,
+        border: isCustom ? "none" : `1px solid ${btnBorderColor}`,
+        borderRadius: btnRadius,
+        padding: isCustom ? 0 : isArrows ? "8px" : "10px 18px",
+        fontSize: 14,
+        lineHeight: 0,
+        cursor: "pointer",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        ...(!isIconMode ? btnFont : {}),
+    }
+
+    const staticControlsBlock = showControls && slideNodes.length > 0 && (
+        <div
+            style={{
+                display: "flex",
+                width: "100%",
+                alignItems: "center",
+                justifyContent: controlAlignment,
+                gap: controlGap,
+                margin: `${controlMargin}px 0`,
+            }}
+        >
+            <div style={{ ...btnBase, opacity: 0.2 }}>{prevContent}</div>
+            <div style={btnBase}>{nextContent}</div>
+        </div>
+    )
 
     // --- Static renderer fallback ---
     if (isStatic) {
@@ -542,46 +708,99 @@ function OverlappingSlider({
                     width: "100%",
                     height: "100%",
                     display: "flex",
-                    gap: `${gap}px`,
-                    overflow: "hidden",
-                    alignItems: "center",
-                    paddingLeft,
-                    paddingRight,
+                    flexDirection: "column",
+                    gap: showControls ? controlGap : 0,
                 }}
             >
-                {slideNodes.length > 0 ? (
-                    slideNodes.map((child, i) => (
+                {controlPosition === "top" && staticControlsBlock}
+                <div
+                    style={{
+                        flex: 1,
+                        minHeight: 0,
+                        display: "flex",
+                        gap: `${gap}px`,
+                        overflow: "hidden",
+                        alignItems: "center",
+                        paddingLeft,
+                        paddingRight,
+                    }}
+                >
+                    {slideNodes.length > 0 ? (
+                        slideNodes.map((child, i) => (
+                            <div
+                                key={i}
+                                style={{
+                                    flex: "none",
+                                    maxWidth,
+                                }}
+                            >
+                                {child}
+                            </div>
+                        ))
+                    ) : (
                         <div
-                            key={i}
                             style={{
-                                flex: "none",
-                                width: slideWidth,
-                                overflow: "hidden",
+                                width: "100%",
+                                minHeight: 180,
+                                border: "1px dashed rgba(0,0,0,0.25)",
+                                borderRadius: 12,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "rgba(0,0,0,0.5)",
+                                fontSize: 14,
                             }}
                         >
-                            {child}
+                            Add slides to FoldoverSlider
                         </div>
-                    ))
-                ) : (
-                    <div
-                        style={{
-                            width: "100%",
-                            minHeight: 180,
-                            border: "1px dashed rgba(0,0,0,0.25)",
-                            borderRadius: 12,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "rgba(0,0,0,0.5)",
-                            fontSize: 14,
-                        }}
-                    >
-                        Add slides to OverlappingSlider
-                    </div>
-                )}
+                    )}
+                </div>
+                {controlPosition === "bottom" && staticControlsBlock}
             </div>
         )
     }
+
+    const controlsBlock = showControls && slideNodes.length > 0 && (
+        <div
+            style={{
+                display: "flex",
+                width: "100%",
+                alignItems: "center",
+                justifyContent: controlAlignment,
+                gap: controlGap,
+                margin: `${controlMargin}px 0`,
+            }}
+        >
+            <button
+                type="button"
+                aria-label="Previous Slide"
+                onClick={onPrev}
+                disabled={!canPrev}
+                style={{
+                    ...btnBase,
+                    opacity: canPrev ? 1 : 0.2,
+                    pointerEvents: canPrev ? "auto" : "none",
+                    transition: reducedMotion ? "none" : "opacity 0.2s ease",
+                }}
+            >
+                {prevContent}
+            </button>
+            <button
+                type="button"
+                aria-label="Next Slide"
+                onClick={onNext}
+                disabled={!canNext}
+                style={{
+                    ...btnBase,
+                    opacity: canNext ? 1 : 0.2,
+                    pointerEvents: canNext ? "auto" : "none",
+                    transition: reducedMotion ? "none" : "opacity 0.2s ease",
+                }}
+            >
+                {nextContent}
+            </button>
+        </div>
+    )
 
     // --- Live render ---
     return (
@@ -593,8 +812,9 @@ function OverlappingSlider({
                 width: "100%",
                 height: "100%",
                 boxSizing: "border-box",
-                overflow: "hidden",
-                position: "relative",
+                display: "flex",
+                flexDirection: "column",
+                gap: showControls ? controlGap : 0,
                 outline: "none",
             }}
         >
@@ -624,67 +844,81 @@ function OverlappingSlider({
                 }}
             />
 
+            {controlPosition === "top" && controlsBlock}
+
             {/* Track (draggable) */}
             <div
-                ref={trackRef}
                 style={{
-                    display: "flex",
-                    flexDirection: "row",
-                    alignItems: "stretch",
-                    height: "100%",
-                    paddingLeft,
-                    paddingRight,
-                    cursor: "grab",
-                    userSelect: "none",
-                    touchAction: "pan-y",
-                    willChange: "transform",
+                    flex: 1,
+                    minHeight: 0,
+                    position: "relative",
+                    overflowX: "clip",
+                    overflowY: "visible",
                 }}
             >
-                {slideNodes.length > 0 ? (
-                    slideNodes.map((child, index) => (
+                <div
+                    ref={trackRef}
+                    style={{
+                        display: "flex",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        height: "100%",
+                        paddingLeft,
+                        paddingRight,
+                        cursor: "grab",
+                        userSelect: "none",
+                        touchAction: "pan-y",
+                        willChange: "transform",
+                    }}
+                >
+                    {slideNodes.length > 0 ? (
+                        slideNodes.map((child, index) => (
+                            <div
+                                key={index}
+                                data-overlap-slider-item=""
+                                style={{
+                                    flex: "none",
+                                    maxWidth,
+                                    borderRadius,
+                                    marginRight:
+                                        index < slideNodes.length - 1
+                                            ? gap
+                                            : 0,
+                                    willChange: "transform",
+                                    backfaceVisibility: "hidden",
+                                }}
+                            >
+                                {child}
+                            </div>
+                        ))
+                    ) : (
                         <div
-                            key={index}
-                            data-overlap-slider-item=""
                             style={{
-                                flex: "none",
-                                width: slideWidth,
-                                marginRight:
-                                    index < slideNodes.length - 1
-                                        ? gap
-                                        : 0,
-                                overflow: "hidden",
-                                willChange: "transform",
-                                backfaceVisibility: "hidden",
+                                width: "100%",
+                                minHeight: 180,
+                                border: "1px dashed rgba(0,0,0,0.25)",
+                                borderRadius: 12,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "rgba(0,0,0,0.5)",
+                                fontSize: 14,
                             }}
                         >
-                            {child}
+                            Add slides to FoldoverSlider
                         </div>
-                    ))
-                ) : (
-                    <div
-                        style={{
-                            width: "100%",
-                            minHeight: 180,
-                            border: "1px dashed rgba(0,0,0,0.25)",
-                            borderRadius: 12,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "rgba(0,0,0,0.5)",
-                            fontSize: 14,
-                        }}
-                    >
-                        Add slides to OverlappingSlider
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
+
+            {controlPosition === "bottom" && controlsBlock}
         </div>
     )
 }
 
 // --- Property Controls ---
 
-addPropertyControls(OverlappingSlider, {
+addPropertyControls(FoldoverSlider, {
     // --- Content ---
     children: {
         type: ControlType.Array,
@@ -694,15 +928,25 @@ addPropertyControls(OverlappingSlider, {
     },
 
     // --- Layout ---
-    slideWidth: {
+    maxWidth: {
         type: ControlType.Number,
-        title: "Slide Width",
+        title: "Max Width",
         min: 120,
-        max: 800,
+        max: 2000,
         step: 4,
         unit: "px",
         displayStepper: true,
-        defaultValue: 384,
+        defaultValue: 400,
+    },
+    borderRadius: {
+        type: ControlType.Number,
+        title: "Radius",
+        min: 0,
+        max: 100,
+        step: 1,
+        unit: "px",
+        displayStepper: true,
+        defaultValue: 12,
     },
     gap: {
         type: ControlType.Number,
@@ -759,9 +1003,17 @@ addPropertyControls(OverlappingSlider, {
                 min: -45,
                 max: 45,
                 step: 1,
-                unit: "°",
+                unit: "\u00b0",
                 displayStepper: true,
                 defaultValue: -8,
+            },
+            minOpacity: {
+                type: ControlType.Number,
+                title: "Min Opacity",
+                min: 0,
+                max: 1,
+                step: 0.05,
+                defaultValue: 0.4,
             },
             transformOrigin: {
                 type: ControlType.Enum,
@@ -772,8 +1024,119 @@ addPropertyControls(OverlappingSlider, {
             },
         },
     },
+
+    // --- Controls ---
+    showControls: {
+        type: ControlType.Boolean,
+        title: "Show Buttons",
+        defaultValue: false,
+    },
+    buttonContent: {
+        type: ControlType.Enum,
+        title: "Content",
+        options: ["text", "arrows", "custom"],
+        optionTitles: ["Text", "Arrows", "Custom"],
+        defaultValue: "arrows",
+        hidden: (props: FoldoverSliderProps) => !props.showControls,
+    },
+    prevLabel: {
+        type: ControlType.String,
+        title: "Prev Label",
+        defaultValue: "Prev",
+        hidden: (props: FoldoverSliderProps) => !props.showControls || props.buttonContent !== "text",
+    },
+    nextLabel: {
+        type: ControlType.String,
+        title: "Next Label",
+        defaultValue: "Next",
+        hidden: (props: FoldoverSliderProps) => !props.showControls || props.buttonContent !== "text",
+    },
+    prevIcon: {
+        type: componentInstanceControlType as any,
+        title: "Prev Icon",
+        hidden: (props: FoldoverSliderProps) => !props.showControls || props.buttonContent !== "custom",
+    },
+    nextIcon: {
+        type: componentInstanceControlType as any,
+        title: "Next Icon",
+        hidden: (props: FoldoverSliderProps) => !props.showControls || props.buttonContent !== "custom",
+    },
+    controlPosition: {
+        type: ControlType.Enum,
+        title: "Position",
+        options: ["bottom", "top"],
+        optionTitles: ["Bottom", "Top"],
+        defaultValue: "bottom",
+        hidden: (props: FoldoverSliderProps) => !props.showControls,
+    },
+    controlAlignment: {
+        type: ControlType.Enum,
+        title: "Align",
+        options: ["flex-start", "center", "flex-end"],
+        optionTitles: ["Start", "Center", "End"],
+        defaultValue: "center",
+        hidden: (props: FoldoverSliderProps) => !props.showControls,
+    },
+    controlGap: {
+        type: ControlType.Number,
+        title: "Spacing",
+        min: 0,
+        max: 80,
+        step: 1,
+        unit: "px",
+        displayStepper: true,
+        defaultValue: 16,
+        hidden: (props: FoldoverSliderProps) => !props.showControls,
+    },
+    controlMargin: {
+        type: ControlType.Number,
+        title: "Margin",
+        min: 0,
+        max: 80,
+        step: 1,
+        unit: "px",
+        displayStepper: true,
+        defaultValue: 0,
+        hidden: (props: FoldoverSliderProps) => !props.showControls,
+    },
+    buttonStyle: {
+        type: ControlType.Object,
+        title: "Button Style",
+        hidden: (props: FoldoverSliderProps) => !props.showControls,
+        controls: {
+            font: {
+                type: ControlType.Font,
+                title: "Font",
+                controls: "extended",
+            },
+            color: {
+                type: ControlType.Color,
+                title: "Text",
+                defaultValue: "#efeeec",
+            },
+            background: {
+                type: ControlType.Color,
+                title: "Fill",
+                defaultValue: "#131313",
+            },
+            borderColor: {
+                type: ControlType.Color,
+                title: "Border",
+                defaultValue: "#2c2c2c",
+            },
+            borderRadius: {
+                type: ControlType.Number,
+                title: "Radius",
+                min: 0,
+                max: 100,
+                step: 1,
+                unit: "px",
+                defaultValue: 8,
+            },
+        },
+    },
 })
 
-OverlappingSlider.displayName = "Overlapping Slider"
+FoldoverSlider.displayName = "Foldover Slider"
 
-export default OverlappingSlider
+export default FoldoverSlider

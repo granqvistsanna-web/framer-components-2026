@@ -33,7 +33,9 @@ function loadScript(src: string, timeout = 10_000): Promise<void> {
         ) as HTMLScriptElement | null
         if (existing) {
             if (existing.dataset.status === "loaded") return resolve()
-            if (existing.dataset.status === "loading") {
+            if (existing.dataset.status === "error") {
+                existing.remove()
+            } else if (existing.dataset.status === "loading") {
                 const onDone = () => {
                     existing.removeEventListener("load", onDone)
                     existing.removeEventListener("error", onDone)
@@ -100,24 +102,36 @@ function useReducedMotion(): boolean {
 interface FlickCardsSliderProps {
     images: string[]
     imageFit: "cover" | "contain" | "fill"
-    cardWidth: number
-    cardHeight: number
-    cardRadius: number
-    cardBackground: string
-    activeOpacity: number
-    nearOpacity: number
-    farOpacity: number
-    rotationAmount: number
-    spreadX: number
-    spreadY: number
-    scaleStep: number
-    animationDuration: number
-    elasticity: number
-    dragThreshold: number
-    showDimOverlay: boolean
-    dimColor: string
+    card: {
+        size: number
+        aspectRatio: string
+        radius: number
+        background: string
+        showBorder: boolean
+        borderWidth: number
+        borderColor: string
+    }
+    fanLayout: {
+        spreadX: number
+        spreadY: number
+        rotation: number
+        scaleStep: number
+    }
+    appearance: {
+        showDimOverlay: boolean
+        dimColor: string
+        activeOpacity: number
+        nearOpacity: number
+        farOpacity: number
+    }
+    animation: {
+        duration: number
+        elasticity: number
+        dragThreshold: number
+    }
     autoPlay: boolean
     autoPlayInterval: number
+    showAppearEffect: boolean
 }
 
 // ─── Runtime state ──────────────────────────────────────────
@@ -135,25 +149,40 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
     const {
         images = [],
         imageFit = "cover",
-        cardWidth = 280,
-        cardHeight = 420,
-        cardRadius = 16,
-        cardBackground = "#111111",
-        activeOpacity = 1,
-        nearOpacity = 0.75,
-        farOpacity = 0.5,
-        rotationAmount = 10,
-        spreadX = 25,
-        spreadY = 1,
-        scaleStep = 0.1,
-        animationDuration = 0.6,
-        elasticity = 1.2,
-        dragThreshold = 0.1,
-        showDimOverlay = true,
-        dimColor = "rgba(0,0,0,0.4)",
+        card,
+        fanLayout,
+        appearance,
+        animation,
         autoPlay = false,
         autoPlayInterval = 3,
+        showAppearEffect = true,
     } = props
+
+    // Destructure nested groups with defaults
+    const cardSize = card?.size || 40
+    const cardAspectRatio = card?.aspectRatio || "3:4"
+    const [rw, rh] = cardAspectRatio.split(":").map(Number)
+    const ratioValue = rw / rh // CSS aspect-ratio value (w/h)
+    const cardRadius = card?.radius ?? 16
+    const cardBackground = card?.background || "#111111"
+    const showBorder = card?.showBorder ?? false
+    const borderWidth = card?.borderWidth || 3
+    const borderColor = card?.borderColor || "#ffffff"
+
+    const spreadX = fanLayout?.spreadX || 25
+    const spreadY = fanLayout?.spreadY ?? 1
+    const rotationAmount = fanLayout?.rotation ?? 10
+    const scaleStep = fanLayout?.scaleStep ?? 0.1
+
+    const showDimOverlay = appearance?.showDimOverlay ?? true
+    const dimColor = appearance?.dimColor || "rgba(0,0,0,0.4)"
+    const activeOpacity = appearance?.activeOpacity ?? 1
+    const nearOpacity = appearance?.nearOpacity ?? 0.75
+    const farOpacity = appearance?.farOpacity ?? 0.5
+
+    const animationDuration = animation?.duration || 0.6
+    const elasticity = animation?.elasticity || 1.2
+    const dragThreshold = animation?.dragThreshold || 0.1
 
     const isStatic = useIsStaticRenderer()
     const reducedMotion = useReducedMotion()
@@ -167,6 +196,7 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
     const liveRegionRef = useRef<HTMLDivElement>(null)
     const [ready, setReady] = useState(false)
     const [isDragging, setIsDragging] = useState(false)
+    const hasAppearedRef = useRef(false)
     const runtimeRef = useRef<RuntimeState>({
         activeIndex: 0,
         isVisible: false,
@@ -315,11 +345,30 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
     useEffect(() => {
         if (isStatic || !ready || !containerRef.current || !listRef.current)
             return
-        if (total < 3) return
 
         const gsap = window.gsap
         const Draggable = window.Draggable
         if (!gsap || !Draggable) return
+
+        // With fewer than 3 items, position cards statically without drag
+        if (total < 3) {
+            hasAppearedRef.current = true
+            const cards = cardsRef.current
+            cards.forEach((card, i) => {
+                if (!card) return
+                const cfg = getConfig(i, 0)
+                card.setAttribute("data-flick-status", cfg.status)
+                card.style.zIndex = String(cfg.z)
+                gsap.set(card, {
+                    xPercent: cfg.x,
+                    yPercent: cfg.y,
+                    rotation: cfg.rot,
+                    scale: cfg.s,
+                    opacity: cfg.o,
+                })
+            })
+            return
+        }
 
         const container = containerRef.current
         const cards = cardsRef.current
@@ -383,13 +432,24 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
             const cfg = getConfig(i, 0)
             card.setAttribute("data-flick-status", cfg.status)
             card.style.zIndex = String(cfg.z)
-            gsap.set(card, {
-                xPercent: cfg.x,
-                yPercent: cfg.y,
-                rotation: cfg.rot,
-                scale: cfg.s,
-                opacity: cfg.o,
-            })
+
+            if (showAppearEffect && !hasAppearedRef.current && !reducedMotion) {
+                gsap.set(card, {
+                    xPercent: 0,
+                    yPercent: 15,
+                    rotation: 0,
+                    scale: 0.85,
+                    opacity: 0,
+                })
+            } else {
+                gsap.set(card, {
+                    xPercent: cfg.x,
+                    yPercent: cfg.y,
+                    rotation: cfg.rot,
+                    scale: cfg.s,
+                    opacity: cfg.o,
+                })
+            }
         })
 
         // ARIA setup
@@ -417,6 +477,13 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
             onPress(this: DraggableInstance & { pointerEvent: PointerEvent }) {
                 pressClientX = this.pointerEvent.clientX
                 setIsDragging(true)
+                // Kill any in-progress appear tweens so drag takes over cleanly
+                if (!hasAppearedRef.current) {
+                    hasAppearedRef.current = true
+                    cards.forEach((card) => {
+                        if (card) gsap.killTweensOf(card)
+                    })
+                }
             },
 
             onDrag(this: DraggableInstance & { pointerEvent: PointerEvent }) {
@@ -536,8 +603,56 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
         window.addEventListener("keydown", onKeyDown)
         state.keyHandler = onKeyDown
 
+        // Appear animation — integrated to avoid race with card positioning
+        let appearObserver: IntersectionObserver | null = null
+        if (showAppearEffect && !hasAppearedRef.current && !reducedMotion) {
+            const triggerAppear = () => {
+                if (hasAppearedRef.current) return
+                hasAppearedRef.current = true
+
+                cards.forEach((card, i) => {
+                    if (!card) return
+                    const cfg = getConfig(i, 0)
+
+                    let dist = i
+                    if (dist > total / 2) dist = total - dist
+
+                    gsap.to(card, {
+                        delay: dist * 0.1,
+                        duration: 0.8,
+                        ease: "back.out(1.7)",
+                        xPercent: cfg.x,
+                        yPercent: cfg.y,
+                        rotation: cfg.rot,
+                        scale: cfg.s,
+                        opacity: cfg.o,
+                    })
+                })
+            }
+
+            appearObserver = new IntersectionObserver(
+                (entries) => {
+                    for (const entry of entries) {
+                        if (entry.isIntersecting) {
+                            triggerAppear()
+                            appearObserver?.disconnect()
+                            appearObserver = null
+                        }
+                    }
+                },
+                { threshold: 0.15 }
+            )
+            appearObserver.observe(container)
+        } else {
+            hasAppearedRef.current = true
+        }
+
         // Cleanup
         return () => {
+            if (appearObserver) {
+                appearObserver.disconnect()
+                appearObserver = null
+            }
             instances.forEach((d) => d.kill())
             dragInstancesRef.current = []
             cards.forEach((card) => {
@@ -554,7 +669,7 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
                 state.observer = null
             }
         }
-    }, [isStatic, ready, total, getConfig, reducedMotion])
+    }, [isStatic, ready, total, getConfig, reducedMotion, showAppearEffect])
 
     // ─── Autoplay ────────────────────────────────────────────
     const [isPaused, setIsPaused] = useState(false)
@@ -565,6 +680,7 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
         if (total < 3) return
 
         const id = window.setInterval(() => {
+            if (!hasAppearedRef.current) return
             const state = runtimeRef.current
             if (state.navigateTo) {
                 state.navigateTo(state.activeIndex + 1)
@@ -603,14 +719,16 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
                             key={i}
                             style={{
                                 position: "absolute",
-                                width: cardWidth,
-                                height: cardHeight,
+                                width: `${cardSize}%`,
+                                aspectRatio: `${rw} / ${rh}`,
                                 transform: `translate(${offset * spreadX * 0.6}%, ${absOffset * spreadY}%) rotate(${rotation}deg) scale(${scale})`,
                                 opacity,
                                 zIndex: 5 - absOffset,
                                 borderRadius: cardRadius,
                                 background: cardBackground,
                                 overflow: "hidden",
+                                border: showBorder ? `${borderWidth}px solid ${borderColor}` : "none",
+                                boxSizing: "border-box",
                             }}
                         >
                             <img
@@ -682,7 +800,7 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
             <div
                 style={{
                     width: "100%",
-                    paddingTop: `${(cardHeight / Math.max(cardWidth * 2, 1)) * 100}%`,
+                    paddingTop: `${cardSize / ratioValue}%`,
                     pointerEvents: "none",
                     opacity: 0,
                 }}
@@ -711,8 +829,8 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
                         data-flick-status="hidden"
                         style={{
                             position: "absolute",
-                            width: cardWidth,
-                            height: cardHeight,
+                            width: `${cardSize}%`,
+                            aspectRatio: `${rw} / ${rh}`,
                             willChange: "transform, opacity",
                             backfaceVisibility: "hidden",
                         }}
@@ -727,6 +845,8 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
                                 overflow: "hidden",
                                 position: "relative",
                                 userSelect: "none",
+                                border: showBorder ? `${borderWidth}px solid ${borderColor}` : "none",
+                                boxSizing: "border-box",
                             }}
                         >
                             <img
@@ -803,165 +923,232 @@ FlickCardsSlider.displayName = "Flick Cards Slider"
 // ─── Property Controls ──────────────────────────────────────
 
 addPropertyControls(FlickCardsSlider, {
+    // ─── Content ────────────────────────────────────────────
     images: {
         type: ControlType.Array,
         title: "Images",
         maxCount: 20,
-        control: { type: ControlType.File, allowedFileTypes: ["jpg", "jpeg", "png", "webp", "gif", "avif", "svg"] },
+        control: {
+            type: ControlType.File,
+            allowedFileTypes: [
+                "jpg",
+                "jpeg",
+                "png",
+                "webp",
+                "gif",
+                "avif",
+                "svg",
+            ],
+        },
     },
     imageFit: {
         type: ControlType.Enum,
-        title: "Image Fit",
+        title: "Fit",
         options: ["cover", "contain", "fill"],
         optionTitles: ["Cover", "Contain", "Fill"],
         defaultValue: "cover",
     },
 
-    // ─── Card Dimensions ────────────────────────────────────
-    cardWidth: {
-        type: ControlType.Number,
-        title: "Card Width",
-        min: 100,
-        max: 600,
-        step: 1,
-        unit: "px",
-        displayStepper: true,
-        defaultValue: 280,
-    },
-    cardHeight: {
-        type: ControlType.Number,
-        title: "Card Height",
-        min: 100,
-        max: 900,
-        step: 1,
-        unit: "px",
-        displayStepper: true,
-        defaultValue: 420,
-    },
-    cardRadius: {
-        type: ControlType.Number,
-        title: "Radius",
-        min: 0,
-        max: 100,
-        step: 1,
-        unit: "px",
-        displayStepper: true,
-        defaultValue: 16,
-    },
-    cardBackground: {
-        type: ControlType.Color,
-        title: "Card BG",
-        defaultValue: "#111111",
-    },
-
-    // ─── Spread & Layout ────────────────────────────────────
-    spreadX: {
-        type: ControlType.Number,
-        title: "Spread X",
-        min: 5,
-        max: 80,
-        step: 1,
-        unit: "%",
-        displayStepper: true,
-        defaultValue: 25,
-    },
-    spreadY: {
-        type: ControlType.Number,
-        title: "Spread Y",
-        min: 0,
-        max: 20,
-        step: 0.5,
-        unit: "%",
-        displayStepper: true,
-        defaultValue: 1,
-    },
-    rotationAmount: {
-        type: ControlType.Number,
-        title: "Rotation",
-        min: 0,
-        max: 30,
-        step: 1,
-        unit: "°",
-        displayStepper: true,
-        defaultValue: 10,
-    },
-    scaleStep: {
-        type: ControlType.Number,
-        title: "Scale Step",
-        min: 0,
-        max: 0.3,
-        step: 0.01,
-        defaultValue: 0.1,
+    // ─── Card (flyout) ──────────────────────────────────────
+    card: {
+        type: ControlType.Object,
+        title: "Card",
+        controls: {
+            size: {
+                type: ControlType.Number,
+                title: "Size",
+                min: 15,
+                max: 80,
+                step: 1,
+                unit: "%",
+                displayStepper: true,
+                defaultValue: 40,
+            },
+            aspectRatio: {
+                type: ControlType.Enum,
+                title: "Ratio",
+                options: ["3:4", "2:3", "4:5", "1:1", "16:9", "9:16"],
+                optionTitles: [
+                    "3:4",
+                    "2:3",
+                    "4:5",
+                    "1:1",
+                    "16:9",
+                    "9:16",
+                ],
+                defaultValue: "3:4",
+            },
+            radius: {
+                type: ControlType.Number,
+                title: "Radius",
+                min: 0,
+                max: 100,
+                step: 1,
+                unit: "px",
+                displayStepper: true,
+                defaultValue: 16,
+            },
+            background: {
+                type: ControlType.Color,
+                title: "Background",
+                defaultValue: "#111111",
+            },
+            showBorder: {
+                type: ControlType.Boolean,
+                title: "Border",
+                defaultValue: false,
+            },
+            borderWidth: {
+                type: ControlType.Number,
+                title: "Border Width",
+                min: 1,
+                max: 20,
+                step: 1,
+                unit: "px",
+                displayStepper: true,
+                defaultValue: 3,
+                hidden: (props: any) => !props.showBorder,
+            },
+            borderColor: {
+                type: ControlType.Color,
+                title: "Border Color",
+                defaultValue: "#ffffff",
+                hidden: (props: any) => !props.showBorder,
+            },
+        },
     },
 
-    // ─── Opacity ────────────────────────────────────────────
-    activeOpacity: {
-        type: ControlType.Number,
-        title: "Active Opacity",
-        min: 0,
-        max: 1,
-        step: 0.05,
-        defaultValue: 1,
-    },
-    nearOpacity: {
-        type: ControlType.Number,
-        title: "Near Opacity",
-        min: 0,
-        max: 1,
-        step: 0.05,
-        defaultValue: 0.75,
-    },
-    farOpacity: {
-        type: ControlType.Number,
-        title: "Far Opacity",
-        min: 0,
-        max: 1,
-        step: 0.05,
-        defaultValue: 0.5,
+    // ─── Fan Layout (flyout) ────────────────────────────────
+    fanLayout: {
+        type: ControlType.Object,
+        title: "Fan Layout",
+        controls: {
+            spreadX: {
+                type: ControlType.Number,
+                title: "Spread X",
+                min: 5,
+                max: 80,
+                step: 1,
+                unit: "%",
+                displayStepper: true,
+                defaultValue: 25,
+            },
+            spreadY: {
+                type: ControlType.Number,
+                title: "Spread Y",
+                min: 0,
+                max: 20,
+                step: 0.5,
+                unit: "%",
+                displayStepper: true,
+                defaultValue: 1,
+            },
+            rotation: {
+                type: ControlType.Number,
+                title: "Rotation",
+                min: 0,
+                max: 30,
+                step: 1,
+                unit: "\u00b0",
+                displayStepper: true,
+                defaultValue: 10,
+            },
+            scaleStep: {
+                type: ControlType.Number,
+                title: "Scale Step",
+                min: 0,
+                max: 0.3,
+                step: 0.01,
+                defaultValue: 0.1,
+            },
+        },
     },
 
-    // ─── Dim Overlay ────────────────────────────────────────
-    showDimOverlay: {
+    // ─── Appearance (flyout) ────────────────────────────────
+    appearance: {
+        type: ControlType.Object,
+        title: "Appearance",
+        controls: {
+            showDimOverlay: {
+                type: ControlType.Boolean,
+                title: "Dim Overlay",
+                defaultValue: true,
+            },
+            dimColor: {
+                type: ControlType.Color,
+                title: "Dim Color",
+                defaultValue: "rgba(0,0,0,0.4)",
+                hidden: (props: any) => !props.showDimOverlay,
+            },
+            activeOpacity: {
+                type: ControlType.Number,
+                title: "Front Opacity",
+                min: 0,
+                max: 1,
+                step: 0.05,
+                defaultValue: 1,
+            },
+            nearOpacity: {
+                type: ControlType.Number,
+                title: "Near Opacity",
+                min: 0,
+                max: 1,
+                step: 0.05,
+                defaultValue: 0.75,
+            },
+            farOpacity: {
+                type: ControlType.Number,
+                title: "Far Opacity",
+                min: 0,
+                max: 1,
+                step: 0.05,
+                defaultValue: 0.5,
+            },
+        },
+    },
+
+    // ─── Animation (flyout) ─────────────────────────────────
+    animation: {
+        type: ControlType.Object,
+        title: "Animation",
+        controls: {
+            duration: {
+                type: ControlType.Number,
+                title: "Duration",
+                min: 0.1,
+                max: 2,
+                step: 0.05,
+                unit: "s",
+                displayStepper: true,
+                defaultValue: 0.6,
+            },
+            elasticity: {
+                type: ControlType.Number,
+                title: "Elasticity",
+                min: 0.5,
+                max: 2,
+                step: 0.1,
+                defaultValue: 1.2,
+            },
+            dragThreshold: {
+                type: ControlType.Number,
+                title: "Drag Threshold",
+                min: 0.02,
+                max: 0.5,
+                step: 0.01,
+                defaultValue: 0.1,
+            },
+        },
+    },
+
+    // ─── Appear ─────────────────────────────────────────────
+    showAppearEffect: {
         type: ControlType.Boolean,
-        title: "Dim Overlay",
+        title: "Appear Effect",
         defaultValue: true,
     },
-    dimColor: {
-        type: ControlType.Color,
-        title: "Dim Color",
-        defaultValue: "rgba(0,0,0,0.4)",
-        hidden: (props: FlickCardsSliderProps) => !props.showDimOverlay,
-    },
 
-    // ─── Animation ──────────────────────────────────────────
-    animationDuration: {
-        type: ControlType.Number,
-        title: "Duration",
-        min: 0.1,
-        max: 2,
-        step: 0.05,
-        unit: "s",
-        displayStepper: true,
-        defaultValue: 0.6,
-    },
-    elasticity: {
-        type: ControlType.Number,
-        title: "Elasticity",
-        min: 0.5,
-        max: 2,
-        step: 0.1,
-        defaultValue: 1.2,
-    },
-    dragThreshold: {
-        type: ControlType.Number,
-        title: "Drag Threshold",
-        min: 0.02,
-        max: 0.5,
-        step: 0.01,
-        defaultValue: 0.1,
-    },
-
-    // ─── Autoplay ──────────────────────────────────────────
+    // ─── Autoplay ───────────────────────────────────────────
     autoPlay: {
         type: ControlType.Boolean,
         title: "Auto Play",

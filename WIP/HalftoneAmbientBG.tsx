@@ -252,8 +252,17 @@ function compileShader(gl: WebGLRenderingContext, type: number, src: string) {
 function linkProgram(gl: WebGLRenderingContext, vs: string, fs: string) {
     const v = compileShader(gl, gl.VERTEX_SHADER, vs)
     const f = compileShader(gl, gl.FRAGMENT_SHADER, fs)
-    if (!v || !f) return null
-    const p = gl.createProgram()!
+    if (!v || !f) {
+        if (v) gl.deleteShader(v)
+        if (f) gl.deleteShader(f)
+        return null
+    }
+    const p = gl.createProgram()
+    if (!p) {
+        gl.deleteShader(v)
+        gl.deleteShader(f)
+        return null
+    }
     gl.attachShader(p, v)
     gl.attachShader(p, f)
     gl.linkProgram(p)
@@ -283,7 +292,7 @@ interface Props {
     style?: React.CSSProperties
 }
 
-export default function DuoToneAmbient({
+export default function HalftoneAmbientBG({
     preset = "Ocean",
     quality = "Full",
     paused = false,
@@ -573,13 +582,13 @@ export default function DuoToneAmbient({
     )
 }
 
-DuoToneAmbient.displayName = "DuoToneAmbient"
-DuoToneAmbient.defaultProps = {
+HalftoneAmbientBG.displayName = "HalftoneAmbientBG"
+HalftoneAmbientBG.defaultProps = {
     width: 800,
     height: 600,
 }
 
-addPropertyControls(DuoToneAmbient, {
+addPropertyControls(HalftoneAmbientBG, {
     preset: {
         type: ControlType.Enum,
         title: "Preset",

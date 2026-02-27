@@ -1,6 +1,6 @@
 # Framer Component Best Practices
 
-Extracted from production-ready components (ColorBend, DragSlider, RubiksCube, OverlappingSlider, HighlightMarkerTextReveal, MarkerTextScrollReveal). Use as a checklist and reference when building new components.
+Extracted from production-ready components (ColorBend, DragSlider, RubiksCube, FoldoverSlider, HighlightMarkerTextReveal, MarkerTextScrollReveal). Use as a checklist and reference when building new components.
 
 ---
 

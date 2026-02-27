@@ -58,9 +58,9 @@ export default function WordShifter({
     inDuration = 0.5,
     outDuration = 0.4,
 }: Props) {
-    const fontStyle = { fontSize: 48, fontWeight: 700, lineHeight: "1.2", ...font }
+    const fontStyle = { ...font }
     const resolvedLineHeight = (() => {
-        const value = fontStyle.lineHeight
+        const value = font?.lineHeight
         if (typeof value === "number") return `${value}em`
         const str = String(value ?? "").trim()
         if (!str) return "1.2em"
@@ -245,6 +245,8 @@ export default function WordShifter({
         </div>
     )
 }
+
+WordShifter.displayName = "Word Shifter"
 
 addPropertyControls(WordShifter, {
     textBefore: {

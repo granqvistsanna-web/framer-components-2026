@@ -13,6 +13,7 @@ interface GsapApi {
   set: (...args: unknown[]) => void
   to: (...args: unknown[]) => void
   getProperty: (target: unknown, property: string) => number
+  context: (fn: () => void, scope?: unknown) => { revert: () => void }
 }
 
 interface DraggableInstance {
@@ -34,6 +35,8 @@ interface Window {
   Draggable?: DraggableApi
   CustomEase?: CustomEaseApi
   InertiaPlugin?: unknown
+  Matter?: any
+  ScrollTrigger?: any
 }
 
 declare module "framer" {
