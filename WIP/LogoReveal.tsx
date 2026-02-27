@@ -1,6 +1,12 @@
-// Logo Reveal
-// @framerSupportedLayoutWidth any-prefer-fixed
-// @framerSupportedLayoutHeight any-prefer-fixed
+/**
+ * Logo Reveal
+ * Full-screen logo reveal animation with GSAP-powered clip-path fill effect.
+ *
+ * @framerSupportedLayoutWidth any-prefer-fixed
+ * @framerSupportedLayoutHeight any-prefer-fixed
+ * @framerIntrinsicWidth 400
+ * @framerIntrinsicHeight 400
+ */
 import * as React from "react"
 import { useEffect, useRef, useState } from "react"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
@@ -62,6 +68,45 @@ function sanitizeSvg(html: string): string {
     } catch {
         return ""
     }
+}
+
+function loadScript(src: string, timeoutMs = 10000): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (typeof document === "undefined") {
+            reject(new Error("No document available"))
+            return
+        }
+        const existing = document.querySelector(
+            `script[src="${src}"]`
+        ) as HTMLScriptElement | null
+        if (existing?.dataset.status === "loaded") {
+            resolve()
+            return
+        }
+        if (existing?.dataset.status === "error") existing.remove()
+
+        const script = document.createElement("script")
+        script.src = src
+        script.async = true
+        script.dataset.status = "loading"
+
+        const timeout = window.setTimeout(() => {
+            script.dataset.status = "error"
+            reject(new Error(`Timed out loading ${src}`))
+        }, timeoutMs)
+
+        script.onload = () => {
+            script.dataset.status = "loaded"
+            clearTimeout(timeout)
+            resolve()
+        }
+        script.onerror = () => {
+            script.dataset.status = "error"
+            clearTimeout(timeout)
+            reject(new Error(`Failed: ${src}`))
+        }
+        document.head.appendChild(script)
+    })
 }
 
 interface Props {
@@ -138,7 +183,7 @@ export default function LogoReveal({
 
     // Intersection Observer for enableScrollTrigger
     useEffect(() => {
-        if (!enableScrollTrigger || !wrapRef.current) return
+        if (!enableScrollTrigger || typeof IntersectionObserver === "undefined" || !wrapRef.current) return
 
         const observer = new IntersectionObserver(
             ([entry]) => {
@@ -155,6 +200,8 @@ export default function LogoReveal({
     }, [enableScrollTrigger, scrollThreshold])
 
     useEffect(() => {
+        if (typeof window === "undefined" || typeof document === "undefined") return
+
         let loadTimeline: GsapTimeline | null = null
         let cancelled = false
         const timeoutIds: ReturnType<typeof setTimeout>[] = []
@@ -167,36 +214,9 @@ export default function LogoReveal({
 
         // Load GSAP from CDN with error handling
         const loadGSAP = async () => {
-            if (!window.gsap) {
-                await new Promise<void>((resolve, reject) => {
-                    const existingScript = document.querySelector('script[src*="gsap.min"]')
-                    if (existingScript) {
-                        if (window.gsap) { resolve(); return }
-                        existingScript.addEventListener("load", () => resolve())
-                        return
-                    }
-                    const script = document.createElement("script")
-                    script.src = "https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js"
-                    script.onload = () => resolve()
-                    script.onerror = () => reject(new Error("Failed to load GSAP"))
-                    document.head.appendChild(script)
-                }).catch(console.error)
-            }
-            if (!window.CustomEase) {
-                await new Promise<void>((resolve, reject) => {
-                    const existingScript = document.querySelector('script[src*="CustomEase"]')
-                    if (existingScript) {
-                        if (window.CustomEase) { resolve(); return }
-                        existingScript.addEventListener("load", () => resolve())
-                        return
-                    }
-                    const script = document.createElement("script")
-                    script.src = "https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/CustomEase.min.js"
-                    script.onload = () => resolve()
-                    script.onerror = () => reject(new Error("Failed to load CustomEase"))
-                    document.head.appendChild(script)
-                }).catch(console.error)
-            }
+            await loadScript("https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js")
+            if (cancelled) return
+            await loadScript("https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/CustomEase.min.js")
         }
 
         loadGSAP().then(() => {

@@ -104,35 +104,41 @@ const DEFAULT_CARDS: CardData[] = [
     },
 ]
 
-function loadScript(src: string): Promise<void> {
+function loadScript(src: string, timeoutMs = 10000): Promise<void> {
     return new Promise((resolve, reject) => {
-        const existing = document.querySelector(
-            `script[src="${src}"]`
-        ) as HTMLScriptElement
-        if (existing) {
-            if (existing.dataset.loaded === "true") {
-                resolve()
-                return
-            }
-            existing.addEventListener("load", () => resolve(), {
-                once: true,
-            })
-            existing.addEventListener(
-                "error",
-                () =>
-                    reject(new Error(`Failed to load ${src}`)),
-                { once: true }
-            )
+        if (typeof document === "undefined") {
+            reject(new Error("No document available"))
             return
         }
+        const existing = document.querySelector(
+            `script[src="${src}"]`
+        ) as HTMLScriptElement | null
+        if (existing?.dataset.status === "loaded") {
+            resolve()
+            return
+        }
+        if (existing?.dataset.status === "error") existing.remove()
+
         const script = document.createElement("script")
         script.src = src
+        script.async = true
+        script.dataset.status = "loading"
+
+        const timeout = window.setTimeout(() => {
+            script.dataset.status = "error"
+            reject(new Error(`Timed out loading ${src}`))
+        }, timeoutMs)
+
         script.onload = () => {
-            script.dataset.loaded = "true"
+            script.dataset.status = "loaded"
+            clearTimeout(timeout)
             resolve()
         }
-        script.onerror = () =>
-            reject(new Error(`Failed to load ${src}`))
+        script.onerror = () => {
+            script.dataset.status = "error"
+            clearTimeout(timeout)
+            reject(new Error(`Failed: ${src}`))
+        }
         document.head.appendChild(script)
     })
 }
@@ -146,6 +152,7 @@ function useContainerWidth(ref: React.RefObject<HTMLDivElement | null>): number 
     useEffect(() => {
         const el = ref.current
         if (!el) return
+        if (typeof ResizeObserver === "undefined") return
         const ro = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 const w = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width
@@ -914,6 +921,9 @@ function TestimonialCardsStack({
     return (
         <div
             ref={stackRef}
+            role="region"
+            aria-roledescription="carousel"
+            aria-label="Testimonials"
             style={{
                 width: "100%",
                 height: "100%",
@@ -926,6 +936,21 @@ function TestimonialCardsStack({
                 boxSizing: "border-box",
             }}
         >
+            <div
+                aria-live="polite"
+                aria-atomic="true"
+                style={{
+                    position: "absolute",
+                    width: 1,
+                    height: 1,
+                    overflow: "hidden",
+                    clip: "rect(0,0,0,0)",
+                    whiteSpace: "nowrap",
+                    border: 0,
+                }}
+            >
+                {`Card 1 of ${displayCards.length}`}
+            </div>
             {/* Collection wrapper — padding controls stack offsets */}
             <div
                 ref={collectionRef}
@@ -961,6 +986,7 @@ function TestimonialCardsStack({
                                 userSelect: "none",
                                 WebkitUserSelect: "none",
                                 WebkitTouchCallout: "none" as any,
+                                touchAction: "none",
                                 width: "100%",
                                 display: "flex",
                                 justifyContent: "center",

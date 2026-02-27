@@ -176,21 +176,15 @@ function HorizontalScrollingSections({
 
     const [reducedMotion, setReducedMotion] = useState(false)
     useEffect(() => {
-        if (typeof window === "undefined" || !window.matchMedia) return
+        if (typeof window === "undefined") return () => {}
         const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
         setReducedMotion(mq.matches)
         const onChange = (e: MediaQueryListEvent) => setReducedMotion(e.matches)
-        if (typeof mq.addEventListener === "function") {
-            mq.addEventListener("change", onChange)
-            return () => mq.removeEventListener("change", onChange)
-        }
-        mq.addListener(onChange)
-        return () => mq.removeListener(onChange)
+        mq.addEventListener("change", onChange)
+        return () => mq.removeEventListener("change", onChange)
     }, [])
 
-    const [windowWidth, setWindowWidth] = useState(
-        typeof window !== "undefined" ? window.innerWidth : 1440
-    )
+    const [windowWidth, setWindowWidth] = useState(1440)
     useEffect(() => {
         if (typeof window === "undefined") return
         let raf = 0

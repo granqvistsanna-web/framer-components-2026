@@ -443,6 +443,7 @@ export default function ImageGridParallax({
         if (layout !== "custom" && LAYOUT_PRESETS[layout]) {
             setLastPreset(LAYOUT_PRESETS[layout])
         }
+        return () => {}
     }, [layout])
 
     const resolvedCards = useMemo(() => {
@@ -507,6 +508,7 @@ export default function ImageGridParallax({
     useEffect(() => {
         const el = containerRef.current
         if (!el) return
+        if (typeof ResizeObserver === "undefined") return
         const ro = new ResizeObserver(([entry]) => {
             const { width, height } = entry.contentRect
             if (width > 0 && height > 0) setContainerSize({ w: width, h: height })
@@ -550,6 +552,7 @@ export default function ImageGridParallax({
             mouseXMV.set(0)
             mouseYMV.set(0)
         }
+        return () => {}
     }, [reducedMotion])
 
     // Element-relative mouse tracking
@@ -632,6 +635,7 @@ export default function ImageGridParallax({
     // Reset flip state when cycling is disabled or card count changes
     useEffect(() => {
         if (!cycleEnabled) setCardFlipped([])
+        return () => {}
     }, [cycleEnabled, resolvedCards.length])
 
     // Flip a batch of cards by their indices
@@ -1022,6 +1026,7 @@ addPropertyControls(ImageGridParallax, {
                     min: 0,
                     max: 2,
                     step: 0.1,
+                    unit: "x",
                 },
             },
         },

@@ -941,6 +941,7 @@ export default function DirectionalListHover(props: Props) {
     // Reset active row when switching back to desktop
     useEffect(() => {
         if (!isMobile) setActiveRowIndex(null)
+        return () => {}
     }, [isMobile])
 
     if (isStaticRenderer) {
@@ -1186,6 +1187,7 @@ addPropertyControls(DirectionalListHover, {
                 min: 0.5,
                 max: 5,
                 step: 0.5,
+                unit: "fr",
             },
             col2Width: {
                 type: ControlType.Number,
@@ -1194,6 +1196,7 @@ addPropertyControls(DirectionalListHover, {
                 min: 0.5,
                 max: 5,
                 step: 0.5,
+                unit: "fr",
             },
             col3Width: {
                 type: ControlType.Number,
@@ -1202,6 +1205,7 @@ addPropertyControls(DirectionalListHover, {
                 min: 0.5,
                 max: 5,
                 step: 0.5,
+                unit: "fr",
                 hidden: (props) =>
                     (props.columnCount ?? 3) < 3,
             },
@@ -1212,6 +1216,7 @@ addPropertyControls(DirectionalListHover, {
                 min: 0.5,
                 max: 5,
                 step: 0.5,
+                unit: "fr",
                 hidden: (props) =>
                     (props.columnCount ?? 3) < 4,
             },

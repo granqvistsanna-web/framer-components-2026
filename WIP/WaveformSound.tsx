@@ -127,6 +127,7 @@ function WaveformSound(props: WaveformSoundProps) {
 
         resize()
 
+        if (typeof ResizeObserver === "undefined") return
         const observer = new ResizeObserver(() => resize())
         observer.observe(canvas)
 
@@ -351,6 +352,7 @@ addPropertyControls(WaveformSound, {
         min: 1,
         max: 16,
         step: 1,
+        unit: "px",
     },
     gap: {
         type: ControlType.Number,
@@ -359,6 +361,7 @@ addPropertyControls(WaveformSound, {
         min: 0,
         max: 20,
         step: 1,
+        unit: "px",
     },
     minHeight: {
         type: ControlType.Number,
@@ -367,6 +370,7 @@ addPropertyControls(WaveformSound, {
         min: 1,
         max: 80,
         step: 1,
+        unit: "px",
     },
     maxHeight: {
         type: ControlType.Number,
@@ -375,6 +379,7 @@ addPropertyControls(WaveformSound, {
         min: 10,
         max: 280,
         step: 2,
+        unit: "px",
     },
     speed: {
         type: ControlType.Number,
@@ -422,6 +427,7 @@ addPropertyControls(WaveformSound, {
         min: 0,
         max: 40,
         step: 1,
+        unit: "px",
     },
     backgroundColor: {
         type: ControlType.Color,
@@ -435,6 +441,7 @@ addPropertyControls(WaveformSound, {
         min: 0,
         max: 80,
         step: 1,
+        unit: "px",
     },
     liquidGlass: {
         type: ControlType.Boolean,
@@ -454,6 +461,7 @@ addPropertyControls(WaveformSound, {
         min: 0,
         max: 40,
         step: 1,
+        unit: "px",
         hidden: (props: WaveformSoundProps) => !props.liquidGlass,
     },
     glassBorderOpacity: {

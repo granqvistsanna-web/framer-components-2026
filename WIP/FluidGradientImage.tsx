@@ -1,5 +1,7 @@
-// Fluid Gradient Image
 /**
+ * Fluid Gradient Image
+ * Interactive WebGL image effect with cursor-driven fluid gradient overlay
+ *
  * @framerSupportedLayoutWidth any-prefer-fixed
  * @framerSupportedLayoutHeight any-prefer-fixed
  * @framerIntrinsicWidth 600
@@ -8,7 +10,7 @@
 import * as React from "react"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
-const TRAIL_LENGTH = 8
+const TRAIL_LENGTH = 12
 
 // ── default placeholder: a warm gradient photo stand-in (pre-encoded for SSR) ──
 const DEFAULT_IMAGE =
@@ -37,6 +39,8 @@ uniform sampler2D uTexture;
 uniform vec2 uImageSize;
 uniform vec3 uEffectColor1;
 uniform vec3 uEffectColor2;
+uniform vec3 uEffectColor3;
+uniform vec3 uEffectColor4;
 uniform float uRadius;
 uniform float uStrength;
 uniform float uSpeed;
@@ -48,23 +52,21 @@ uniform vec2 uTrail[${TRAIL_LENGTH}];
 uniform vec2 uTrailVelocities[${TRAIL_LENGTH}];
 uniform float uTrailStrengths[${TRAIL_LENGTH}];
 
-// ── noise primitives ──
+// ── noise primitives (gradient noise) ──
 
-float hash(vec2 p) {
-    p = fract(p * vec2(123.34, 345.45));
-    p += dot(p, p + 34.345);
-    return fract(p.x * p.y);
+vec2 hash2(vec2 p) {
+    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
 }
 
-float vnoise(vec2 p) {
+float gnoise(vec2 p) {
     vec2 i = floor(p);
     vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+    vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0); // quintic smoothstep
+    return mix(mix(dot(hash2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
+                   dot(hash2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
+               mix(dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
+                   dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x), u.y);
 }
 
 mat2 rot(float a) {
@@ -75,12 +77,25 @@ mat2 rot(float a) {
 float fbm(vec2 p) {
     float v = 0.0, a = 0.5;
     mat2 r = rot(0.37);
-    for (int i = 0; i < 2; i++) {
-        v += a * vnoise(p);
+    for (int i = 0; i < 4; i++) {
+        v += a * gnoise(p);
         p = r * p * 2.0 + vec2(13.7, 31.5);
         a *= 0.5;
     }
     return v;
+}
+
+// ── curl noise (divergence-free flow field) ──
+
+vec2 curlNoise(vec2 p) {
+    float eps = 0.1;
+    float n1 = gnoise(p + vec2(0.0, eps));
+    float n2 = gnoise(p - vec2(0.0, eps));
+    float n3 = gnoise(p + vec2(eps, 0.0));
+    float n4 = gnoise(p - vec2(eps, 0.0));
+    float dFdy = (n1 - n2) / (2.0 * eps);
+    float dFdx = (n3 - n4) / (2.0 * eps);
+    return vec2(dFdy, -dFdx);
 }
 
 // ── HSL helpers ──
@@ -156,37 +171,58 @@ void main() {
     vec2 p = uv * aspect;
     float radiusScaled = uRadius * max(canvasAspect, 1.0);
 
+    // ── global curl flow field (computed once, reused across trail) ──
+    vec2 flowField = curlNoise(p * 2.0 + time * 0.3);
+
     // ── hover proximity (color shifts even when pointer is still) ──
     float hoverDist = distance(p, uPointer * aspect);
     float hoverT = 1.0 - smoothstep(0.0, radiusScaled, hoverDist);
-    float hoverInfluence = hoverT * hoverT * uPointerActive * uStrength;
+    float hoverInfluence = hoverT * hoverT * hoverT * uPointerActive * uStrength;
 
-    // ── trail smudge ──
+    // ── trail: vortex + curl + smudge ──
     float trailInfluence = 0.0;
-    vec2 totalSmudge = vec2(0.0);
+    vec2 totalSwirl = vec2(0.0);
 
     for (int i = 0; i < ${TRAIL_LENGTH}; i++) {
         float trailStr = uTrailStrengths[i];
         if (trailStr < 0.001) continue;
         vec2 trailPos = uTrail[i] * aspect;
-        float dist = distance(p, trailPos);
+        vec2 toTrail = p - trailPos;
+        float dist = length(toTrail);
         float t = 1.0 - smoothstep(0.0, radiusScaled, dist);
-        float influence = t * t * trailStr;
-        float noiseOff = fbm(uv * 4.0 + time + float(i) * 1.7) * uDistortion;
-        influence *= (1.0 + noiseOff);
+        float influence = t * t * t * trailStr; // cubic falloff for softer edges
+
+        // noise modulation for organic shape
+        float noiseOff = gnoise(uv * 5.0 + time * 0.4 + float(i) * 1.7) * uDistortion;
+        influence *= (1.0 + noiseOff * 0.6);
         trailInfluence += influence;
+
         vec2 vel = uTrailVelocities[i];
-        if (length(vel) > 0.001) {
-            totalSmudge += vel * influence * uDistortion;
+        float velMag = length(vel);
+
+        // vortex spin: perpendicular to direction-to-point
+        vec2 tangent = vec2(-toTrail.y, toTrail.x);
+        float vortexStr = influence * velMag * 2.0;
+        totalSwirl += tangent / max(dist, 0.02) * vortexStr * uDistortion * 0.4;
+
+        // reduced linear smudge (still needed for directional push)
+        if (velMag > 0.001) {
+            totalSwirl += vel * influence * uDistortion * 0.3;
         }
+
+        // curl flow contribution (organic turbulence)
+        totalSwirl += flowField * influence * uDistortion * 0.25;
     }
     trailInfluence = clamp(trailInfluence, 0.0, 1.0) * uStrength * uPointerActive;
 
     // combine hover + trail
     float combined = clamp(hoverInfluence + trailInfluence, 0.0, 1.0);
 
-    // smudge texture sampling
-    vec2 smudgedTexUv = texUv + totalSmudge * 0.5 * uPointerActive;
+    // ── texture distortion using curl-warped UVs ──
+    vec2 swirlUv = totalSwirl * 0.5 * uPointerActive;
+    // add subtle curl warp near cursor even when still
+    swirlUv += flowField * hoverInfluence * 0.03;
+    vec2 smudgedTexUv = texUv + swirlUv;
     vec4 smudgedColor = texture2D(uTexture, smudgedTexUv);
 
     // hue shift + saturation boost
@@ -206,18 +242,44 @@ void main() {
     c2hsl.x = fract(c2hsl.x + uTime * uColorCycle * 0.73);
     vec3 cycledColor2 = hsl2rgb(c2hsl);
 
-    // gradient overlay
-    float gradientT = fbm(uv * 2.5 + time * 0.2 + totalSmudge * 6.0);
-    vec3 gradientColor = mix(cycledColor1, cycledColor2, gradientT);
+    vec3 c3hsl = rgb2hsl(uEffectColor3);
+    c3hsl.x = fract(c3hsl.x + uTime * uColorCycle * 1.17);
+    vec3 cycledColor3 = hsl2rgb(c3hsl);
 
-    // blend: more gradient when smudging fast
-    float gradientMix = clamp(combined * 0.4 + length(totalSmudge) * 4.0, 0.0, 0.8);
+    vec3 c4hsl = rgb2hsl(uEffectColor4);
+    c4hsl.x = fract(c4hsl.x + uTime * uColorCycle * 0.53);
+    vec3 cycledColor4 = hsl2rgb(c4hsl);
+
+    // ── domain-warped gradient overlay ──
+    vec2 warpCoord = uv * 2.5 + totalSwirl * 4.0;
+    float warpLayer = fbm(warpCoord + time * 0.15);
+    float gradientT = fbm(warpCoord + warpLayer * 0.5 + time * 0.1);
+
+    // remap FBM output (~[-0.94, 0.94]) to smooth [0, 1]
+    float gt = clamp(gradientT * 0.5 + 0.5, 0.0, 1.0);
+    gt = gt * gt * (3.0 - 2.0 * gt); // hermite smooth
+
+    // 4-stop gradient: color1 → color2 → color3 → color4
+    float seg = gt * 3.0;
+    vec3 gradientColor;
+    if (seg < 1.0) {
+        gradientColor = mix(cycledColor1, cycledColor2, seg);
+    } else if (seg < 2.0) {
+        gradientColor = mix(cycledColor2, cycledColor3, seg - 1.0);
+    } else {
+        gradientColor = mix(cycledColor3, cycledColor4, seg - 2.0);
+    }
+
+    // blend: more gradient when swirling fast
+    float swirlMag = length(totalSwirl);
+    float gradientMix = smoothstep(0.0, 0.8, combined * 0.35 + swirlMag * 2.5);
     vec3 effectColor = mix(hueShifted, gradientColor, gradientMix);
 
     // compositing: image area blends normally, overflow fades out
     vec3 imageBlend = mix(texColor.rgb, effectColor, combined);
     vec3 finalColor = mix(effectColor, imageBlend, inImage);
-    finalColor += gradientColor * combined * combined * 0.4;
+    float glow = combined * combined * combined; // cubic for softer glow
+    finalColor += gradientColor * glow * 0.35;
     finalColor = clamp(finalColor, 0.0, 1.0);
 
     float alpha = inImage * texColor.a;
@@ -369,6 +431,8 @@ type FluidGradientImageProps = {
     image?: string
     effectColor1: string
     effectColor2: string
+    effectColor3: string
+    effectColor4: string
     effect?: {
         radius?: number
         strength?: number
@@ -392,6 +456,8 @@ type FluidGradientImageProps = {
 interface ShaderState {
     effectColor1Rgb: [number, number, number]
     effectColor2Rgb: [number, number, number]
+    effectColor3Rgb: [number, number, number]
+    effectColor4Rgb: [number, number, number]
     radius: number
     strength: number
     speed: number
@@ -417,6 +483,8 @@ interface UniformLocations {
     uImageSize: WebGLUniformLocation | null
     uEffectColor1: WebGLUniformLocation | null
     uEffectColor2: WebGLUniformLocation | null
+    uEffectColor3: WebGLUniformLocation | null
+    uEffectColor4: WebGLUniformLocation | null
     uRadius: WebGLUniformLocation | null
     uStrength: WebGLUniformLocation | null
     uSpeed: WebGLUniformLocation | null
@@ -436,6 +504,8 @@ export default function FluidGradientImage(props: FluidGradientImageProps) {
         image,
         effectColor1 = "#0D9488",
         effectColor2 = "#A78BFA",
+        effectColor3 = "#F472B6",
+        effectColor4 = "#FBBF24",
         effect = {},
         animation = {},
         advanced = {},
@@ -483,6 +553,8 @@ export default function FluidGradientImage(props: FluidGradientImageProps) {
     const stateRef = React.useRef<ShaderState>({
         effectColor1Rgb: parseColorToRgb01(effectColor1),
         effectColor2Rgb: parseColorToRgb01(effectColor2),
+        effectColor3Rgb: parseColorToRgb01(effectColor3),
+        effectColor4Rgb: parseColorToRgb01(effectColor4),
         radius,
         strength,
         speed,
@@ -499,6 +571,8 @@ export default function FluidGradientImage(props: FluidGradientImageProps) {
     stateRef.current = {
         effectColor1Rgb: parseColorToRgb01(effectColor1),
         effectColor2Rgb: parseColorToRgb01(effectColor2),
+        effectColor3Rgb: parseColorToRgb01(effectColor3),
+        effectColor4Rgb: parseColorToRgb01(effectColor4),
         radius,
         strength,
         speed,
@@ -525,11 +599,12 @@ export default function FluidGradientImage(props: FluidGradientImageProps) {
     React.useEffect(() => {
         if (initialMountRef.current) {
             initialMountRef.current = false
-            return
+            return () => {}
         }
         if (reloadTextureRef.current) {
             reloadTextureRef.current(imageSrc)
         }
+        return () => {}
     }, [imageSrc])
 
     // ── main WebGL lifecycle ──
@@ -621,6 +696,14 @@ export default function FluidGradientImage(props: FluidGradientImageProps) {
                 uEffectColor2: gl.getUniformLocation(
                     program,
                     "uEffectColor2"
+                ),
+                uEffectColor3: gl.getUniformLocation(
+                    program,
+                    "uEffectColor3"
+                ),
+                uEffectColor4: gl.getUniformLocation(
+                    program,
+                    "uEffectColor4"
                 ),
                 uRadius: gl.getUniformLocation(program, "uRadius"),
                 uStrength: gl.getUniformLocation(program, "uStrength"),
@@ -972,6 +1055,10 @@ export default function FluidGradientImage(props: FluidGradientImageProps) {
             gl.uniform3f(loc.uEffectColor1, r1, g1, b1)
             const [r2, g2, b2] = s.effectColor2Rgb
             gl.uniform3f(loc.uEffectColor2, r2, g2, b2)
+            const [r3, g3, b3] = s.effectColor3Rgb
+            gl.uniform3f(loc.uEffectColor3, r3, g3, b3)
+            const [r4, g4, b4] = s.effectColor4Rgb
+            gl.uniform3f(loc.uEffectColor4, r4, g4, b4)
 
             gl.uniform1f(loc.uRadius, s.radius)
             gl.uniform1f(loc.uStrength, s.strength)
@@ -1114,6 +1201,16 @@ addPropertyControls(FluidGradientImage, {
         type: ControlType.Color,
         title: "Color 2",
         defaultValue: "#A78BFA",
+    },
+    effectColor3: {
+        type: ControlType.Color,
+        title: "Color 3",
+        defaultValue: "#F472B6",
+    },
+    effectColor4: {
+        type: ControlType.Color,
+        title: "Color 4",
+        defaultValue: "#FBBF24",
     },
     effect: {
         type: ControlType.Object,

@@ -164,25 +164,25 @@ function FlickCardsSlider(props: FlickCardsSliderProps) {
     const [rw, rh] = cardAspectRatio.split(":").map(Number)
     const ratioValue = rw / rh // CSS aspect-ratio value (w/h)
     const cardRadius = card?.radius ?? 16
-    const cardBackground = card?.background || "#111111"
+    const cardBackground = card?.background ?? "#111111"
     const showBorder = card?.showBorder ?? false
-    const borderWidth = card?.borderWidth || 3
-    const borderColor = card?.borderColor || "#ffffff"
+    const borderWidth = card?.borderWidth ?? 3
+    const borderColor = card?.borderColor ?? "#ffffff"
 
-    const spreadX = fanLayout?.spreadX || 25
+    const spreadX = fanLayout?.spreadX ?? 25
     const spreadY = fanLayout?.spreadY ?? 1
     const rotationAmount = fanLayout?.rotation ?? 10
     const scaleStep = fanLayout?.scaleStep ?? 0.1
 
     const showDimOverlay = appearance?.showDimOverlay ?? true
-    const dimColor = appearance?.dimColor || "rgba(0,0,0,0.4)"
+    const dimColor = appearance?.dimColor ?? "rgba(0,0,0,0.4)"
     const activeOpacity = appearance?.activeOpacity ?? 1
     const nearOpacity = appearance?.nearOpacity ?? 0.75
     const farOpacity = appearance?.farOpacity ?? 0.5
 
-    const animationDuration = animation?.duration || 0.6
-    const elasticity = animation?.elasticity || 1.2
-    const dragThreshold = animation?.dragThreshold || 0.1
+    const animationDuration = animation?.duration ?? 0.6
+    const elasticity = animation?.elasticity ?? 1.2
+    const dragThreshold = animation?.dragThreshold ?? 0.1
 
     const isStatic = useIsStaticRenderer()
     const reducedMotion = useReducedMotion()
@@ -1059,6 +1059,7 @@ addPropertyControls(FlickCardsSlider, {
                 min: 0,
                 max: 0.3,
                 step: 0.01,
+                unit: "x",
                 defaultValue: 0.1,
             },
         },
@@ -1128,6 +1129,7 @@ addPropertyControls(FlickCardsSlider, {
                 min: 0.5,
                 max: 2,
                 step: 0.1,
+                unit: "x",
                 defaultValue: 1.2,
             },
             dragThreshold: {
@@ -1136,6 +1138,7 @@ addPropertyControls(FlickCardsSlider, {
                 min: 0.02,
                 max: 0.5,
                 step: 0.01,
+                unit: "x",
                 defaultValue: 0.1,
             },
         },

@@ -681,6 +681,10 @@ function CoverFlowSlider({
 
         // Keyboard handler — scoped to root so multiple sliders don't conflict
         const onKeyDown = (e: KeyboardEvent) => {
+            const tag = (e.target as HTMLElement)?.tagName?.toLowerCase()
+            if (tag === "input" || tag === "textarea" || tag === "select") return
+            if ((e.target as HTMLElement)?.isContentEditable) return
+
             if (e.key === "ArrowRight") {
                 e.preventDefault()
                 navigateTo(state.activeIndex + 1)
@@ -1188,6 +1192,7 @@ addPropertyControls(CoverFlowSlider, {
                 min: 0.3,
                 max: 1,
                 step: 0.05,
+                unit: "x",
                 defaultValue: 0.8,
             },
             depthOffset: {

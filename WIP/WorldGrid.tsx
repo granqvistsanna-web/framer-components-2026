@@ -346,6 +346,7 @@ function WorldGrid(props: Props) {
             const alt = item?.alt || `Image ${lightboxIndex + 1}`
             liveRef.current.textContent = `Viewing ${alt}, image ${lightboxIndex + 1} of ${safeCount}`
         }
+        return () => {}
     }, [lightboxIndex, images, safeCount])
 
     // ─── Cleanup on unmount ─────────────────────────────────
@@ -845,6 +846,7 @@ addPropertyControls(WorldGrid, {
         min: 0.1,
         max: 3,
         step: 0.1,
+        unit: "x",
     },
     backgroundColor: {
         type: ControlType.Color,
@@ -858,6 +860,7 @@ addPropertyControls(WorldGrid, {
         min: 0.1,
         max: 1,
         step: 0.05,
+        unit: "x",
     },
     maxZoom: {
         type: ControlType.Number,
@@ -866,6 +869,7 @@ addPropertyControls(WorldGrid, {
         min: 1,
         max: 4,
         step: 0.1,
+        unit: "x",
     },
     enableLightbox: {
         type: ControlType.Boolean,
@@ -909,6 +913,7 @@ addPropertyControls(WorldGrid, {
         min: 0.05,
         max: 2,
         step: 0.05,
+        unit: "x",
         hidden: (props: any) => !props.autoRotate,
     },
 })
