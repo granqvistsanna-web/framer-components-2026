@@ -13,6 +13,7 @@ BL/         Client components
 - **AIChatSequence** — Animated AI chat conversation
 - **CurvedTicker** — Circular/curved scrolling text ticker
 - **FluidPixelText** — Image-based particle dispersion effect
+- **GrainGradient** — Animated grainy gradient background with WebGL shaders
 - **GradientBarsBG** — Animated gradient bars background
 - **GradientTextReveal** — Smooth text reveal with gradient colors
 - **VerticalGridLines** — Animated vertical grid line overlay

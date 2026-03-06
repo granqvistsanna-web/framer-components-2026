@@ -12,6 +12,12 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["global.d.ts", "declarations.d.ts", "BL/**/*.tsx", "WIP/**/*.tsx"],
-  "exclude": ["node_modules", ".playwright-mcp", "shipped"]
+  "include": [
+    "global.d.ts",
+    "declarations.d.ts",
+    "BL/**/*.tsx",
+    "WIP/**/*.tsx",
+    "shipped/**/*.tsx"
+  ],
+  "exclude": ["node_modules", ".playwright-mcp"]
 }

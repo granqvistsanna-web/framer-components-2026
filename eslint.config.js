@@ -5,11 +5,18 @@ import reactHooks from "eslint-plugin-react-hooks"
 
 export default [
   {
-    ignores: ["node_modules/**", ".git/**", ".playwright-mcp/**", "shipped/**"],
+    ignores: ["node_modules/**", ".git/**", ".playwright-mcp/**"],
   },
   js.configs.recommended,
   {
-    files: ["BL/**/*.ts", "BL/**/*.tsx", "WIP/**/*.ts", "WIP/**/*.tsx"],
+    files: [
+      "BL/**/*.ts",
+      "BL/**/*.tsx",
+      "WIP/**/*.ts",
+      "WIP/**/*.tsx",
+      "shipped/**/*.ts",
+      "shipped/**/*.tsx",
+    ],
     languageOptions: {
       parser: tsParser,
       parserOptions: {

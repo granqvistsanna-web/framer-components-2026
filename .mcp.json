@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "framer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.unframer.co/mcp?id=c8f5769a709bb38d032570f3f25e9461dfaa5df9d0545d26fa19c443f22d6e0f&secret=mCey8oE8DvStONxWBX8OfxxAKM6jISVI"
+      ]
+    }
+  }
+}

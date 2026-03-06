@@ -52,6 +52,18 @@ declare module "framer" {
     File: string
     EventHandler: string
     Slot: string
+    Image: string
+    Link: string
+    Transition: string
+    ComponentInstance: string
+  }
+
+  export const RenderTarget: {
+    canvas: string
+    preview: string
+    export: string
+    thumbnail: string
+    current: () => string
   }
 
   export function addPropertyControls(
