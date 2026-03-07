@@ -464,7 +464,7 @@ export default function WebGLInteractiveGradient(props: WebGLInteractiveGradient
     }, [isClient])
 
     useEffect(() => {
-        if (!isClient || isStatic) return () => {}
+        if (!isClient) return () => {}
         const container = containerRef.current
         if (!container) return () => {}
 
@@ -764,31 +764,6 @@ export default function WebGLInteractiveGradient(props: WebGLInteractiveGradient
     }, [isClient, isStatic])
 
     const config = configRef.current
-
-    if (isStatic) {
-        const fallback = buildFallbackStyle(config)
-        return (
-            <div
-                style={{
-                    ...style,
-                    width: "100%",
-                    height: "100%",
-                    minHeight: 120,
-                    overflow: "hidden",
-                    background: config.fallbackColor,
-                    position: "relative",
-                }}
-            >
-                <div
-                    style={{
-                        position: "absolute",
-                        inset: 0,
-                        ...fallback,
-                    }}
-                />
-            </div>
-        )
-    }
 
     return (
         <div

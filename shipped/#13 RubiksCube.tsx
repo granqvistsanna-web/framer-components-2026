@@ -1480,7 +1480,7 @@ export default function RubiksCube(props: RubiksCubeProps) {
     }, [loaded, animate, isStaticRenderer])
 
     if (isStaticRenderer) {
-        return <CanvasPlaceholder cubeColor={cubeColor} backgroundColor={backgroundColor} preset={preset} cubeSize={cubeSize} gridSize={gridSize} />
+        return <CanvasPlaceholder cubeColor={cubeColor} backgroundColor={transparentBg ? "transparent" : backgroundColor} preset={preset} cubeSize={cubeSize} gridSize={gridSize} />
     }
 
     return (
@@ -1497,6 +1497,8 @@ export default function RubiksCube(props: RubiksCubeProps) {
             style={{
                 width: "100%",
                 height: "100%",
+                minWidth: 200,
+                minHeight: 200,
                 position: "relative",
                 overflow: "hidden",
                 backgroundColor: transparentBg ? "transparent" : backgroundColor,

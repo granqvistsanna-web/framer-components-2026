@@ -13,7 +13,7 @@
  */
 
 import * as React from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 // --- Types ---
@@ -484,8 +484,8 @@ function CoverFlow({
         }
     }, [isStatic])
 
-    // Initialize slider
-    useEffect(() => {
+    // Initialize slider — useLayoutEffect so transforms apply before paint
+    useLayoutEffect(() => {
         if (isStatic || !engineReady) return
 
         const gsap = window.gsap
@@ -737,6 +737,7 @@ function CoverFlow({
         depthOffset,
         duration,
         loop,
+        containerWidth,
         slidesSignature,
     ])
 

@@ -1,21 +1,14 @@
 /**
- *  29
  * #29 CMS Gallery Slideshow
- */
-import * as React from "react"
-import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
-import { motion, animate, useMotionValue, AnimatePresence } from "framer-motion"
-
-/**
+ *
  * @framerIntrinsicWidth 800
  * @framerIntrinsicHeight 400
  * @framerSupportedLayoutWidth any
  * @framerSupportedLayoutHeight any
- *
- * CMS Slider Pro - V9 (Ultimate Stable)
- * - Fixed: Animation Conflict (White screen bug) -> Solved with controlsRef.stop()
- * - Fixed: Canvas CMS Items (Repeating 1st item) -> Solved with normalizedContent structure
  */
+import * as React from "react"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
+import { motion, animate, useMotionValue, AnimatePresence } from "framer-motion"
 
 // ============================================
 // TYPES
@@ -38,8 +31,8 @@ interface LayoutSettings {
     items: number
     gap: number
     padding: number
-    radius: number
     maxWidth: number
+    aspectRatio: string
 }
 
 interface AutoplaySettings {
@@ -51,8 +44,6 @@ interface AutoplaySettings {
 interface NavigationSettings {
     draggable: boolean
     step: "Single" | "Page"
-    dragThreshold: number
-    edgeResistance: number
     keyboard: boolean
 }
 
@@ -69,11 +60,6 @@ interface ArrowSettings {
     fadeIn: boolean
     inset: number
     gap: number
-    offsetX: number
-    offsetY: number
-    shadow: boolean
-    shadowColor: string
-    shadowBlur: number
 }
 
 interface DotSettings {
@@ -81,14 +67,10 @@ interface DotSettings {
     size: number
     inset: number
     gap: number
-    padding: number
     fill: string
     activeFill: string
     backdrop: string
     radius: number
-    opacity: number
-    activeScale: number
-    blur: number
 }
 
 interface LightboxSettings {
@@ -178,13 +160,11 @@ export default function CMSSlider(props: CMSSliderProps) {
         direction = "Left",
         loop = true,
         current = 0,
-        layout = { items: 3, gap: 30, padding: 0, radius: 0, maxWidth: 0 },
+        layout = { items: 3, gap: 30, padding: 0, maxWidth: 0, aspectRatio: "Auto" },
         autoplay = { enabled: false, interval: 3, pauseOnHover: true },
         navigation = {
             draggable: true,
             step: "Single",
-            dragThreshold: 6,
-            edgeResistance: 0.3,
             keyboard: true,
         },
         arrows = {
@@ -200,25 +180,16 @@ export default function CMSSlider(props: CMSSliderProps) {
             fadeIn: false,
             inset: 20,
             gap: 10,
-            offsetX: 0,
-            offsetY: 0,
-            shadow: false,
-            shadowColor: "rgba(0,0,0,0.2)",
-            shadowBlur: 10,
         },
         dots = {
             type: "Dots",
             size: 10,
             inset: 20,
             gap: 8,
-            padding: 10,
             fill: "rgba(255,255,255,0.4)",
             activeFill: "#ffffff",
             backdrop: "rgba(0,0,0,0.4)",
             radius: 20,
-            opacity: 0.5,
-            activeScale: 1.3,
-            blur: 4,
         },
         responsive = { enabled: false, tablet: 2, mobile: 1 },
         lightbox = {
@@ -491,6 +462,7 @@ export default function CMSSlider(props: CMSSliderProps) {
     }, [slideSize, activeIndex, calcTargetTranslate, setTranslate, isCanvas])
 
     React.useEffect(() => {
+        if (typeof window === "undefined") return
         if (!autoplay.enabled || isCanvas || itemCount <= effectiveItems) return
         if (autoplay.pauseOnHover && isHovered) return
 
@@ -512,6 +484,7 @@ export default function CMSSlider(props: CMSSliderProps) {
     ])
 
     React.useEffect(() => {
+        if (typeof window === "undefined") return
         if (!navigation.keyboard || isCanvas) return
         const handleKeyDown = (e: KeyboardEvent) => {
             if (!isHovered && !isFocused) return
@@ -571,6 +544,7 @@ export default function CMSSlider(props: CMSSliderProps) {
     }, [lightboxImages.length])
 
     React.useEffect(() => {
+        if (typeof window === "undefined") return
         if (!lightboxOpen) return
         const handleKey = (e: KeyboardEvent) => {
             if (e.key === "Escape") closeLightbox()
@@ -594,6 +568,11 @@ export default function CMSSlider(props: CMSSliderProps) {
         velocity: 0,
         moved: false,
     })
+    const clickPreventTimerRef = React.useRef<ReturnType<typeof setTimeout>>(0 as any)
+
+    React.useEffect(() => {
+        return () => clearTimeout(clickPreventTimerRef.current)
+    }, [])
 
     const getCurrentTranslate = () => (isVertical ? y.get() : x.get())
 
@@ -624,7 +603,7 @@ export default function CMSSlider(props: CMSSliderProps) {
         const pos = isVertical ? e.clientY : e.clientX
         const diff = pos - dragRef.current.startPos
 
-        if (Math.abs(diff) > Math.max(1, navigation.dragThreshold)) {
+        if (Math.abs(diff) > 6) {
             dragRef.current.moved = true
         }
 
@@ -647,7 +626,7 @@ export default function CMSSlider(props: CMSSliderProps) {
 
         const minTranslate = -maxTranslateAbs
         const maxTranslate = 0
-        const resist = clamp(navigation.edgeResistance, 0, 1)
+        const resist = 0.3
 
         if (nextTranslate > maxTranslate)
             nextTranslate =
@@ -711,7 +690,8 @@ export default function CMSSlider(props: CMSSliderProps) {
             capture: true,
             once: true,
         })
-        setTimeout(
+        clearTimeout(clickPreventTimerRef.current)
+        clickPreventTimerRef.current = setTimeout(
             () =>
                 window.removeEventListener("click", preventClick, {
                     capture: true,
@@ -723,10 +703,6 @@ export default function CMSSlider(props: CMSSliderProps) {
     // ============================================
     // RENDER HELPERS
     // ============================================
-
-    const arrowBoxShadow = arrows.shadow
-        ? `0 4px ${arrows.shadowBlur}px ${arrows.shadowColor}`
-        : "none"
 
     const arrowBtnStyle: React.CSSProperties = {
         width: arrows.size,
@@ -742,7 +718,6 @@ export default function CMSSlider(props: CMSSliderProps) {
         transition: "opacity 0.2s ease, transform 0.15s ease",
         opacity: showArrowsNow ? 1 : 0,
         pointerEvents: isCanvas ? "none" : showArrowsNow ? "auto" : "none",
-        boxShadow: arrowBoxShadow,
         flexShrink: 0,
     }
 
@@ -750,8 +725,6 @@ export default function CMSSlider(props: CMSSliderProps) {
         const isGroup = arrows.type === "Grouped"
         const align = arrows.alignment
         const inset = arrows.inset
-        const offX = arrows.offsetX
-        const offY = arrows.offsetY
 
         const style: React.CSSProperties = {
             position: "absolute",
@@ -763,42 +736,42 @@ export default function CMSSlider(props: CMSSliderProps) {
         }
 
         if (align.includes("Left")) {
-            style.left = inset + offX
+            style.left = inset
             style.justifyContent = "flex-start"
         } else if (align.includes("Right")) {
-            style.right = inset - offX
+            style.right = inset
             style.justifyContent = "flex-end"
         } else {
             style.left = "50%"
-            style.transform = `translateX(calc(-50% + ${offX}px))`
+            style.transform = "translateX(-50%)"
             style.justifyContent = "center"
         }
 
         if (align.includes("Top")) {
-            style.top = inset + offY
+            style.top = inset
             style.alignItems = "flex-start"
         } else if (align.includes("Bottom")) {
-            style.bottom = inset - offY
+            style.bottom = inset
             style.alignItems = "flex-end"
         } else {
             style.top = "50%"
             if (align.includes("Center Center")) {
-                style.transform = `translate(calc(-50% + ${offX}px), calc(-50% + ${offY}px))`
+                style.transform = "translate(-50%, -50%)"
             } else {
-                style.transform = `translateY(calc(-50% + ${offY}px))`
+                style.transform = "translateY(-50%)"
                 if (style.left === "50%")
-                    style.transform += ` translateX(${offX}px)`
+                    style.transform = "translate(-50%, -50%)"
             }
             style.alignItems = "center"
         }
 
         if (!isGroup) {
             style.width = `calc(100% - ${inset * 2}px)`
-            style.left = inset + offX
+            style.left = inset
             style.justifyContent = "space-between"
             if (align.startsWith("Center")) {
                 style.top = "50%"
-                style.transform = `translateY(calc(-50% + ${offY}px))`
+                style.transform = "translateY(-50%)"
                 style.height = 0
                 style.overflow = "visible"
             }
@@ -852,29 +825,144 @@ export default function CMSSlider(props: CMSSliderProps) {
                     width: "100%",
                     height: "100%",
                     overflow: "hidden",
-                    display: "flex",
-                    flexDirection: isVertical ? "column" : "row",
-                    gap: layout.gap,
-                    padding: layout.padding,
-                    boxSizing: "border-box",
+                    position: "relative",
                 }}
             >
-                {content || (
+                <div
+                    style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        flexDirection: isVertical ? "column" : "row",
+                        gap: layout.gap,
+                        padding: layout.padding,
+                        boxSizing: "border-box",
+                    }}
+                >
+                    {content || (
+                        <div
+                            style={{
+                                width: "100%",
+                                height: "100%",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                backgroundColor: "#EBEAF9",
+                                color: "#8855FF",
+                                fontFamily: "Inter, system-ui, sans-serif",
+                                fontSize: 14,
+                                fontWeight: 600,
+                            }}
+                        >
+                            Connect to Content
+                        </div>
+                    )}
+                </div>
+
+                {/* Canvas arrows */}
+                {arrows.show && (
                     <div
                         style={{
-                            width: "100%",
-                            height: "100%",
+                            position: "absolute",
+                            top: "50%",
+                            transform: "translateY(-50%)",
                             display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            backgroundColor: "#EBEAF9",
-                            color: "#8855FF",
-                            fontFamily: "Inter, system-ui, sans-serif",
-                            fontSize: 14,
-                            fontWeight: 600,
+                            pointerEvents: "none",
+                            ...(arrows.type === "Split"
+                                ? {
+                                      left: arrows.inset,
+                                      right: arrows.inset,
+                                      justifyContent: "space-between",
+                                  }
+                                : {
+                                      left: "50%",
+                                      transform: "translate(-50%, -50%)",
+                                      gap: arrows.gap,
+                                  }),
                         }}
                     >
-                        Connect to Content
+                        <div style={{ ...arrowBtnStyle, opacity: 1 }}>
+                            {arrows.prevImage ? (
+                                <img src={arrows.prevImage} style={{ width: arrows.size * 0.45, height: arrows.size * 0.45 }} />
+                            ) : (
+                                <ChevronLeft size={arrows.size} color={arrows.fill} />
+                            )}
+                        </div>
+                        <div style={{ ...arrowBtnStyle, opacity: 1 }}>
+                            {arrows.nextImage ? (
+                                <img src={arrows.nextImage} style={{ width: arrows.size * 0.45, height: arrows.size * 0.45 }} />
+                            ) : (
+                                <ChevronRight size={arrows.size} color={arrows.fill} />
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Canvas dots */}
+                {dots.type !== "None" && (
+                    <div
+                        style={{
+                            position: "absolute",
+                            bottom: dots.inset,
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: dots.gap,
+                            padding: 10,
+                            borderRadius: dots.radius,
+                            background: dots.backdrop,
+                            backdropFilter: "blur(4px)",
+                            pointerEvents: "none",
+                        }}
+                    >
+                        {dots.type === "Dots" &&
+                            Array.from({ length: Math.min(itemCount || 3, 5) }).map((_, i) => (
+                                <div
+                                    key={i}
+                                    style={{
+                                        width: dots.size,
+                                        height: dots.size,
+                                        borderRadius: "50%",
+                                        background: i === 0 ? dots.activeFill : dots.fill,
+                                        opacity: i === 0 ? 1 : 0.5,
+                                    }}
+                                />
+                            ))}
+                        {dots.type === "Numbers" && (
+                            <span
+                                style={{
+                                    fontFamily: "Inter, system-ui, sans-serif",
+                                    fontSize: 13,
+                                    fontWeight: 500,
+                                    color: dots.fill,
+                                }}
+                            >
+                                <span style={{ color: dots.activeFill }}>1</span>
+                                {" / "}
+                                {itemCount || 3}
+                            </span>
+                        )}
+                        {dots.type === "Progress" && (
+                            <div
+                                style={{
+                                    width: 120,
+                                    height: 4,
+                                    borderRadius: dots.radius,
+                                    background: dots.fill,
+                                    overflow: "hidden",
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        width: `${(1 / (itemCount || 3)) * 100}%`,
+                                        height: "100%",
+                                        background: dots.activeFill,
+                                        borderRadius: dots.radius,
+                                    }}
+                                />
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -931,10 +1019,23 @@ export default function CMSSlider(props: CMSSliderProps) {
     // CSS VARS + CSS
     // ============================================
 
+    const parsedAspectRatio = React.useMemo(() => {
+        if (!layout.aspectRatio || layout.aspectRatio === "Auto") return null
+        const map: Record<string, string> = {
+            "1:1": "1 / 1",
+            "4:3": "4 / 3",
+            "3:2": "3 / 2",
+            "16:9": "16 / 9",
+            "2:3": "2 / 3",
+            "3:4": "3 / 4",
+            "9:16": "9 / 16",
+        }
+        return map[layout.aspectRatio] || null
+    }, [layout.aspectRatio])
+
     const cssVars = {
         "--slider-gap": `${layout.gap}px`,
         "--slider-items": effectiveItems,
-        "--slider-radius": `${layout.radius}px`,
         "--flex-dir": isVertical ? "column" : "row",
     } as React.CSSProperties
 
@@ -958,20 +1059,30 @@ export default function CMSSlider(props: CMSSliderProps) {
       .cms-slider-track > * > * {
         --total-gap: calc((var(--slider-items) - 1) * var(--slider-gap));
         --item-size: calc((100% - var(--total-gap)) / var(--slider-items));
-        
+
         flex: 0 0 var(--item-size) !important;
-        
+
         ${isVertical ? "height: var(--item-size) !important;" : "width: var(--item-size) !important;"}
         ${isVertical ? "min-height: var(--item-size) !important;" : "min-width: var(--item-size) !important;"}
         ${isVertical ? "width: 100% !important;" : ""}
-        
-        border-radius: var(--slider-radius) !important;
+
+        ${parsedAspectRatio ? `aspect-ratio: ${parsedAspectRatio} !important;` : ""}
+        ${parsedAspectRatio && !isVertical ? "height: auto !important;" : ""}
+        ${parsedAspectRatio && isVertical ? "width: auto !important;" : ""}
+
         overflow: hidden !important;
         margin: 0 !important;
         flex-shrink: 0 !important;
         box-sizing: border-box !important;
         transform: translateZ(0);
       }
+      ${parsedAspectRatio ? `
+      .cms-slider-track > * > * img,
+      .cms-slider-track > * > * video {
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: cover !important;
+      }` : ""}
       .cms-slider-track a {
         cursor: pointer !important;
         user-select: none !important;
@@ -998,8 +1109,6 @@ export default function CMSSlider(props: CMSSliderProps) {
                 height: "100%",
                 outline: "none",
                 ...cssVars,
-                minWidth: isCanvas ? 200 : undefined,
-                minHeight: isCanvas ? 200 : undefined,
             }}
             tabIndex={0}
             onMouseEnter={() => setIsHovered(true)}
@@ -1125,11 +1234,10 @@ export default function CMSSlider(props: CMSSliderProps) {
                         alignItems: "center",
                         bottom: dots.inset,
                         gap: dots.gap,
-                        padding: dots.padding,
+                        padding: 10,
                         borderRadius: dots.radius,
                         background: dots.backdrop,
-                        backdropFilter:
-                            dots.blur > 0 ? `blur(${dots.blur}px)` : undefined,
+                        backdropFilter: "blur(4px)",
                         pointerEvents: isCanvas ? "none" : "auto",
                     }}
                     role="tablist"
@@ -1157,8 +1265,8 @@ export default function CMSSlider(props: CMSSliderProps) {
                                     i === activeIndex
                                         ? dots.activeFill
                                         : dots.fill,
-                                opacity: i === activeIndex ? 1 : dots.opacity,
-                                transform: `scale(${i === activeIndex ? dots.activeScale : 1})`,
+                                opacity: i === activeIndex ? 1 : 0.5,
+                                transform: `scale(${i === activeIndex ? 1.3 : 1})`,
                             }}
                         />
                     ))}
@@ -1180,8 +1288,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                         borderRadius: dots.radius,
                         overflow: "hidden",
                         zIndex: 10,
-                        backdropFilter:
-                            dots.blur > 0 ? `blur(${dots.blur}px)` : undefined,
+                        backdropFilter: "blur(4px)",
                     }}
                 >
                     <motion.div
@@ -1204,11 +1311,10 @@ export default function CMSSlider(props: CMSSliderProps) {
                         bottom: dots.inset,
                         left: "50%",
                         transform: "translateX(-50%)",
-                        padding: `${dots.padding * 0.5}px ${dots.padding}px`,
+                        padding: "5px 10px",
                         background: dots.backdrop,
                         borderRadius: dots.radius,
-                        backdropFilter:
-                            dots.blur > 0 ? `blur(${dots.blur}px)` : undefined,
+                        backdropFilter: "blur(4px)",
                         fontFamily: "Inter, system-ui, sans-serif",
                         fontSize: 13,
                         fontWeight: 500,
@@ -1234,6 +1340,9 @@ export default function CMSSlider(props: CMSSliderProps) {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.2 }}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Image lightbox"
                         onClick={closeLightbox}
                         style={{
                             position: "fixed",
@@ -1317,7 +1426,7 @@ export default function CMSSlider(props: CMSSliderProps) {
 addPropertyControls(CMSSlider, {
     // --- Content ---
     content: {
-        type: ControlType.ComponentInstance,
+        type: (ControlType as unknown as Record<string, string>).ComponentInstance ?? "ComponentInstance" as any,
         title: "Content",
         description: "Connect a Collection List.",
     },
@@ -1374,9 +1483,8 @@ addPropertyControls(CMSSlider, {
                 defaultValue: 0,
                 min: 0,
                 max: 2400,
-                step: 1,
+                step: 10,
                 unit: "px",
-                displayStepper: true,
                 description: "Content max width (0 = none).",
             },
             padding: {
@@ -1388,14 +1496,12 @@ addPropertyControls(CMSSlider, {
                 step: 5,
                 unit: "px",
             },
-            radius: {
-                type: ControlType.Number,
-                title: "Radius",
-                defaultValue: 0,
-                min: 0,
-                max: 60,
-                step: 2,
-                unit: "px",
+            aspectRatio: {
+                type: ControlType.Enum,
+                title: "Aspect Ratio",
+                defaultValue: "Auto",
+                options: ["Auto", "1:1", "4:3", "3:2", "16:9", "2:3", "3:4", "9:16"],
+                optionTitles: ["Auto", "1:1", "4:3", "3:2", "16:9", "2:3", "3:4", "9:16"],
             },
         },
     },
@@ -1448,23 +1554,6 @@ addPropertyControls(CMSSlider, {
                 type: ControlType.Boolean,
                 title: "Keyboard",
                 defaultValue: true,
-            },
-            dragThreshold: {
-                type: ControlType.Number,
-                title: "Drag Limit",
-                defaultValue: 6,
-                min: 1,
-                max: 24,
-                step: 1,
-                unit: "px",
-            },
-            edgeResistance: {
-                type: ControlType.Number,
-                title: "Resistance",
-                defaultValue: 0.3,
-                min: 0,
-                max: 1,
-                step: 0.05,
             },
         },
     },
@@ -1568,43 +1657,6 @@ addPropertyControls(CMSSlider, {
                 step: 2,
                 unit: "px",
             },
-            offsetX: {
-                type: ControlType.Number,
-                title: "Offset X",
-                defaultValue: 0,
-                min: -500,
-                max: 500,
-                step: 5,
-                unit: "px",
-            },
-            offsetY: {
-                type: ControlType.Number,
-                title: "Offset Y",
-                defaultValue: 0,
-                min: -500,
-                max: 500,
-                step: 5,
-                unit: "px",
-            },
-            shadow: {
-                type: ControlType.Boolean,
-                title: "Shadow",
-                defaultValue: false,
-            },
-            shadowColor: {
-                type: ControlType.Color,
-                title: "Shadow Color",
-                defaultValue: "rgba(0,0,0,0.2)",
-            },
-            shadowBlur: {
-                type: ControlType.Number,
-                title: "Shadow Blur",
-                defaultValue: 10,
-                min: 0,
-                max: 50,
-                step: 1,
-                unit: "px",
-            },
         },
     },
 
@@ -1647,15 +1699,6 @@ addPropertyControls(CMSSlider, {
                 step: 1,
                 unit: "px",
             },
-            padding: {
-                type: ControlType.Number,
-                title: "Padding",
-                defaultValue: 10,
-                min: 0,
-                max: 28,
-                step: 1,
-                unit: "px",
-            },
             fill: {
                 type: ControlType.Color,
                 title: "Inactive",
@@ -1678,31 +1721,6 @@ addPropertyControls(CMSSlider, {
                 min: 0,
                 max: 60,
                 step: 2,
-                unit: "px",
-            },
-            opacity: {
-                type: ControlType.Number,
-                title: "Opacity",
-                defaultValue: 0.5,
-                min: 0.05,
-                max: 1,
-                step: 0.05,
-            },
-            activeScale: {
-                type: ControlType.Number,
-                title: "Active Scale",
-                defaultValue: 1.3,
-                min: 1,
-                max: 2.2,
-                step: 0.05,
-            },
-            blur: {
-                type: ControlType.Number,
-                title: "Blur",
-                defaultValue: 4,
-                min: 0,
-                max: 24,
-                step: 1,
                 unit: "px",
             },
         },

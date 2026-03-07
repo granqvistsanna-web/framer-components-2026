@@ -443,7 +443,24 @@ function loadScript(src: string, timeoutMs = 10000): Promise<void> {
 
 ---
 
-## 12. Performance CSS
+## 12. Minimum Dimensions for WebGL / Canvas Components
+
+Components that render into a canvas or WebGL context (Three.js, raw `<canvas>`) have no intrinsic content size. When Framer's layout is set to **"Fit"**, the container collapses to 0×0 and the renderer never initializes.
+
+Always set `minWidth` and `minHeight` on the container:
+
+```tsx
+style={{
+    width: "100%",
+    height: "100%",
+    minWidth: 200,
+    minHeight: 200,
+}}
+```
+
+---
+
+## 13. Performance CSS
 
 ```tsx
 // On animated elements
@@ -467,7 +484,7 @@ style={{
 
 ---
 
-## 13. Empty State Handling
+## 14. Empty State Handling
 
 Always handle zero children / empty arrays:
 
@@ -496,7 +513,7 @@ const safeItems = Array.isArray(items) && items.length > 0 ? items : ["fallback"
 
 ---
 
-## 14. Component Structure Checklist
+## 15. Component Structure Checklist
 
 Use this before shipping:
 
@@ -519,6 +536,7 @@ Use this before shipping:
 [ ] Empty state handled (no children / empty arrays)
 [ ] ARIA attributes on interactive elements
 [ ] Keyboard nav on carousels/sliders
+[ ] minWidth/minHeight on WebGL/canvas containers
 [ ] No hardcoded colors or fonts
 [ ] Performance CSS (will-change, backface-visibility)
 ```

@@ -1,8 +1,8 @@
 /**
  * #36 ThreeJS Infinite Slider
  *
- * Vertical infinite-scroll image slider with WebGL distortion effect.
- * Based on Codegrid's ThreeJS slider concept, adapted for Framer.
+ * Infinite-scroll image slider with WebGL distortion effect.
+ * Supports vertical and horizontal directions.
  */
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 import * as React from "react"
@@ -31,37 +31,44 @@ interface SlideData {
     link?: string
 }
 
-interface ThreeJSSliderProps {
-    slides?: SlideData[]
-    // Style
-    backgroundColor?: string
-    slideAspectRatio?: number
-    slideMinHeight?: number
-    slideMaxHeight?: number
-    slideGap?: number
-    // Interaction
-    distortionStrength?: number
-    scrollSmoothing?: number
-    momentumFriction?: number
+interface SlideSize {
+    aspectRatio?: number
+    minHeight?: number
+    maxHeight?: number
+    gap?: number
+}
+
+interface ScrollTuning {
+    smoothing?: number
+    momentum?: number
     wheelSpeed?: number
     dragSpeed?: number
-    // Snap
+}
+
+interface ThreeJSSliderProps {
+    slides?: SlideData[]
+    backgroundColor?: string
+    direction?: "vertical" | "horizontal"
+    slideSize?: SlideSize
+    interactive?: boolean
+    distortionStrength?: number
+    borderRadius?: number
+    activeScale?: number
+    randomHeights?: boolean
     snapToSlide?: boolean
     snapStrength?: number
-    // Overlay
+    scrollTuning?: ScrollTuning
     showOverlay?: boolean
     overlayFont?: Record<string, any>
     overlayColor?: string
     overlaySize?: number
     counterSize?: number
-    overlayPosition?: "left" | "center" | "right"
-    // Layout
+    overlayPosition?: "top-left" | "top-center" | "top-right" | "top-split" | "center-left" | "center" | "center-right" | "center-split" | "bottom-left" | "bottom-center" | "bottom-right" | "bottom-split"
+    autoplay?: boolean
+    autoplaySpeed?: number
     maxDpr?: number
-    // States
     enableMotion?: boolean
     respectReducedMotion?: boolean
-    interactive?: boolean
-    // Framer
     style?: React.CSSProperties
 }
 
@@ -159,29 +166,38 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
     const {
         slides = DEFAULT_SLIDES,
         backgroundColor = "#141414",
-        slideAspectRatio = 1.5,
-        slideMinHeight = 1,
-        slideMaxHeight = 1.5,
-        slideGap = 0.05,
+        direction = "vertical",
+        slideSize,
+        interactive = true,
         distortionStrength = 2.5,
-        scrollSmoothing = 0.05,
-        momentumFriction = 0.95,
-        wheelSpeed = 0.01,
-        dragSpeed = 0.01,
+        borderRadius = 0,
+        activeScale = 1.0,
+        randomHeights = true,
         snapToSlide = false,
         snapStrength = 0.03,
+        scrollTuning,
         showOverlay = true,
         overlayFont = {},
         overlayColor = "#ffffff",
         overlaySize = 16,
         counterSize = 14,
-        overlayPosition = "left",
+        overlayPosition = "bottom-left",
+        autoplay = false,
+        autoplaySpeed = 0.15,
         maxDpr = 2,
         enableMotion = true,
         respectReducedMotion = true,
-        interactive = true,
         style,
     } = props
+
+    const slideAspectRatio = slideSize?.aspectRatio ?? 1.5
+    const slideMinHeight = slideSize?.minHeight ?? 1
+    const slideMaxHeight = slideSize?.maxHeight ?? 1.5
+    const slideGap = slideSize?.gap ?? 0.05
+    const scrollSmoothing = scrollTuning?.smoothing ?? 0.05
+    const momentumFriction = scrollTuning?.momentum ?? 0.95
+    const wheelSpeed = scrollTuning?.wheelSpeed ?? 0.01
+    const dragSpeed = scrollTuning?.dragSpeed ?? 0.01
 
     const isStatic = useIsStaticRenderer()
     const outerRef = useRef<HTMLDivElement>(null)
@@ -208,17 +224,23 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
     // Refs for mutable state accessed in animation loop
     const configRef = useRef({
         backgroundColor,
+        direction,
         slideAspectRatio,
         slideMinHeight,
         slideMaxHeight,
         slideGap,
         distortionStrength,
+        borderRadius,
+        activeScale,
+        randomHeights,
         scrollSmoothing,
         momentumFriction,
         wheelSpeed,
         dragSpeed,
         snapToSlide,
         snapStrength,
+        autoplay,
+        autoplaySpeed,
         maxDpr,
         enableMotion,
         respectReducedMotion,
@@ -226,17 +248,23 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
     })
     configRef.current = {
         backgroundColor,
+        direction,
         slideAspectRatio,
         slideMinHeight,
         slideMaxHeight,
         slideGap,
         distortionStrength,
+        borderRadius,
+        activeScale,
+        randomHeights,
         scrollSmoothing,
         momentumFriction,
         wheelSpeed,
         dragSpeed,
         snapToSlide,
         snapStrength,
+        autoplay,
+        autoplaySpeed,
         maxDpr,
         enableMotion,
         respectReducedMotion,
@@ -313,12 +341,14 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
         )
         camera.position.z = 5
 
-        // Generate random slide heights (stable per mount)
+        // Generate slide heights (random or uniform)
         const slideHeights = Array.from(
             { length: totalSlides },
             () =>
-                configRef.current.slideMinHeight +
-                Math.random() * (configRef.current.slideMaxHeight - configRef.current.slideMinHeight)
+                configRef.current.randomHeights
+                    ? configRef.current.slideMinHeight +
+                      Math.random() * (configRef.current.slideMaxHeight - configRef.current.slideMinHeight)
+                    : configRef.current.slideMaxHeight
         )
 
         const slideOffsets: number[] = []
@@ -354,13 +384,10 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
             uniform sampler2D uTexture;
             uniform vec2 uPlaneAspect;
             uniform vec2 uImageAspect;
-            uniform float uLoaded;
+            uniform float uOpacity;
+            uniform float uBorderRadius;
             varying vec2 vUv;
             void main() {
-                if (uLoaded < 0.5) {
-                    gl_FragColor = vec4(0.15, 0.15, 0.15, 1.0);
-                    return;
-                }
                 vec2 uv = vUv;
                 float planeRatio = uPlaneAspect.x / uPlaneAspect.y;
                 float imageRatio = uImageAspect.x / uImageAspect.y;
@@ -371,7 +398,20 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
                     float scale = planeRatio / imageRatio;
                     uv.x = uv.x * scale + (1.0 - scale) * 0.5;
                 }
-                gl_FragColor = texture2D(uTexture, uv);
+                vec4 texColor = texture2D(uTexture, uv);
+                vec4 placeholder = vec4(0.15, 0.15, 0.15, 1.0);
+                gl_FragColor = mix(placeholder, texColor, uOpacity);
+
+                // Rounded corners via SDF
+                if (uBorderRadius > 0.0) {
+                    float ar = uPlaneAspect.x / uPlaneAspect.y;
+                    vec2 uvCorr = (vUv - 0.5) * vec2(ar, 1.0);
+                    vec2 halfSize = vec2(ar * 0.5, 0.5);
+                    float r = uBorderRadius;
+                    vec2 q = abs(uvCorr) - halfSize + r;
+                    float d = length(max(q, 0.0)) - r;
+                    gl_FragColor.a *= 1.0 - smoothstep(-0.003, 0.003, d);
+                }
             }
         `
 
@@ -387,8 +427,10 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
                     uTexture: { value: null },
                     uPlaneAspect: { value: new THREE.Vector2(width, height) },
                     uImageAspect: { value: new THREE.Vector2(1, 1) },
-                    uLoaded: { value: 0.0 },
+                    uOpacity: { value: 0.0 },
+                    uBorderRadius: { value: borderRadius },
                 },
+                transparent: true,
                 side: THREE.DoubleSide,
             })
             const mesh = new THREE.Mesh(geometry, material)
@@ -406,13 +448,12 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
                         texture.dispose()
                         return
                     }
-                    texture.colorSpace = THREE.SRGBColorSpace
                     material.uniforms.uTexture.value = texture
                     material.uniforms.uImageAspect.value.set(
                         texture.image.width,
                         texture.image.height
                     )
-                    material.uniforms.uLoaded.value = 1.0
+                    mesh.userData.opacityTarget = 1.0
                 })
             }
 
@@ -423,8 +464,9 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
         // Distortion
         function applyDistortion(
             mesh: THREE.Mesh,
-            positionY: number,
-            strength: number
+            scrollAxisPos: number,
+            strength: number,
+            horizontal: boolean
         ) {
             const positions = (mesh.geometry as THREE.PlaneGeometry).attributes
                 .position
@@ -433,7 +475,9 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
             for (let i = 0; i < positions.count; i++) {
                 const x = original[i * 3]
                 const y = original[i * 3 + 1]
-                const distance = Math.sqrt(x * x + (positionY + y) ** 2)
+                const distance = horizontal
+                    ? Math.sqrt((scrollAxisPos + x) ** 2 + y * y)
+                    : Math.sqrt(x * x + (scrollAxisPos + y) ** 2)
                 const falloff = Math.max(0, 1 - distance / 2)
                 const bend = Math.pow(Math.sin((falloff * Math.PI) / 2), 1.5)
                 positions.setZ(i, bend * strength)
@@ -458,14 +502,19 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
 
         let isDragging = false
         let dragStartY = 0
+        let dragStartX = 0
         let dragDelta = 0
         let totalDragDistance = 0
+        let touchStartX = 0
         let touchStartY = 0
+        let touchLastX = 0
         let touchLastY = 0
         let touchTotalDistance = 0
 
         let activeSlideIndex = -1
         let scrollTimeout: ReturnType<typeof setTimeout> | null = null
+        let isHovered = false
+        let autoplayIdleTime = 0
 
         const addDistortionBurst = (amount: number) => {
             distortionTarget = Math.min(1, distortionTarget + amount)
@@ -475,8 +524,13 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
         const onWheel = (e: WheelEvent) => {
             if (!configRef.current.interactive) return
             e.preventDefault()
+            // Use deltaX for horizontal (trackpad), fall back to deltaY
+            const isHoriz = configRef.current.direction === "horizontal"
+            const rawDelta = isHoriz
+                ? (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY)
+                : e.deltaY
             const clampedDelta =
-                Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 150)
+                Math.sign(rawDelta) * Math.min(Math.abs(rawDelta), 150)
             addDistortionBurst(Math.abs(clampedDelta) * 0.001)
             scrollTarget += clampedDelta * configRef.current.wheelSpeed
             isScrolling = true
@@ -486,6 +540,7 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
 
         const onTouchStart = (e: TouchEvent) => {
             if (!configRef.current.interactive) return
+            touchStartX = touchLastX = e.touches[0].clientX
             touchStartY = touchLastY = e.touches[0].clientY
             touchTotalDistance = 0
             scrollMomentum = 0
@@ -495,22 +550,35 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
         const onTouchMove = (e: TouchEvent) => {
             if (!configRef.current.interactive) return
             e.preventDefault()
-            const deltaY = e.touches[0].clientY - touchLastY
+            const isHoriz = configRef.current.direction === "horizontal"
+            const delta = isHoriz
+                ? e.touches[0].clientX - touchLastX
+                : e.touches[0].clientY - touchLastY
+            touchLastX = e.touches[0].clientX
             touchLastY = e.touches[0].clientY
-            touchTotalDistance += Math.abs(deltaY)
-            addDistortionBurst(Math.abs(deltaY) * 0.02)
-            scrollTarget -= deltaY * 0.01
+            touchTotalDistance += Math.abs(delta)
+            addDistortionBurst(Math.abs(delta) * 0.02)
+            scrollTarget -= delta * 0.01
             isScrolling = true
         }
 
         const onTouchEnd = () => {
             if (!configRef.current.interactive) return
-            // Tap detection — navigate if barely moved
+            const isHoriz = configRef.current.direction === "horizontal"
+            // Tap detection — click-to-center or follow link
             if (touchTotalDistance < 5) {
-                const link = validSlides[activeSlideIndex]?.link
-                if (link) window.open(link, "_blank", "noopener")
+                const clicked = getClickedSlide(touchStartX, touchStartY)
+                if (clicked !== null && clicked !== activeSlideIndex) {
+                    scrollToSlide(clicked)
+                } else {
+                    const link = validSlides[activeSlideIndex]?.link
+                    if (link) window.open(link, "_blank", "noopener")
+                }
             }
-            const swipeVelocity = (touchLastY - touchStartY) * 0.005
+            const swipeDelta = isHoriz
+                ? touchLastX - touchStartX
+                : touchLastY - touchStartY
+            const swipeVelocity = swipeDelta * 0.005
             if (Math.abs(swipeVelocity) > 0.5) {
                 scrollMomentum = -swipeVelocity * 0.1
                 addDistortionBurst(Math.abs(swipeVelocity) * 0.45)
@@ -528,6 +596,7 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
             if (!configRef.current.interactive) return
             if (e.pointerType === "touch") return
             isDragging = true
+            dragStartX = e.clientX
             dragStartY = e.clientY
             dragDelta = 0
             totalDragDistance = 0
@@ -538,12 +607,16 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
         const onPointerMove = (e: PointerEvent) => {
             if (!configRef.current.interactive || !isDragging) return
             if (e.pointerType === "touch") return
-            const deltaY = e.clientY - dragStartY
+            const isHoriz = configRef.current.direction === "horizontal"
+            const delta = isHoriz
+                ? e.clientX - dragStartX
+                : e.clientY - dragStartY
+            dragStartX = e.clientX
             dragStartY = e.clientY
-            dragDelta = deltaY
-            totalDragDistance += Math.abs(deltaY)
-            addDistortionBurst(Math.abs(deltaY) * 0.02)
-            scrollTarget -= deltaY * configRef.current.dragSpeed
+            dragDelta = delta
+            totalDragDistance += Math.abs(delta)
+            addDistortionBurst(Math.abs(delta) * 0.02)
+            scrollTarget -= delta * configRef.current.dragSpeed
             isScrolling = true
         }
 
@@ -554,10 +627,15 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
             renderer.domElement.style.cursor = configRef.current.interactive
                 ? "grab"
                 : "default"
-            // Click detection — navigate if barely dragged
+            // Click detection — click-to-center or follow link
             if (totalDragDistance < 5) {
-                const link = validSlides[activeSlideIndex]?.link
-                if (link) window.open(link, "_blank", "noopener")
+                const clicked = getClickedSlide(e.clientX, e.clientY)
+                if (clicked !== null && clicked !== activeSlideIndex) {
+                    scrollToSlide(clicked)
+                } else {
+                    const link = validSlides[activeSlideIndex]?.link
+                    if (link) window.open(link, "_blank", "noopener")
+                }
                 return
             }
             if (Math.abs(dragDelta) > 2) {
@@ -570,6 +648,33 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
 
         renderer.domElement.style.cursor = interactive ? "grab" : "default"
 
+        // Raycaster for click-to-center
+        const raycaster = new THREE.Raycaster()
+        const pointerNDC = new THREE.Vector2()
+
+        const getClickedSlide = (clientX: number, clientY: number): number | null => {
+            const rect = renderer.domElement.getBoundingClientRect()
+            pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1
+            pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1
+            raycaster.setFromCamera(pointerNDC, camera)
+            const hits = raycaster.intersectObjects(meshes)
+            if (hits.length > 0) return hits[0].object.userData.index as number
+            return null
+        }
+
+        const scrollToSlide = (targetIndex: number) => {
+            const targetOffset = slideOffsets[targetIndex]
+            const wrappedPos = wrap(scrollTarget, loopLength)
+            let delta = targetOffset - wrappedPos
+            if (delta > halfLoop) delta -= loopLength
+            if (delta < -halfLoop) delta += loopLength
+            addDistortionBurst(Math.min(1, Math.abs(delta) * 0.4))
+            scrollTarget += delta
+            isScrolling = true
+            if (scrollTimeout) clearTimeout(scrollTimeout)
+            scrollTimeout = setTimeout(() => (isScrolling = false), 600)
+        }
+
         // Expose scroll function for keyboard nav
         scrollTargetRef.current = (delta: number) => {
             addDistortionBurst(Math.abs(delta) * 0.3)
@@ -579,6 +684,11 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
             scrollTimeout = setTimeout(() => (isScrolling = false), 300)
         }
 
+        const onMouseEnter = () => { isHovered = true }
+        const onMouseLeave = () => { isHovered = false; autoplayIdleTime = 0 }
+
+        container.addEventListener("mouseenter", onMouseEnter)
+        container.addEventListener("mouseleave", onMouseLeave)
         container.addEventListener("wheel", onWheel, { passive: false })
         container.addEventListener("touchstart", onTouchStart, {
             passive: true,
@@ -661,6 +771,20 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
                 }
             }
 
+            // Autoplay: continuously scroll when idle and not hovered
+            if (cfg.autoplay && motionEnabled && !isScrolling && !isDragging) {
+                if (isHovered) {
+                    autoplayIdleTime = 0
+                } else {
+                    autoplayIdleTime += deltaTime
+                    if (autoplayIdleTime > 0.8) {
+                        scrollTarget += cfg.autoplaySpeed * deltaTime
+                    }
+                }
+            } else {
+                autoplayIdleTime = 0
+            }
+
             scrollPosition +=
                 (scrollTarget - scrollPosition) * cfg.scrollSmoothing
 
@@ -711,25 +835,58 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
                 lastBgColor = cfg.backgroundColor
             }
 
+            const isHoriz = cfg.direction === "horizontal"
             let closestDist = Infinity
             let closestIdx = 0
 
             for (const mesh of meshes) {
                 const { offset, index } = mesh.userData
-                let y = -(offset - wrap(scrollPosition, loopLength))
-                y = wrap(y + halfLoop, loopLength) - halfLoop
-                mesh.position.y = y
+                let pos = -(offset - wrap(scrollPosition, loopLength))
+                pos = wrap(pos + halfLoop, loopLength) - halfLoop
 
-                if (Math.abs(y) < closestDist) {
-                    closestDist = Math.abs(y)
+                if (isHoriz) {
+                    mesh.position.x = pos
+                    mesh.position.y = 0
+                } else {
+                    mesh.position.y = pos
+                    mesh.position.x = 0
+                }
+
+                if (Math.abs(pos) < closestDist) {
+                    closestDist = Math.abs(pos)
                     closestIdx = index
                 }
 
-                if (Math.abs(y) < halfLoop + cfg.slideMaxHeight) {
+                // Active slide scale
+                if (cfg.activeScale > 1.0) {
+                    const scaleRange = 2.5
+                    const t = Math.max(0, 1 - Math.abs(pos) / scaleRange)
+                    const s = 1 + (cfg.activeScale - 1) * t * t
+                    mesh.scale.set(s, s, 1)
+                } else {
+                    mesh.scale.set(1, 1, 1)
+                }
+
+                // Animate opacity fade-in
+                const mat = mesh.material as THREE.ShaderMaterial
+                const target = (mesh.userData.opacityTarget as number) || 0
+                const current = mat.uniforms.uOpacity.value as number
+                if (current < target) {
+                    mat.uniforms.uOpacity.value = Math.min(
+                        target,
+                        current + deltaTime * 1.8
+                    )
+                }
+
+                // Update border radius uniform
+                mat.uniforms.uBorderRadius.value = cfg.borderRadius
+
+                if (Math.abs(pos) < halfLoop + cfg.slideMaxHeight) {
                     applyDistortion(
                         mesh,
-                        y,
-                        cfg.distortionStrength * signedDistortion
+                        pos,
+                        cfg.distortionStrength * signedDistortion,
+                        isHoriz
                     )
                 }
             }
@@ -753,6 +910,8 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
             if (resizeObserver) resizeObserver.disconnect()
             else window.removeEventListener("resize", resize)
 
+            container.removeEventListener("mouseenter", onMouseEnter)
+            container.removeEventListener("mouseleave", onMouseLeave)
             container.removeEventListener("wheel", onWheel)
             container.removeEventListener("touchstart", onTouchStart)
             container.removeEventListener("touchmove", onTouchMove)
@@ -839,12 +998,21 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
         }
     }
 
+    const [overlayV, overlayH] = overlayPosition.includes("-")
+        ? overlayPosition.split("-") as [string, string]
+        : ["center", overlayPosition] as [string, string]
+
+    const isSplit = overlayH === "split"
+    const isCenter = overlayH === "center"
     const overlayJustify =
-        overlayPosition === "center"
-            ? "center"
-            : overlayPosition === "right"
-              ? "flex-end"
-              : "flex-start"
+        isSplit ? "space-between" : isCenter ? "center" : overlayH === "right" ? "flex-end" : "flex-start"
+    const overlayDirection = isCenter ? "column" as const : "row" as const
+    const overlayAlign = isCenter ? "center" : "center"
+    const overlayTop =
+        overlayV === "top" ? "2rem" : overlayV === "bottom" ? undefined : "50%"
+    const overlayBottom = overlayV === "bottom" ? "2rem" : undefined
+    const overlayTransform =
+        overlayV === "center" ? "translateY(-50%)" : undefined
 
     return (
         <div
@@ -894,17 +1062,19 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
                 <div
                     style={{
                         position: "absolute",
-                        top: "50%",
+                        top: overlayTop,
+                        bottom: overlayBottom,
                         left: 0,
-                        transform: "translateY(-50%)",
+                        transform: overlayTransform,
                         width: "100%",
                         padding: "0 2rem",
                         display: "flex",
+                        flexDirection: overlayDirection,
                         justifyContent: overlayJustify,
-                        alignItems: "center",
+                        alignItems: overlayAlign,
                         pointerEvents: "none",
                         zIndex: 2,
-                        gap: 16,
+                        gap: isCenter ? 4 : 16,
                     }}
                 >
                     <p
@@ -973,40 +1143,75 @@ addPropertyControls(ThreeJSSlider, {
         defaultValue: "#141414",
         section: "Style",
     },
-    slideAspectRatio: {
-        type: ControlType.Number,
-        title: "Aspect Ratio",
-        min: 0.5,
-        max: 3,
-        step: 0.1,
-        defaultValue: 1.5,
+    direction: {
+        type: ControlType.Enum,
+        title: "Direction",
+        options: ["vertical", "horizontal"],
+        optionTitles: ["Vertical", "Horizontal"],
+        defaultValue: "vertical",
         section: "Style",
     },
-    slideMinHeight: {
+    borderRadius: {
         type: ControlType.Number,
-        title: "Min Height",
-        min: 0.3,
-        max: 3,
-        step: 0.1,
-        defaultValue: 1,
-        section: "Style",
-    },
-    slideMaxHeight: {
-        type: ControlType.Number,
-        title: "Max Height",
-        min: 0.5,
-        max: 4,
-        step: 0.1,
-        defaultValue: 1.5,
-        section: "Style",
-    },
-    slideGap: {
-        type: ControlType.Number,
-        title: "Gap",
+        title: "Corner Radius",
         min: 0,
-        max: 1,
+        max: 0.15,
+        step: 0.005,
+        defaultValue: 0,
+        section: "Style",
+    },
+    slideSize: {
+        type: ControlType.Object,
+        title: "Slide Size",
+        controls: {
+            aspectRatio: {
+                type: ControlType.Number,
+                title: "Aspect Ratio",
+                min: 0.5,
+                max: 3,
+                step: 0.1,
+                defaultValue: 1.5,
+            },
+            minHeight: {
+                type: ControlType.Number,
+                title: "Min Height",
+                min: 0.3,
+                max: 3,
+                step: 0.1,
+                defaultValue: 1,
+            },
+            maxHeight: {
+                type: ControlType.Number,
+                title: "Max / Uniform Height",
+                min: 0.5,
+                max: 4,
+                step: 0.1,
+                defaultValue: 1.5,
+            },
+            gap: {
+                type: ControlType.Number,
+                title: "Gap",
+                min: 0,
+                max: 1,
+                step: 0.01,
+                defaultValue: 0.05,
+            },
+        },
+        section: "Style",
+    },
+    randomHeights: {
+        type: ControlType.Boolean,
+        title: "Random Heights",
+        defaultValue: true,
+        section: "Style",
+    },
+    activeScale: {
+        type: ControlType.Number,
+        title: "Active Scale",
+        min: 1.0,
+        max: 1.4,
         step: 0.01,
-        defaultValue: 0.05,
+        defaultValue: 1.0,
         section: "Style",
     },
     interactive: {
@@ -1040,41 +1245,44 @@ addPropertyControls(ThreeJSSlider, {
         hidden: (props) => !props.snapToSlide,
         section: "Interaction",
     },
-    scrollSmoothing: {
-        type: ControlType.Number,
-        title: "Smoothing",
-        min: 0.01,
-        max: 0.5,
-        step: 0.01,
-        defaultValue: 0.05,
-        section: "Scroll Physics",
-    },
-    momentumFriction: {
-        type: ControlType.Number,
-        title: "Momentum",
-        min: 0.8,
-        max: 0.99,
-        step: 0.01,
-        defaultValue: 0.95,
-        section: "Scroll Physics",
-    },
-    wheelSpeed: {
-        type: ControlType.Number,
-        title: "Wheel Speed",
-        min: 0.001,
-        max: 0.05,
-        step: 0.001,
-        defaultValue: 0.01,
-        section: "Scroll Physics",
-    },
-    dragSpeed: {
-        type: ControlType.Number,
-        title: "Drag Speed",
-        min: 0.001,
-        max: 0.05,
-        step: 0.001,
-        defaultValue: 0.01,
-        section: "Scroll Physics",
+    scrollTuning: {
+        type: ControlType.Object,
+        title: "Scroll Tuning",
+        controls: {
+            smoothing: {
+                type: ControlType.Number,
+                title: "Smoothing",
+                min: 0.01,
+                max: 0.5,
+                step: 0.01,
+                defaultValue: 0.05,
+            },
+            momentum: {
+                type: ControlType.Number,
+                title: "Momentum",
+                min: 0.8,
+                max: 0.99,
+                step: 0.01,
+                defaultValue: 0.95,
+            },
+            wheelSpeed: {
+                type: ControlType.Number,
+                title: "Wheel Speed",
+                min: 0.001,
+                max: 0.05,
+                step: 0.001,
+                defaultValue: 0.01,
+            },
+            dragSpeed: {
+                type: ControlType.Number,
+                title: "Drag Speed",
+                min: 0.001,
+                max: 0.05,
+                step: 0.001,
+                defaultValue: 0.01,
+            },
+        },
+        section: "Interaction",
     },
     showOverlay: {
         type: ControlType.Boolean,
@@ -1122,11 +1330,35 @@ addPropertyControls(ThreeJSSlider, {
     overlayPosition: {
         type: ControlType.Enum,
         title: "Position",
-        options: ["left", "center", "right"],
-        optionTitles: ["Left", "Center", "Right"],
-        defaultValue: "left",
+        options: [
+            "top-left", "top-center", "top-right", "top-split",
+            "center-left", "center", "center-right", "center-split",
+            "bottom-left", "bottom-center", "bottom-right", "bottom-split",
+        ],
+        optionTitles: [
+            "Top Left", "Top Center", "Top Right", "Top Split",
+            "Center Left", "Center", "Center Right", "Center Split",
+            "Bottom Left", "Bottom Center", "Bottom Right", "Bottom Split",
+        ],
+        defaultValue: "bottom-left",
         hidden: (props) => !props.showOverlay,
         section: "Overlay",
+    },
+    autoplay: {
+        type: ControlType.Boolean,
+        title: "Autoplay",
+        defaultValue: false,
+        section: "Interaction",
+    },
+    autoplaySpeed: {
+        type: ControlType.Number,
+        title: "Autoplay Speed",
+        min: 0.02,
+        max: 1,
+        step: 0.01,
+        defaultValue: 0.15,
+        hidden: (props) => !props.autoplay,
+        section: "Interaction",
     },
     maxDpr: {
         type: ControlType.Number,
@@ -1136,19 +1368,19 @@ addPropertyControls(ThreeJSSlider, {
         step: 0.25,
         unit: "\u00d7",
         defaultValue: 2,
-        section: "Advanced",
+        section: "Performance",
     },
     enableMotion: {
         type: ControlType.Boolean,
         title: "Enable Motion",
         defaultValue: true,
-        section: "Advanced",
+        section: "Performance",
     },
     respectReducedMotion: {
         type: ControlType.Boolean,
         title: "Reduced Motion",
         defaultValue: true,
         hidden: (props) => !props.enableMotion,
-        section: "Advanced",
+        section: "Performance",
     },
 })

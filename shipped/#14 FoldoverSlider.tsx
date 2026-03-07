@@ -4,6 +4,7 @@
  * A horizontal draggable slider where passed cards overlap, scale down,
  * and rotate into a stack — creating a "deck of cards" feel.
  *
+ * @framerDisableUnlink
  * @framerSupportedLayoutWidth any
  * @framerSupportedLayoutHeight any-prefer-fixed
  * @framerIntrinsicWidth 800
@@ -11,7 +12,7 @@
  */
 
 import * as React from "react"
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 // --- Types ---
@@ -49,6 +50,14 @@ interface ButtonStyle {
     borderRadius?: number
 }
 
+interface DotStyle {
+    size?: number
+    gap?: number
+    color?: string
+    activeColor?: string
+    borderRadius?: number
+}
+
 interface FoldoverSliderProps {
     children: React.ReactNode
     gap: number
@@ -69,6 +78,9 @@ interface FoldoverSliderProps {
     controlMargin: number
     controlAlignment: "flex-start" | "center" | "flex-end"
     buttonStyle: ButtonStyle
+    showDots: boolean
+    dotPosition: "bottom" | "top"
+    dotStyle: DotStyle
     onSlideChange?: (index: number) => void
 }
 
@@ -182,9 +194,11 @@ function useContainerWidth(
                 if (w > 0) {
                     window.cancelAnimationFrame(raf)
                     raf = window.requestAnimationFrame(() => {
-                        setWidth((prev) =>
-                            Math.abs(prev - w) > 0.5 ? w : prev
-                        )
+                        startTransition(() => {
+                            setWidth((prev) =>
+                                Math.abs(prev - w) > 0.5 ? w : prev
+                            )
+                        })
                     })
                 }
             }
@@ -294,6 +308,9 @@ function FoldoverSlider({
     controlMargin = 0,
     controlAlignment = "center",
     buttonStyle,
+    showDots = false,
+    dotPosition = "bottom",
+    dotStyle,
     onSlideChange,
 }: FoldoverSliderProps) {
     const minScale = overlapEffect?.minScale ?? 0.45
@@ -305,6 +322,11 @@ function FoldoverSlider({
     const btnBg = buttonStyle?.background ?? "#131313"
     const btnBorderColor = buttonStyle?.borderColor ?? "#2c2c2c"
     const btnRadius = buttonStyle?.borderRadius ?? 8
+    const dotSize = dotStyle?.size ?? 8
+    const dotGap = dotStyle?.gap ?? 8
+    const dotColor = dotStyle?.color ?? "rgba(255,255,255,0.3)"
+    const dotActiveColor = dotStyle?.activeColor ?? "#ffffff"
+    const dotRadius = dotStyle?.borderRadius ?? 50
     const isStatic = useIsStaticRenderer()
     const reducedMotion = useReducedMotion()
     const rootRef = useRef<HTMLDivElement>(null)
@@ -330,6 +352,7 @@ function FoldoverSlider({
     const onSlideChangeRef = useRef(onSlideChange)
     useEffect(() => {
         onSlideChangeRef.current = onSlideChange
+        return () => { onSlideChangeRef.current = undefined }
     }, [onSlideChange])
 
     const slideNodes = useMemo(() => {
@@ -363,9 +386,9 @@ function FoldoverSlider({
                     window.Draggable,
                     window.InertiaPlugin
                 )
-                if (mounted) setEngineReady(true)
+                if (mounted) startTransition(() => setEngineReady(true))
             } catch {
-                if (mounted) setEngineReady(false)
+                if (mounted) startTransition(() => setEngineReady(false))
             }
         }
 
@@ -436,7 +459,7 @@ function FoldoverSlider({
         updateLiveRegionRef.current = updateLiveRegion
 
         const notifyChange = (idx: number) => {
-            setDisplayIndex(idx)
+            startTransition(() => setDisplayIndex(idx))
             onSlideChangeRef.current?.(idx)
         }
 
@@ -680,6 +703,28 @@ function FoldoverSlider({
         ...(!isIconMode ? btnFont : {}),
     }
 
+    const staticDotsBlock = showDots && slideNodes.length > 1 && (
+        <div
+            style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: dotGap,
+            }}
+        >
+            {slideNodes.map((_, i) => (
+                <div
+                    key={i}
+                    style={{
+                        width: dotSize,
+                        height: dotSize,
+                        borderRadius: `${dotRadius}%`,
+                        background: i === 0 ? dotActiveColor : dotColor,
+                    }}
+                />
+            ))}
+        </div>
+    )
+
     const staticControlsBlock = showControls && slideNodes.length > 0 && (
         <div
             style={{
@@ -705,10 +750,11 @@ function FoldoverSlider({
                     height: "100%",
                     display: "flex",
                     flexDirection: "column",
-                    gap: showControls ? controlGap : 0,
+                    gap: (showControls || showDots) ? controlGap : 0,
                 }}
             >
                 {controlPosition === "top" && staticControlsBlock}
+                {dotPosition === "top" && staticDotsBlock}
                 <div
                     style={{
                         flex: 1,
@@ -751,6 +797,7 @@ function FoldoverSlider({
                         </div>
                     )}
                 </div>
+                {dotPosition === "bottom" && staticDotsBlock}
                 {controlPosition === "bottom" && staticControlsBlock}
             </div>
         )
@@ -798,6 +845,39 @@ function FoldoverSlider({
         </div>
     )
 
+    const dotsBlock = showDots && slideNodes.length > 1 && (
+        <div
+            role="tablist"
+            aria-label="Slide indicators"
+            style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: dotGap,
+            }}
+        >
+            {slideNodes.map((_, i) => (
+                <button
+                    key={i}
+                    type="button"
+                    role="tab"
+                    aria-selected={i === displayIndex}
+                    aria-label={`Go to slide ${i + 1}`}
+                    onClick={() => runtimeRef.current.navigateTo?.(i)}
+                    style={{
+                        width: dotSize,
+                        height: dotSize,
+                        borderRadius: `${dotRadius}%`,
+                        background: i === displayIndex ? dotActiveColor : dotColor,
+                        border: "none",
+                        padding: 0,
+                        cursor: "pointer",
+                        transition: reducedMotion ? "none" : "background 0.2s ease",
+                    }}
+                />
+            ))}
+        </div>
+    )
+
     // --- Live render ---
     return (
         <div
@@ -813,7 +893,7 @@ function FoldoverSlider({
                 boxSizing: "border-box",
                 display: "flex",
                 flexDirection: "column",
-                gap: showControls ? controlGap : 0,
+                gap: (showControls || showDots) ? controlGap : 0,
                 outline: "none",
             }}
         >
@@ -844,6 +924,7 @@ function FoldoverSlider({
             />
 
             {controlPosition === "top" && controlsBlock}
+            {dotPosition === "top" && dotsBlock}
 
             {/* Track (draggable) */}
             <div
@@ -911,6 +992,7 @@ function FoldoverSlider({
                 </div>
             </div>
 
+            {dotPosition === "bottom" && dotsBlock}
             {controlPosition === "bottom" && controlsBlock}
         </div>
     )
@@ -1132,6 +1214,68 @@ addPropertyControls(FoldoverSlider, {
                 step: 1,
                 unit: "px",
                 defaultValue: 8,
+            },
+        },
+    },
+
+    // --- Dots ---
+    showDots: {
+        type: ControlType.Boolean,
+        title: "Show Dots",
+        defaultValue: false,
+    },
+    dotPosition: {
+        type: ControlType.Enum,
+        title: "Dot Position",
+        options: ["bottom", "top"],
+        optionTitles: ["Bottom", "Top"],
+        defaultValue: "bottom",
+        hidden: (props: FoldoverSliderProps) => !props.showDots,
+    },
+    dotStyle: {
+        type: ControlType.Object,
+        title: "Dot Style",
+        hidden: (props: FoldoverSliderProps) => !props.showDots,
+        controls: {
+            size: {
+                type: ControlType.Number,
+                title: "Size",
+                min: 4,
+                max: 24,
+                step: 1,
+                unit: "px",
+                displayStepper: true,
+                defaultValue: 8,
+            },
+            gap: {
+                type: ControlType.Number,
+                title: "Gap",
+                min: 2,
+                max: 24,
+                step: 1,
+                unit: "px",
+                displayStepper: true,
+                defaultValue: 8,
+            },
+            color: {
+                type: ControlType.Color,
+                title: "Color",
+                defaultValue: "rgba(255,255,255,0.3)",
+            },
+            activeColor: {
+                type: ControlType.Color,
+                title: "Active",
+                defaultValue: "#ffffff",
+            },
+            borderRadius: {
+                type: ControlType.Number,
+                title: "Roundness",
+                min: 0,
+                max: 50,
+                step: 1,
+                unit: "%",
+                displayStepper: true,
+                defaultValue: 50,
             },
         },
     },
