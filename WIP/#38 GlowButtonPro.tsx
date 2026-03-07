@@ -373,7 +373,7 @@ export default function LuminousButton(props: LuminousButtonProps) {
         ? `translate(${magneticOffset.x}px, ${magneticOffset.y}px)`
         : undefined
 
-    // Shared keyframes for both modes
+    // Keyframes
     const keyframesStyle = `
         .${uid}:focus-visible {
             outline: 2px solid ${glowColorA};
