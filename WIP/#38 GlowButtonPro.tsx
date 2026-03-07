@@ -32,12 +32,28 @@ interface LuminousButtonProps {
         travelingLightWidth: number
         travelingLightSpeed: number
     }
-    padding: { x: number; y: number }
+    paddingX: number
+    paddingY: number
     hover: {
         scale: number
         tapScale: number
+        glowBoost: number
         shimmer: boolean
         textGlow: boolean
+        magnetic: boolean
+        magneticStrength: number
+        magneticRadius: number
+    }
+    appear: {
+        animation: "none" | "fade" | "fade-up" | "fade-down" | "fade-scale"
+        duration: number
+        delay: number
+        staggerIndex: number
+        staggerOffset: number
+    }
+    effects: {
+        sparkle: boolean
+        sparkleInterval: number
     }
     font: CSSProperties
     onClick?: () => void
@@ -48,7 +64,7 @@ interface LuminousButtonProps {
  * @framerSupportedLayoutWidth any-prefer-fixed
  * @framerSupportedLayoutHeight any-prefer-fixed
  * @framerIntrinsicWidth 200
- * @framerIntrinsicHeight 56
+ * @framerIntrinsicHeight 50
  */
 export default function LuminousButton(props: LuminousButtonProps) {
     const {
@@ -58,8 +74,11 @@ export default function LuminousButton(props: LuminousButtonProps) {
         textColor = "#FFFFFF",
         glow = {},
         buttonStyle = {},
-        padding = {},
+        paddingX: padX = 32,
+        paddingY: padY = 16,
         hover = {},
+        appear = {},
+        effects = {},
         font = {},
         onClick,
         style,
@@ -90,13 +109,29 @@ export default function LuminousButton(props: LuminousButtonProps) {
         travelingLightSpeed = 4,
     } = buttonStyle as any
 
-    const { x: padX = 32, y: padY = 16 } = padding as any
     const {
         scale: hoverScale = 1.04,
         tapScale = 0.97,
+        glowBoost = 1.8,
         shimmer = true,
         textGlow: showTextGlow = true,
+        magnetic = false,
+        magneticStrength = 0.3,
+        magneticRadius = 150,
     } = hover as any
+
+    const {
+        animation: appearAnimation = "fade-scale",
+        duration: appearDuration = 0.5,
+        delay: appearDelay = 0,
+        staggerIndex = 0,
+        staggerOffset = 0.1,
+    } = appear as any
+
+    const {
+        sparkle = false,
+        sparkleInterval = 3,
+    } = effects as any
 
     const isStatic = useIsStaticRenderer()
     const isFixedWidth = style?.width === "100%"
@@ -105,7 +140,11 @@ export default function LuminousButton(props: LuminousButtonProps) {
     const [isHovered, setIsHovered] = useState(false)
     const [reducedMotion, setReducedMotion] = useState(false)
     const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 })
+    const [magneticOffset, setMagneticOffset] = useState({ x: 0, y: 0 })
+    const [sparkles, setSparkles] = useState<{ id: number; x: number; y: number; size: number }[]>([])
     const btnRef = useRef<HTMLButtonElement>(null)
+    const wrapRef = useRef<HTMLDivElement>(null)
+    const sparkleIdRef = useRef(0)
 
     useEffect(() => {
         if (typeof window === "undefined") return
@@ -118,8 +157,9 @@ export default function LuminousButton(props: LuminousButtonProps) {
 
     const followRadius = (glowSpread + glowBlur) * 3
 
+    // Glow follow mouse
     useEffect(() => {
-        if (!followMouse || reducedMotion || typeof window === "undefined") return
+        if (!followMouse || reducedMotion || typeof window === "undefined") return () => {}
         const onMove = (e: MouseEvent) => {
             if (!btnRef.current) return
             const rect = btnRef.current.getBoundingClientRect()
@@ -144,6 +184,60 @@ export default function LuminousButton(props: LuminousButtonProps) {
         return () => window.removeEventListener("mousemove", onMove)
     }, [followMouse, reducedMotion, glowSpread, glowBlur, followIntensity, followRadius])
 
+    // Magnetic hover — shift the whole button toward the cursor
+    useEffect(() => {
+        if (!magnetic || reducedMotion || typeof window === "undefined") return () => {}
+        const onMove = (e: MouseEvent) => {
+            if (!btnRef.current) return
+            const rect = btnRef.current.getBoundingClientRect()
+            const cx = rect.left + rect.width / 2
+            const cy = rect.top + rect.height / 2
+            const dx = e.clientX - cx
+            const dy = e.clientY - cy
+            const dist = Math.sqrt(dx * dx + dy * dy)
+            if (dist > magneticRadius) {
+                setMagneticOffset((prev) =>
+                    prev.x === 0 && prev.y === 0 ? prev : { x: 0, y: 0 }
+                )
+                return
+            }
+            const strength = (1 - dist / magneticRadius) * magneticStrength
+            setMagneticOffset({
+                x: dx * strength,
+                y: dy * strength,
+            })
+        }
+        window.addEventListener("mousemove", onMove)
+        return () => window.removeEventListener("mousemove", onMove)
+    }, [magnetic, reducedMotion, magneticStrength, magneticRadius])
+
+    // Idle sparkles
+    useEffect(() => {
+        if (!sparkle || reducedMotion || isStatic) return
+        const timeouts: number[] = []
+        const interval = setInterval(() => {
+            const id = sparkleIdRef.current++
+            setSparkles((prev) => [
+                ...prev.slice(-4), // keep max 5
+                {
+                    id,
+                    x: 10 + Math.random() * 80, // % position
+                    y: 10 + Math.random() * 80,
+                    size: 2 + Math.random() * 3,
+                },
+            ])
+            // Auto-remove after animation completes
+            const tid = window.setTimeout(() => {
+                setSparkles((prev) => prev.filter((s) => s.id !== id))
+            }, 800)
+            timeouts.push(tid)
+        }, sparkleInterval * 1000)
+        return () => {
+            clearInterval(interval)
+            timeouts.forEach(clearTimeout)
+        }
+    }, [sparkle, reducedMotion, isStatic, sparkleInterval])
+
     const uid = useRef(`lb-${Math.random().toString(36).slice(2, 8)}`).current
     const spinKf = `${uid}-spin`
     const shimmerKf = `${uid}-shimmer`
@@ -153,6 +247,10 @@ export default function LuminousButton(props: LuminousButtonProps) {
     const blobBKf = `${uid}-blobB`
     const blobCKf = `${uid}-blobC`
     const travelKf = `${uid}-travel`
+    const sparkleKf = `${uid}-sparkle`
+
+    // Stagger: total delay = base delay + staggerIndex * staggerOffset
+    const totalAppearDelay = appearDelay + staggerIndex * staggerOffset
 
     // Smoother conic gradient with intermediate blended stops for richer transitions
     const conicGradient = `conic-gradient(from 0deg, ${glowColorA}, color-mix(in oklch, ${glowColorA} 50%, ${glowColorB}) 16.6%, ${glowColorB}, color-mix(in oklch, ${glowColorB} 50%, ${glowColorC}) 50%, ${glowColorC}, color-mix(in oklch, ${glowColorC} 50%, ${glowColorA}) 83.3%, ${glowColorA})`
@@ -188,13 +286,15 @@ export default function LuminousButton(props: LuminousButtonProps) {
                 style={{
                     ...style,
                     position: "relative",
-                    display: "flex",
+                    display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
                     backgroundColor: "transparent",
                     color: textColor,
                     borderRadius,
                     ...font,
+                    ...(isFixedWidth ? {} : { width: "auto" }),
+                    ...(isFixedHeight ? {} : { height: "auto" }),
                 }}
             >
                 {/* Fill with glow via box-shadow */}
@@ -231,17 +331,12 @@ export default function LuminousButton(props: LuminousButtonProps) {
                             borderRadius,
                             background: glowBackground,
                             opacity: glowIntensity,
-                        }}
-                    />
-                )}
-                {/* Outline inner fill */}
-                {outline && (
-                    <div
-                        style={{
-                            position: "absolute",
-                            inset: outlineWidth,
-                            borderRadius: Math.max(0, borderRadius - outlineWidth),
-                            background: fillGradient,
+                            padding: outlineWidth,
+                            WebkitMask:
+                                "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
+                            WebkitMaskComposite: "xor",
+                            mask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)" as any,
+                            maskComposite: "exclude" as any,
                         }}
                     />
                 )}
@@ -259,251 +354,134 @@ export default function LuminousButton(props: LuminousButtonProps) {
 
     const textGlowShadow = `0 0 ${glowBlur * 0.3}px ${glowColorA}, 0 0 ${glowBlur * 0.6}px color-mix(in srgb, ${glowColorB} 50%, transparent)`
 
-    // Padding + negative margin trick: expand the bounding box so the glow
-    // isn't clipped by Framer's parent overflow:hidden, then pull it back
-    // with negative margin so layout stays the same.
     const bleed = glowSpread * 2 + glowBlur
 
-    return (
-        <motion.button
-            type="button"
-            ref={btnRef}
-            className={uid}
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-            style={{
-                ...style,
-                position: "relative",
-                backgroundColor: "transparent",
-                color: textColor,
-                border: "none",
-                borderRadius,
-                padding: bleed,
-                margin: -bleed,
-                cursor: "pointer",
-                boxSizing: "content-box" as const,
-                overflow: "visible",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                ...font,
-                ...(isFixedWidth ? {} : { width: "max-content" }),
-                ...(isFixedHeight ? {} : { height: "max-content" }),
-                willChange: "transform",
-                backfaceVisibility: "hidden" as const,
-            }}
-            onClick={() => {
-                if (link && typeof document !== "undefined") {
-                    const a = Object.assign(document.createElement("a"), {
-                        href: link,
-                        target: "_blank",
-                        rel: "noopener noreferrer",
-                    })
-                    a.click()
-                }
-                onClick?.()
-            }}
-            whileHover={reducedMotion ? undefined : { scale: hoverScale }}
-            whileTap={reducedMotion ? undefined : { scale: tapScale }}
-            transition={{ type: "spring", stiffness: 400, damping: 25 }}
-        >
-            {/* Keyframes */}
-            <style>{`
-                .${uid}:focus-visible {
-                    outline: 2px solid ${glowColorA};
-                    outline-offset: 4px;
-                }
-                @keyframes ${spinKf} {
-                    from { transform: rotate(0deg); }
-                    to { transform: rotate(360deg); }
-                }
-                @keyframes ${pulseKf} {
-                    0%, 100% { filter: brightness(1); }
-                    50% { filter: brightness(1.4); }
-                }
-                @keyframes ${breatheKf} {
-                    0%, 100% { filter: brightness(1); transform: scale(1); }
-                    50% { filter: brightness(1.5); transform: scale(1.08); }
-                }
-                @keyframes ${blobAKf} {
-                    0%, 100% { transform: translate(-30%, -20%) scale(1); }
-                    33% { transform: translate(20%, -30%) scale(1.1); }
-                    66% { transform: translate(-10%, 25%) scale(0.95); }
-                }
-                @keyframes ${blobBKf} {
-                    0%, 100% { transform: translate(25%, 15%) scale(1.05); }
-                    33% { transform: translate(-20%, -15%) scale(0.9); }
-                    66% { transform: translate(30%, -25%) scale(1.1); }
-                }
-                @keyframes ${blobCKf} {
-                    0%, 100% { transform: translate(5%, -25%) scale(0.95); }
-                    33% { transform: translate(-25%, 20%) scale(1.1); }
-                    66% { transform: translate(20%, 10%) scale(1); }
-                }
-                @keyframes ${shimmerKf} {
-                    0% { transform: translateX(-100%) skewX(-12deg) scaleY(1.1); opacity: 0; }
-                    8% { opacity: 1; }
-                    85% { opacity: 1; }
-                    100% { transform: translateX(400%) skewX(-12deg) scaleY(1.1); opacity: 0; }
-                }
-                @keyframes ${travelKf} {
-                    from { transform: rotate(0deg); }
-                    to { transform: rotate(360deg); }
-                }
-            `}</style>
+    const handleClick = useCallback(() => {
+        if (link && typeof document !== "undefined") {
+            const a = Object.assign(document.createElement("a"), {
+                href: link,
+                target: "_blank",
+                rel: "noopener noreferrer",
+            })
+            a.click()
+        }
+        onClick?.()
+    }, [link, onClick])
 
-            {/* Glow container — isolated stacking context so blur
-                never affects text rendering during scale transforms */}
-            <div
-                style={{
-                    position: "absolute",
-                    inset: -bleed,
-                    pointerEvents: "none",
-                    isolation: "isolate",
-                    zIndex: 0,
-                    transform: followMouse && !reducedMotion
-                        ? `translate(${mouseOffset.x}px, ${mouseOffset.y}px)`
-                        : undefined,
-                    transition: followMouse ? "transform 0.25s ease-out" : undefined,
-                }}
-            >
-                {/* Outer glow — blurred gradient behind the button */}
-                {!outline && (
-                    <motion.div
+    // Magnetic wrapper transform
+    const magneticTransform = magnetic && !reducedMotion && (magneticOffset.x !== 0 || magneticOffset.y !== 0)
+        ? `translate(${magneticOffset.x}px, ${magneticOffset.y}px)`
+        : undefined
+
+    // Shared keyframes for both modes
+    const keyframesStyle = `
+        .${uid}:focus-visible {
+            outline: 2px solid ${glowColorA};
+            outline-offset: 4px;
+        }
+        @keyframes ${spinKf} {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        @keyframes ${pulseKf} {
+            0%, 100% { filter: blur(${outline ? glowBlur * 1.2 : glowBlur}px) brightness(1); }
+            50% { filter: blur(${outline ? glowBlur * 1.2 : glowBlur}px) brightness(1.4); }
+        }
+        @keyframes ${breatheKf} {
+            0%, 100% { filter: blur(${outline ? glowBlur * 1.2 : glowBlur}px) brightness(1); transform: scale(1); }
+            50% { filter: blur(${outline ? glowBlur * 1.2 : glowBlur}px) brightness(1.5); transform: scale(1.08); }
+        }
+        @keyframes ${blobAKf} {
+            0%, 100% { transform: translate(-30%, -20%) scale(1); }
+            33% { transform: translate(20%, -30%) scale(1.1); }
+            66% { transform: translate(-10%, 25%) scale(0.95); }
+        }
+        @keyframes ${blobBKf} {
+            0%, 100% { transform: translate(25%, 15%) scale(1.05); }
+            33% { transform: translate(-20%, -15%) scale(0.9); }
+            66% { transform: translate(30%, -25%) scale(1.1); }
+        }
+        @keyframes ${blobCKf} {
+            0%, 100% { transform: translate(5%, -25%) scale(0.95); }
+            33% { transform: translate(-25%, 20%) scale(1.1); }
+            66% { transform: translate(20%, 10%) scale(1); }
+        }
+        @keyframes ${shimmerKf} {
+            0% { transform: translateX(-100%) skewX(-12deg) scaleY(1.1); opacity: 0; }
+            8% { opacity: 1; }
+            85% { opacity: 1; }
+            100% { transform: translateX(400%) skewX(-12deg) scaleY(1.1); opacity: 0; }
+        }
+        @keyframes ${travelKf} {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        @keyframes ${sparkleKf} {
+            0% { transform: scale(0) rotate(0deg); opacity: 0; }
+            20% { transform: scale(1) rotate(45deg); opacity: 1; }
+            80% { transform: scale(1.2) rotate(90deg); opacity: 0.8; }
+            100% { transform: scale(0) rotate(135deg); opacity: 0; }
+        }
+    `
+
+    // Shared inner content (glow, outline, fill, shimmer, sparkles, label)
+    const glowContainerStyle: CSSProperties = {
+        position: "absolute",
+        inset: -bleed,
+        pointerEvents: "none",
+        isolation: "isolate",
+        zIndex: 0,
+        transform: followMouse && !reducedMotion
+            ? `translate(${mouseOffset.x}px, ${mouseOffset.y}px)`
+            : undefined,
+        transition: followMouse ? "transform 0.25s ease-out" : undefined,
+    }
+
+    const innerContent = (
+        <>
+            <style>{keyframesStyle}</style>
+
+            {/* Glow container */}
+            <div style={glowContainerStyle}>
+                <motion.div
                         style={{
                             position: "absolute",
-                            inset: bleed + glowBlur,
-                            borderRadius: borderRadius + glowSpread,
+                            inset: outline ? bleed * 0.3 : bleed * 0.4,
+                            borderRadius: outline
+                                ? borderRadius + glowSpread * 2
+                                : borderRadius + glowSpread,
                             overflow: "hidden",
-                            filter: `blur(${glowBlur}px)`,
+                            filter: `blur(${outline ? glowBlur * 1.2 : glowBlur}px)`,
                             animation: !reducedMotion && !isHovered && glowAnimation !== "none"
                                 ? glowAnimation === "breathe"
                                     ? `${breatheKf} ${animationSpeed * 1.5}s ease-in-out infinite`
                                     : `${pulseKf} ${animationSpeed * 1.5}s ease-in-out infinite`
                                 : "none",
                         }}
+                        initial={
+                            reducedMotion || appearAnimation === "none"
+                                ? undefined
+                                : { opacity: 0, scale: 0.5 }
+                        }
                         animate={{
                             opacity: isHovered
-                                ? Math.min(glowIntensity * 1.5, 1)
-                                : glowIntensity,
+                                ? Math.min(glowIntensity * glowBoost, 1)
+                                : outline
+                                    ? glowIntensity * 0.5
+                                    : glowIntensity,
+                            scale: 1,
                         }}
-                        transition={{ duration: reducedMotion ? 0 : 0.4 }}
-                    >
-                        {/* Conic: spinning gradient */}
-                        {!isBlobs && (
-                            <div
-                                style={{
-                                    position: "absolute",
-                                    inset: isLinear ? 0 : "-50%",
-                                    background: glowBackground,
-                                    animation: !reducedMotion && !isLinear
-                                        ? `${spinKf} ${animationSpeed}s linear infinite`
-                                        : "none",
-                                }}
-                            />
-                        )}
-                        {/* Blobs: 3 drifting colored orbs */}
-                        {isBlobs && (
-                            <>
-                                <div
-                                    style={{
-                                        position: "absolute",
-                                        width: "70%",
-                                        height: "120%",
-                                        left: "15%",
-                                        top: "-10%",
-                                        borderRadius: "50%",
-                                        background: `radial-gradient(circle, ${glowColorA} 0%, transparent 70%)`,
-                                        animation: !reducedMotion
-                                            ? `${blobAKf} ${animationSpeed * 2}s ease-in-out infinite`
-                                            : "none",
-                                    }}
-                                />
-                                <div
-                                    style={{
-                                        position: "absolute",
-                                        width: "65%",
-                                        height: "110%",
-                                        left: "20%",
-                                        top: "-5%",
-                                        borderRadius: "50%",
-                                        background: `radial-gradient(circle, ${glowColorB} 0%, transparent 70%)`,
-                                        animation: !reducedMotion
-                                            ? `${blobBKf} ${animationSpeed * 2.4}s ease-in-out infinite`
-                                            : "none",
-                                    }}
-                                />
-                                <div
-                                    style={{
-                                        position: "absolute",
-                                        width: "60%",
-                                        height: "100%",
-                                        left: "25%",
-                                        top: "0%",
-                                        borderRadius: "50%",
-                                        background: `radial-gradient(circle, ${glowColorC} 0%, transparent 70%)`,
-                                        animation: !reducedMotion
-                                            ? `${blobCKf} ${animationSpeed * 2.8}s ease-in-out infinite`
-                                            : "none",
-                                    }}
-                                />
-                            </>
-                        )}
-                    </motion.div>
-                )}
-
-                {/* Outline mode — large ambient glow blob behind button */}
-                {outline && (
-                    <motion.div
-                        style={{
-                            position: "absolute",
-                            inset: bleed * 0.3,
-                            borderRadius: borderRadius + glowSpread * 2,
-                            overflow: "hidden",
-                            filter: `blur(${glowBlur * 1.2}px)`,
-                            animation: !reducedMotion && !isHovered && glowAnimation !== "none"
-                                ? glowAnimation === "breathe"
-                                    ? `${breatheKf} ${animationSpeed * 1.5}s ease-in-out infinite`
-                                    : `${pulseKf} ${animationSpeed * 1.5}s ease-in-out infinite`
-                                : "none",
-                        }}
-                        animate={{
-                            opacity: isHovered
-                                ? Math.min(glowIntensity * 1.2, 1)
-                                : glowIntensity * 0.5,
-                        }}
-                        transition={{ duration: reducedMotion ? 0 : 0.4 }}
-                    >
-                        {!isBlobs && (
-                            <div
-                                style={{
-                                    position: "absolute",
-                                    inset: isLinear ? 0 : "-50%",
-                                    background: glowBackground,
-                                    animation: !reducedMotion && !isLinear
-                                        ? `${spinKf} ${animationSpeed}s linear infinite`
-                                        : "none",
-                                }}
-                            />
-                        )}
-                        {isBlobs && (
-                            <>
-                                <div style={{ position: "absolute", width: "70%", height: "120%", left: "15%", top: "-10%", borderRadius: "50%", background: `radial-gradient(circle, ${glowColorA} 0%, transparent 70%)`, animation: !reducedMotion ? `${blobAKf} ${animationSpeed * 2}s ease-in-out infinite` : "none" }} />
-                                <div style={{ position: "absolute", width: "65%", height: "110%", left: "20%", top: "-5%", borderRadius: "50%", background: `radial-gradient(circle, ${glowColorB} 0%, transparent 70%)`, animation: !reducedMotion ? `${blobBKf} ${animationSpeed * 2.4}s ease-in-out infinite` : "none" }} />
-                                <div style={{ position: "absolute", width: "60%", height: "100%", left: "25%", top: "0%", borderRadius: "50%", background: `radial-gradient(circle, ${glowColorC} 0%, transparent 70%)`, animation: !reducedMotion ? `${blobCKf} ${animationSpeed * 2.8}s ease-in-out infinite` : "none" }} />
-                            </>
-                        )}
-                    </motion.div>
-                )}
-
-                {/* Outline mode — thin clean gradient border ring */}
-                {outline && (
-                    <div
-                        style={{
-                            position: "absolute",
-                            inset: 2 * bleed,
-                            borderRadius,
-                            overflow: "hidden",
+                        transition={{
+                            opacity: {
+                                duration: reducedMotion ? 0 : appearDuration * 4,
+                                delay: appearAnimation !== "none" && !reducedMotion ? totalAppearDelay + appearDuration : 0,
+                                ease: [0.05, 0.7, 0.1, 1],
+                            },
+                            scale: {
+                                duration: reducedMotion ? 0 : appearDuration * 5,
+                                delay: appearAnimation !== "none" && !reducedMotion ? totalAppearDelay + appearDuration : 0,
+                                ease: [0.05, 0.7, 0.1, 1],
+                            },
                         }}
                     >
                         {!isBlobs && (
@@ -525,32 +503,62 @@ export default function LuminousButton(props: LuminousButtonProps) {
                                 <div style={{ position: "absolute", width: "60%", height: "100%", left: "25%", top: "0%", borderRadius: "50%", background: `radial-gradient(circle, ${glowColorC} 0%, transparent 70%)`, animation: !reducedMotion ? `${blobCKf} ${animationSpeed * 2.8}s ease-in-out infinite` : "none" }} />
                             </>
                         )}
-                        {/* Cutout — leaves only the thin border visible */}
+                </motion.div>
+            </div>
+
+            {/* Outline border — gradient ring via CSS mask */}
+            {outline && (
+                <div
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        borderRadius,
+                        overflow: "hidden",
+                        pointerEvents: "none",
+                        zIndex: 2,
+                        padding: outlineWidth,
+                        WebkitMask:
+                            "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
+                        WebkitMaskComposite: "xor",
+                        mask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)" as any,
+                        maskComposite: "exclude" as any,
+                    }}
+                >
+                    {!isBlobs && (
                         <div
                             style={{
                                 position: "absolute",
-                                inset: outlineWidth,
-                                borderRadius: Math.max(0, borderRadius - outlineWidth),
-                                background: fillBg,
+                                inset: isLinear ? 0 : "-50%",
+                                background: glowBackground,
+                                animation:
+                                    !reducedMotion && !isLinear
+                                        ? `${spinKf} ${animationSpeed}s linear infinite`
+                                        : "none",
                             }}
                         />
-                    </div>
-                )}
-            </div>
+                    )}
+                    {isBlobs && (
+                        <>
+                            <div style={{ position: "absolute", width: "70%", height: "120%", left: "15%", top: "-10%", borderRadius: "50%", background: `radial-gradient(circle, ${glowColorA} 0%, transparent 70%)`, animation: !reducedMotion ? `${blobAKf} ${animationSpeed * 2}s ease-in-out infinite` : "none" }} />
+                            <div style={{ position: "absolute", width: "65%", height: "110%", left: "20%", top: "-5%", borderRadius: "50%", background: `radial-gradient(circle, ${glowColorB} 0%, transparent 70%)`, animation: !reducedMotion ? `${blobBKf} ${animationSpeed * 2.4}s ease-in-out infinite` : "none" }} />
+                            <div style={{ position: "absolute", width: "60%", height: "100%", left: "25%", top: "0%", borderRadius: "50%", background: `radial-gradient(circle, ${glowColorC} 0%, transparent 70%)`, animation: !reducedMotion ? `${blobCKf} ${animationSpeed * 2.8}s ease-in-out infinite` : "none" }} />
+                        </>
+                    )}
+                </div>
+            )}
 
-            {/* Traveling light — soft highlight sweeping along the border */}
+            {/* Traveling light */}
             {travelingLight && !reducedMotion && (
                 <div
                     style={{
                         position: "absolute",
-                        inset: bleed,
+                        inset: 0,
                         borderRadius,
                         overflow: "hidden",
                         pointerEvents: "none",
                         zIndex: 3,
                     }}
                 >
-                    {/* Spinning conic gradient with a narrow bright arc */}
                     <div
                         style={{
                             position: "absolute",
@@ -559,7 +567,6 @@ export default function LuminousButton(props: LuminousButtonProps) {
                             animation: `${travelKf} ${travelingLightSpeed}s linear infinite`,
                         }}
                     />
-                    {/* Cutout — leaves only the thin border visible */}
                     <div
                         style={{
                             position: "absolute",
@@ -575,10 +582,8 @@ export default function LuminousButton(props: LuminousButtonProps) {
             <div
                 style={{
                     position: "absolute",
-                    inset: outline ? bleed + outlineWidth : bleed,
-                    borderRadius: outline
-                        ? Math.max(0, borderRadius - outlineWidth)
-                        : borderRadius,
+                    inset: 0,
+                    borderRadius,
                     background: fillGradient,
                     zIndex: 1,
                     pointerEvents: "none",
@@ -596,9 +601,9 @@ export default function LuminousButton(props: LuminousButtonProps) {
             <div
                 style={{
                     position: "absolute",
-                    top: outline ? bleed + outlineWidth : bleed,
-                    left: outline ? bleed + outlineWidth + borderRadius * 0.3 : bleed + borderRadius * 0.3,
-                    right: outline ? bleed + outlineWidth + borderRadius * 0.3 : bleed + borderRadius * 0.3,
+                    top: 0,
+                    left: borderRadius * 0.3,
+                    right: borderRadius * 0.3,
                     height: 1,
                     background: `linear-gradient(90deg, transparent, rgba(255,255,255,0.15) 30%, rgba(255,255,255,0.25) 50%, rgba(255,255,255,0.15) 70%, transparent)`,
                     borderRadius: 1,
@@ -607,14 +612,12 @@ export default function LuminousButton(props: LuminousButtonProps) {
                 }}
             />
 
-            {/* Noise texture overlay for tactile quality */}
+            {/* Noise texture overlay */}
             <div
                 style={{
                     position: "absolute",
-                    inset: outline ? bleed + outlineWidth : bleed,
-                    borderRadius: outline
-                        ? Math.max(0, borderRadius - outlineWidth)
-                        : borderRadius,
+                    inset: 0,
+                    borderRadius,
                     opacity: 0.035,
                     mixBlendMode: "overlay" as const,
                     backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
@@ -629,16 +632,13 @@ export default function LuminousButton(props: LuminousButtonProps) {
                 <div
                     style={{
                         position: "absolute",
-                        inset: outline ? bleed + outlineWidth : bleed,
-                        borderRadius: outline
-                            ? Math.max(0, borderRadius - outlineWidth)
-                            : borderRadius,
+                        inset: 0,
+                        borderRadius,
                         overflow: "hidden",
                         pointerEvents: "none",
-                        zIndex: 2,
+                        zIndex: 3,
                     }}
                 >
-                    {/* Specular highlight sweep */}
                     <div
                         style={{
                             position: "absolute",
@@ -658,12 +658,42 @@ export default function LuminousButton(props: LuminousButtonProps) {
                 </div>
             )}
 
+            {/* Idle sparkles */}
+            {sparkle && !reducedMotion && sparkles.length > 0 && (
+                <div
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        borderRadius,
+                        overflow: "hidden",
+                        pointerEvents: "none",
+                        zIndex: 6,
+                    }}
+                >
+                    {sparkles.map((s) => (
+                        <div
+                            key={s.id}
+                            style={{
+                                position: "absolute",
+                                left: `${s.x}%`,
+                                top: `${s.y}%`,
+                                width: s.size,
+                                height: s.size,
+                                background: `radial-gradient(circle, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.4) 40%, transparent 70%)`,
+                                boxShadow: `0 0 ${s.size * 2}px rgba(255,255,255,0.6), 0 0 ${s.size * 4}px color-mix(in srgb, ${glowColorA} 40%, transparent)`,
+                                borderRadius: "50%",
+                                animation: `${sparkleKf} 0.8s ease-out forwards`,
+                            }}
+                        />
+                    ))}
+                </div>
+            )}
+
             {/* Label */}
             <span
                 style={{
                     position: "relative",
                     zIndex: 5,
-                    padding: `${padY}px ${padX}px`,
                     textShadow:
                         isHovered && showTextGlow ? textGlowShadow : `0 1px 2px rgba(0,0,0,0.3)`,
                     transition: reducedMotion
@@ -674,7 +704,78 @@ export default function LuminousButton(props: LuminousButtonProps) {
             >
                 {label}
             </span>
-        </motion.button>
+        </>
+    )
+
+    // Shared button styles
+    const buttonBaseStyle: CSSProperties = {
+        ...style,
+        position: "relative",
+        backgroundColor: "transparent",
+        color: textColor,
+        border: "none",
+        borderRadius,
+        padding: `${padY}px ${padX}px`,
+        cursor: "pointer",
+        overflow: "visible",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        ...font,
+        ...(isFixedWidth ? {} : { width: "auto" }),
+        ...(isFixedHeight ? {} : { height: "auto" }),
+        willChange: "transform",
+        backfaceVisibility: "hidden" as const,
+    }
+
+    // Magnetic wrapper
+    const wrapperStyle: CSSProperties = magnetic && !reducedMotion
+        ? {
+              display: "inline-flex",
+              transform: magneticTransform,
+              transition: "transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)",
+              willChange: "transform",
+          }
+        : { display: "inline-flex" }
+
+    return (
+        <div ref={wrapRef} style={wrapperStyle}>
+            <motion.button
+                type="button"
+                ref={btnRef}
+                className={uid}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+                style={buttonBaseStyle}
+                onClick={handleClick}
+                initial={
+                    reducedMotion || appearAnimation === "none"
+                        ? undefined
+                        : {
+                              opacity: 0,
+                              ...(appearAnimation === "fade-scale" && { scale: 0.95 }),
+                              ...(appearAnimation === "fade-up" && { y: 12 }),
+                              ...(appearAnimation === "fade-down" && { y: -12 }),
+                          }
+                }
+                animate={
+                    reducedMotion || appearAnimation === "none"
+                        ? undefined
+                        : { opacity: 1, scale: 1, y: 0 }
+                }
+                whileHover={reducedMotion ? undefined : { scale: hoverScale }}
+                whileTap={reducedMotion ? undefined : { scale: tapScale }}
+                transition={{
+                    type: "spring",
+                    stiffness: 400,
+                    damping: 25,
+                    opacity: { duration: appearDuration, delay: totalAppearDelay, ease: [0.16, 1, 0.3, 1] },
+                    y: { duration: appearDuration, delay: totalAppearDelay, ease: [0.16, 1, 0.3, 1] },
+                }}
+            >
+                {innerContent}
+            </motion.button>
+        </div>
     )
 }
 
@@ -848,29 +949,23 @@ addPropertyControls(LuminousButton, {
             },
         },
     },
-    padding: {
-        type: ControlType.Object,
-        title: "Padding",
-        controls: {
-            x: {
-                type: ControlType.Number,
-                title: "Horizontal",
-                defaultValue: 32,
-                min: 8,
-                max: 80,
-                step: 2,
-                unit: "px",
-            },
-            y: {
-                type: ControlType.Number,
-                title: "Vertical",
-                defaultValue: 16,
-                min: 4,
-                max: 40,
-                step: 2,
-                unit: "px",
-            },
-        },
+    paddingX: {
+        type: ControlType.Number,
+        title: "Padding X",
+        defaultValue: 32,
+        min: 8,
+        max: 80,
+        step: 2,
+        unit: "px",
+    },
+    paddingY: {
+        type: ControlType.Number,
+        title: "Padding Y",
+        defaultValue: 16,
+        min: 4,
+        max: 40,
+        step: 2,
+        unit: "px",
     },
     hover: {
         type: ControlType.Object,
@@ -892,6 +987,14 @@ addPropertyControls(LuminousButton, {
                 max: 1,
                 step: 0.01,
             },
+            glowBoost: {
+                type: ControlType.Number,
+                title: "Glow Boost",
+                defaultValue: 1.8,
+                min: 1,
+                max: 3,
+                step: 0.1,
+            },
             shimmer: {
                 type: ControlType.Boolean,
                 title: "Shimmer",
@@ -901,6 +1004,103 @@ addPropertyControls(LuminousButton, {
                 type: ControlType.Boolean,
                 title: "Text Glow",
                 defaultValue: true,
+            },
+            magnetic: {
+                type: ControlType.Boolean,
+                title: "Magnetic",
+                defaultValue: false,
+            },
+            magneticStrength: {
+                type: ControlType.Number,
+                title: "Magnetic Strength",
+                defaultValue: 0.3,
+                min: 0.05,
+                max: 0.8,
+                step: 0.05,
+                hidden: (props: any) => !props?.hover?.magnetic,
+            },
+            magneticRadius: {
+                type: ControlType.Number,
+                title: "Magnetic Radius",
+                defaultValue: 150,
+                min: 50,
+                max: 400,
+                step: 10,
+                unit: "px",
+                hidden: (props: any) => !props?.hover?.magnetic,
+            },
+        },
+    },
+    appear: {
+        type: ControlType.Object,
+        title: "Appear",
+        controls: {
+            animation: {
+                type: ControlType.Enum,
+                title: "Animation",
+                options: ["none", "fade", "fade-up", "fade-down", "fade-scale"],
+                optionTitles: ["None", "Fade", "Fade Up", "Fade Down", "Fade + Scale"],
+                defaultValue: "fade-scale",
+            },
+            duration: {
+                type: ControlType.Number,
+                title: "Duration",
+                defaultValue: 0.5,
+                min: 0.1,
+                max: 2,
+                step: 0.1,
+                unit: "s",
+                hidden: (props: any) => props?.appear?.animation === "none",
+            },
+            delay: {
+                type: ControlType.Number,
+                title: "Delay",
+                defaultValue: 0,
+                min: 0,
+                max: 3,
+                step: 0.1,
+                unit: "s",
+                hidden: (props: any) => props?.appear?.animation === "none",
+            },
+            staggerIndex: {
+                type: ControlType.Number,
+                title: "Stagger Index",
+                defaultValue: 0,
+                min: 0,
+                max: 20,
+                step: 1,
+                hidden: (props: any) => props?.appear?.animation === "none",
+            },
+            staggerOffset: {
+                type: ControlType.Number,
+                title: "Stagger Offset",
+                defaultValue: 0.1,
+                min: 0.02,
+                max: 0.5,
+                step: 0.02,
+                unit: "s",
+                hidden: (props: any) => props?.appear?.animation === "none",
+            },
+        },
+    },
+    effects: {
+        type: ControlType.Object,
+        title: "Effects",
+        controls: {
+            sparkle: {
+                type: ControlType.Boolean,
+                title: "Idle Sparkle",
+                defaultValue: false,
+            },
+            sparkleInterval: {
+                type: ControlType.Number,
+                title: "Sparkle Interval",
+                defaultValue: 3,
+                min: 0.5,
+                max: 10,
+                step: 0.5,
+                unit: "s",
+                hidden: (props: any) => !props?.effects?.sparkle,
             },
         },
     },
