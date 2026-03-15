@@ -19,12 +19,15 @@ import * as THREE from "three"
 // Config defaults
 // ---------------------------------------------------------------------------
 
+const PLACEHOLDER_IMAGE =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='600'%3E%3Crect fill='%23262626' width='800' height='600'/%3E%3Cpath d='M360 260h80v80h-80z' fill='%23444'/%3E%3C/svg%3E"
+
 const DEFAULT_SLIDES = [
-    { image: "", title: "Slide 1" },
-    { image: "", title: "Slide 2" },
-    { image: "", title: "Slide 3" },
-    { image: "", title: "Slide 4" },
-    { image: "", title: "Slide 5" },
+    { image: PLACEHOLDER_IMAGE, title: "Slide 1" },
+    { image: PLACEHOLDER_IMAGE, title: "Slide 2" },
+    { image: PLACEHOLDER_IMAGE, title: "Slide 3" },
+    { image: PLACEHOLDER_IMAGE, title: "Slide 4" },
+    { image: PLACEHOLDER_IMAGE, title: "Slide 5" },
 ]
 
 // ---------------------------------------------------------------------------
@@ -44,6 +47,24 @@ interface SlideSize {
     minHeight?: number
     maxHeight?: number
     gap?: number
+    randomHeights?: boolean
+    activeScale?: number
+}
+
+interface SnapSettings {
+    enabled?: boolean
+    strength?: number
+}
+
+interface AutoplaySettings {
+    enabled?: boolean
+    speed?: number
+}
+
+interface LinkIndicator {
+    show?: boolean
+    style?: "icon" | "label" | "label-icon"
+    label?: string
 }
 
 interface EffectSettings {
@@ -67,15 +88,11 @@ interface Scroll3DSliderProps {
     direction?: "vertical" | "horizontal"
     borderRadius?: number
     slideSize?: SlideSize
-    randomHeights?: boolean
-    activeScale?: number
     effect?: EffectSettings
     interactive?: boolean
-    snapToSlide?: boolean
-    snapStrength?: number
+    snap?: SnapSettings
     scrollTuning?: ScrollTuning
-    autoplay?: boolean
-    autoplaySpeed?: number
+    autoplay?: AutoplaySettings
     showOverlay?: boolean
     overlayFont?: Record<string, any>
     overlayColor?: string
@@ -94,9 +111,7 @@ interface Scroll3DSliderProps {
         | "bottom-center"
         | "bottom-right"
         | "bottom-split"
-    showLinkIndicator?: boolean
-    linkStyle?: "icon" | "label" | "label-icon"
-    linkLabel?: string
+    linkIndicator?: LinkIndicator
     maxDpr?: number
     enableMotion?: boolean
     respectReducedMotion?: boolean
@@ -131,14 +146,54 @@ function StaticFallback({
     slides,
     backgroundColor,
     overlayColor,
+    overlayFont,
+    overlaySize,
+    counterSize,
+    overlayPosition,
+    showOverlay,
     style,
 }: {
     slides: SlideData[]
     backgroundColor: string
     overlayColor: string
+    overlayFont: Record<string, any>
+    overlaySize: number
+    counterSize: number
+    overlayPosition: string
+    showOverlay: boolean
     style?: React.CSSProperties
 }) {
-    const firstWithImage = slides.find((s) => s.image)
+    const validSlides = slides.filter((s) => s.image)
+    const firstWithImage = validSlides[0]
+    const firstTitle = firstWithImage?.title || ""
+    const slideCount = validSlides.length
+
+    const [overlayV, overlayH] = overlayPosition.includes("-")
+        ? (overlayPosition.split("-") as [string, string])
+        : (["center", overlayPosition] as [string, string])
+
+    const isSplit = overlayH === "split"
+    const isCenter = overlayH === "center"
+    const overlayJustify = isSplit
+        ? "space-between"
+        : isCenter
+          ? "center"
+          : overlayH === "right"
+            ? "flex-end"
+            : "flex-start"
+    const overlayDirection = isCenter
+        ? ("column" as const)
+        : ("row" as const)
+    const overlayTop =
+        overlayV === "top"
+            ? "2rem"
+            : overlayV === "bottom"
+              ? undefined
+              : "50%"
+    const overlayBottom = overlayV === "bottom" ? "2rem" : undefined
+    const overlayTransform =
+        overlayV === "center" ? "translateY(-50%)" : undefined
+
     return (
         <div
             style={{
@@ -158,7 +213,7 @@ function StaticFallback({
             {firstWithImage?.image && (
                 <img
                     src={firstWithImage.image}
-                    alt={firstWithImage.title || ""}
+                    alt={firstTitle}
                     style={{
                         maxWidth: "60%",
                         maxHeight: "70%",
@@ -167,19 +222,49 @@ function StaticFallback({
                     }}
                 />
             )}
-            <div
-                style={{
-                    position: "absolute",
-                    bottom: 24,
-                    left: 24,
-                    color: overlayColor,
-                    fontFamily: "Inter, sans-serif",
-                    fontSize: 14,
-                    opacity: 0.7,
-                }}
-            >
-                {slides.length} slides
-            </div>
+            {showOverlay && slideCount > 0 && (
+                <div
+                    style={{
+                        position: "absolute",
+                        top: overlayTop,
+                        bottom: overlayBottom,
+                        left: 0,
+                        transform: overlayTransform,
+                        width: "100%",
+                        padding: "0 2rem",
+                        display: "flex",
+                        flexDirection: overlayDirection,
+                        justifyContent: overlayJustify,
+                        alignItems: "center",
+                        pointerEvents: "none",
+                        gap: isCenter ? 4 : 16,
+                    }}
+                >
+                    <p
+                        style={{
+                            ...overlayFont,
+                            fontSize: overlaySize,
+                            color: overlayColor,
+                            margin: 0,
+                            whiteSpace: "nowrap",
+                        }}
+                    >
+                        {firstTitle}
+                    </p>
+                    <p
+                        style={{
+                            ...overlayFont,
+                            fontSize: counterSize,
+                            color: overlayColor,
+                            margin: 0,
+                            opacity: 0.7,
+                            whiteSpace: "nowrap",
+                        }}
+                    >
+                        {zeroPad(1)} / {zeroPad(slideCount)}
+                    </p>
+                </div>
+            )}
         </div>
     )
 }
@@ -195,49 +280,57 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         direction = "vertical",
         borderRadius = 0,
         slideSize,
-        randomHeights = true,
-        activeScale = 1.0,
         effect,
         interactive = true,
-        snapToSlide = false,
-        snapStrength: rawSnapStrength = 20,
+        snap,
         scrollTuning,
-        autoplay = false,
-        autoplaySpeed: rawAutoplaySpeed = 30,
+        autoplay,
         showOverlay = true,
         overlayFont = {},
         overlayColor = "#ffffff",
         overlaySize = 16,
         counterSize = 14,
         overlayPosition = "bottom-left",
-        showLinkIndicator = true,
-        linkStyle = "icon",
-        linkLabel = "View",
+        linkIndicator,
         maxDpr = 2,
         enableMotion = true,
         respectReducedMotion = true,
         style,
     } = props
 
-    // Resolve nested defaults
+    // Resolve nested defaults — slideSize
+    const slideAspectRatio = slideSize?.aspectRatio ?? 1.5
+    const slideMinHeight = slideSize?.minHeight ?? 1
+    const slideMaxHeight = slideSize?.maxHeight ?? 1.5
+    const slideGap = slideSize?.gap ?? 0.05
+    const randomHeights = slideSize?.randomHeights ?? true
+    const activeScale = slideSize?.activeScale ?? 1.0
+
+    // Resolve nested defaults — effect
     const effectPreset = effect?.preset ?? "distortion"
     const distortionStrength = effect?.distortionStrength ?? 2.5
     const effectPerspective = effect?.perspective ?? 45
     const effectRotation = effect?.rotation ?? 45
     const effectDepth = effect?.depth ?? 2.0
 
-    const slideAspectRatio = slideSize?.aspectRatio ?? 1.5
-    const slideMinHeight = slideSize?.minHeight ?? 1
-    const slideMaxHeight = slideSize?.maxHeight ?? 1.5
-    const slideGap = slideSize?.gap ?? 0.05
+    // Resolve nested defaults — snap
+    const snapToSlide = snap?.enabled ?? false
+    const snapStrength = ((snap?.strength ?? 20) / 100) * 0.15
+
+    // Resolve nested defaults — autoplay
+    const autoplayEnabled = autoplay?.enabled ?? false
+    const autoplaySpeed = ((autoplay?.speed ?? 30) / 100) * 1.0
+
+    // Resolve nested defaults — link indicator
+    const showLinkIndicator = linkIndicator?.show ?? true
+    const linkStyle = linkIndicator?.style ?? "icon"
+    const linkLabel = linkIndicator?.label ?? "View"
 
     // Convert user-facing % (1–100) to internal multipliers
     const scrollSmoothing = ((scrollTuning?.smoothing ?? 10) / 100) * 0.5
     const momentumFriction = 0.8 + ((scrollTuning?.momentum ?? 80) / 100) * 0.19
     const wheelSpeed = ((scrollTuning?.wheelSpeed ?? 20) / 100) * 0.05
     const dragSpeed = ((scrollTuning?.dragSpeed ?? 20) / 100) * 0.05
-    const snapStrength = (rawSnapStrength / 100) * 0.15
-    const autoplaySpeed = (rawAutoplaySpeed / 100) * 1.0
 
     // Geometry key — triggers scene rebuild when layout props change
     const geometryKey = `${randomHeights}-${slideAspectRatio}-${slideMinHeight}-${slideMaxHeight}-${slideGap}`
@@ -285,6 +378,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         slideMinHeight,
         slideMaxHeight,
         slideGap,
+        randomHeights,
         effectPreset,
         distortionStrength,
         effectPerspective,
@@ -298,7 +392,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         dragSpeed,
         snapToSlide,
         snapStrength,
-        autoplay,
+        autoplayEnabled,
         autoplaySpeed,
         maxDpr,
         enableMotion,
@@ -312,6 +406,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         slideMinHeight,
         slideMaxHeight,
         slideGap,
+        randomHeights,
         effectPreset,
         distortionStrength,
         effectPerspective,
@@ -325,7 +420,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         dragSpeed,
         snapToSlide,
         snapStrength,
-        autoplay,
+        autoplayEnabled,
         autoplaySpeed,
         maxDpr,
         enableMotion,
@@ -675,6 +770,26 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
             distortionTarget = Math.min(1, distortionTarget + amount)
         }
 
+        // Raycaster
+        const raycaster = new THREE.Raycaster()
+        const pointerNDC = new THREE.Vector2()
+
+        const getClickedSlide = (
+            clientX: number,
+            clientY: number
+        ): number | null => {
+            const rect = renderer.domElement.getBoundingClientRect()
+            pointerNDC.x =
+                ((clientX - rect.left) / rect.width) * 2 - 1
+            pointerNDC.y =
+                -((clientY - rect.top) / rect.height) * 2 + 1
+            raycaster.setFromCamera(pointerNDC, camera)
+            const hits = raycaster.intersectObjects(meshes)
+            if (hits.length > 0)
+                return hits[0].object.userData.index as number
+            return null
+        }
+
         // --- Event handlers ---
         const onWheel = (e: WheelEvent) => {
             if (!configRef.current.interactive) return
@@ -725,13 +840,15 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         const onTouchEnd = () => {
             if (!configRef.current.interactive) return
             const isHoriz = configRef.current.direction === "horizontal"
-            if (touchTotalDistance < 5) {
+            if (touchTotalDistance < 10) {
                 const clicked = getClickedSlide(touchStartX, touchStartY)
-                if (clicked !== null && clicked !== activeSlideIndex) {
-                    scrollToSlide(clicked)
-                } else {
-                    const link = validSlides[activeSlideIndex]?.link
-                    if (link) window.open(link, "_blank", "noopener")
+                if (clicked !== null) {
+                    const clickedLink = validSlides[clicked]?.link
+                    if (clicked === activeSlideIndex && clickedLink) {
+                        window.open(clickedLink, "_blank", "noopener")
+                    } else {
+                        scrollToSlide(clicked)
+                    }
                 }
             }
             const swipeDelta = isHoriz
@@ -769,8 +886,20 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         }
 
         const onPointerMove = (e: PointerEvent) => {
-            if (!configRef.current.interactive || !isDragging) return
             if (e.pointerType === "touch") return
+            if (!configRef.current.interactive) return
+
+            if (!isDragging) {
+                // Update cursor: show pointer when hovering active slide with a link
+                const hovered = getClickedSlide(e.clientX, e.clientY)
+                if (hovered === activeSlideIndex && validSlides[activeSlideIndex]?.link) {
+                    renderer.domElement.style.cursor = "pointer"
+                } else {
+                    renderer.domElement.style.cursor = "grab"
+                }
+                return
+            }
+
             const isHoriz = configRef.current.direction === "horizontal"
             const delta = isHoriz
                 ? e.clientX - dragStartX
@@ -792,13 +921,15 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
                 .interactive
                 ? "grab"
                 : "default"
-            if (totalDragDistance < 5) {
+            if (totalDragDistance < 10) {
                 const clicked = getClickedSlide(e.clientX, e.clientY)
-                if (clicked !== null && clicked !== activeSlideIndex) {
-                    scrollToSlide(clicked)
-                } else {
-                    const link = validSlides[activeSlideIndex]?.link
-                    if (link) window.open(link, "_blank", "noopener")
+                if (clicked !== null) {
+                    const clickedLink = validSlides[clicked]?.link
+                    if (clicked === activeSlideIndex && clickedLink) {
+                        window.open(clickedLink, "_blank", "noopener")
+                    } else {
+                        scrollToSlide(clicked)
+                    }
                 }
                 return
             }
@@ -806,31 +937,15 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
                 scrollMomentum = -dragDelta * 0.01
                 addDistortionBurst(Math.abs(dragDelta) * 0.005)
                 isScrolling = true
-                setTimeout(() => (isScrolling = false), 800)
+                if (scrollTimeout) clearTimeout(scrollTimeout)
+                scrollTimeout = setTimeout(
+                    () => (isScrolling = false),
+                    800
+                )
             }
         }
 
         renderer.domElement.style.cursor = interactive ? "grab" : "default"
-
-        // Raycaster
-        const raycaster = new THREE.Raycaster()
-        const pointerNDC = new THREE.Vector2()
-
-        const getClickedSlide = (
-            clientX: number,
-            clientY: number
-        ): number | null => {
-            const rect = renderer.domElement.getBoundingClientRect()
-            pointerNDC.x =
-                ((clientX - rect.left) / rect.width) * 2 - 1
-            pointerNDC.y =
-                -((clientY - rect.top) / rect.height) * 2 + 1
-            raycaster.setFromCamera(pointerNDC, camera)
-            const hits = raycaster.intersectObjects(meshes)
-            if (hits.length > 0)
-                return hits[0].object.userData.index as number
-            return null
-        }
 
         const scrollToSlide = (targetIndex: number) => {
             const targetOffset = slideOffsets[targetIndex]
@@ -958,7 +1073,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
 
             // Autoplay
             if (
-                cfg.autoplay &&
+                cfg.autoplayEnabled &&
                 motionEnabled &&
                 !isScrolling &&
                 !isDragging
@@ -1109,8 +1224,10 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
                             applyDistortion(
                                 mesh,
                                 pos,
-                                cfg.distortionStrength *
-                                    signedDistortion,
+                                motionEnabled
+                                    ? cfg.distortionStrength *
+                                          signedDistortion
+                                    : 0,
                                 isHoriz
                             )
                             break
@@ -1207,6 +1324,11 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
                 slides={slides}
                 backgroundColor={backgroundColor}
                 overlayColor={overlayColor}
+                overlayFont={overlayFont}
+                overlaySize={overlaySize}
+                counterSize={counterSize}
+                overlayPosition={overlayPosition}
+                showOverlay={showOverlay}
                 style={style}
             />
         )
@@ -1437,7 +1559,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
     )
 }
 
-Scroll3DSlider.displayName = "#45 Scroll3DSlider"
+Scroll3DSlider.displayName = "Scroll3DSlider"
 
 // ---------------------------------------------------------------------------
 // Property controls
@@ -1468,6 +1590,7 @@ addPropertyControls(Scroll3DSlider, {
         },
         defaultValue: DEFAULT_SLIDES,
         maxCount: 20,
+        section: "Slides",
     },
 
     // --- Style ---
@@ -1496,7 +1619,7 @@ addPropertyControls(Scroll3DSlider, {
     },
     slideSize: {
         type: ControlType.Object,
-        title: "Slide Size",
+        title: "Slide Layout",
         controls: {
             aspectRatio: {
                 type: ControlType.Number,
@@ -1530,23 +1653,21 @@ addPropertyControls(Scroll3DSlider, {
                 step: 0.01,
                 defaultValue: 0.05,
             },
+            randomHeights: {
+                type: ControlType.Boolean,
+                title: "Random Heights",
+                defaultValue: true,
+            },
+            activeScale: {
+                type: ControlType.Number,
+                title: "Active Scale",
+                min: 1.0,
+                max: 1.4,
+                step: 0.01,
+                unit: "\u00d7",
+                defaultValue: 1.0,
+            },
         },
-        section: "Style",
-    },
-    randomHeights: {
-        type: ControlType.Boolean,
-        title: "Random Heights",
-        defaultValue: true,
-        section: "Style",
-    },
-    activeScale: {
-        type: ControlType.Number,
-        title: "Active Scale",
-        min: 1.0,
-        max: 1.4,
-        step: 0.01,
-        unit: "\u00d7",
-        defaultValue: 1.0,
         section: "Style",
     },
 
@@ -1629,21 +1750,26 @@ addPropertyControls(Scroll3DSlider, {
         defaultValue: true,
         section: "Interaction",
     },
-    snapToSlide: {
-        type: ControlType.Boolean,
-        title: "Snap to Slide",
-        defaultValue: false,
-        section: "Interaction",
-    },
-    snapStrength: {
-        type: ControlType.Number,
-        title: "Snap Strength",
-        min: 1,
-        max: 100,
-        step: 1,
-        unit: "%",
-        defaultValue: 20,
-        hidden: (props: any) => !props.snapToSlide,
+    snap: {
+        type: ControlType.Object,
+        title: "Snap",
+        controls: {
+            enabled: {
+                type: ControlType.Boolean,
+                title: "Snap to Slide",
+                defaultValue: false,
+            },
+            strength: {
+                type: ControlType.Number,
+                title: "Strength",
+                min: 1,
+                max: 100,
+                step: 1,
+                unit: "%",
+                defaultValue: 20,
+                hidden: (props: any) => !props.snap?.enabled,
+            },
+        },
         section: "Interaction",
     },
     scrollTuning: {
@@ -1690,20 +1816,25 @@ addPropertyControls(Scroll3DSlider, {
         section: "Interaction",
     },
     autoplay: {
-        type: ControlType.Boolean,
+        type: ControlType.Object,
         title: "Autoplay",
-        defaultValue: false,
-        section: "Interaction",
-    },
-    autoplaySpeed: {
-        type: ControlType.Number,
-        title: "Autoplay Speed",
-        min: 1,
-        max: 100,
-        step: 1,
-        unit: "%",
-        defaultValue: 30,
-        hidden: (props: any) => !props.autoplay,
+        controls: {
+            enabled: {
+                type: ControlType.Boolean,
+                title: "Autoplay",
+                defaultValue: false,
+            },
+            speed: {
+                type: ControlType.Number,
+                title: "Speed",
+                min: 1,
+                max: 100,
+                step: 1,
+                unit: "%",
+                defaultValue: 30,
+                hidden: (props: any) => !props.autoplay?.enabled,
+            },
+        },
         section: "Interaction",
     },
 
@@ -1786,30 +1917,33 @@ addPropertyControls(Scroll3DSlider, {
         hidden: (props: any) => !props.showOverlay,
         section: "Overlay",
     },
-    showLinkIndicator: {
-        type: ControlType.Boolean,
+    linkIndicator: {
+        type: ControlType.Object,
         title: "Link Indicator",
-        defaultValue: true,
+        controls: {
+            show: {
+                type: ControlType.Boolean,
+                title: "Show",
+                defaultValue: true,
+            },
+            style: {
+                type: ControlType.Enum,
+                title: "Style",
+                options: ["icon", "label", "label-icon"],
+                optionTitles: ["Icon", "Label", "Label + Icon"],
+                defaultValue: "icon",
+                hidden: (props: any) => !props.linkIndicator?.show,
+            },
+            label: {
+                type: ControlType.String,
+                title: "Label",
+                defaultValue: "View",
+                hidden: (props: any) =>
+                    !props.linkIndicator?.show ||
+                    (props.linkIndicator?.style ?? "icon") === "icon",
+            },
+        },
         hidden: (props: any) => !props.showOverlay,
-        section: "Overlay",
-    },
-    linkStyle: {
-        type: ControlType.Enum,
-        title: "Link Style",
-        options: ["icon", "label", "label-icon"],
-        optionTitles: ["Icon", "Label", "Label + Icon"],
-        defaultValue: "icon",
-        hidden: (props: any) => !props.showOverlay || !props.showLinkIndicator,
-        section: "Overlay",
-    },
-    linkLabel: {
-        type: ControlType.String,
-        title: "Link Label",
-        defaultValue: "View",
-        hidden: (props: any) =>
-            !props.showOverlay ||
-            !props.showLinkIndicator ||
-            props.linkStyle === "icon",
         section: "Overlay",
     },
 
