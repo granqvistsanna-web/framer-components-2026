@@ -8,7 +8,7 @@
  * @framerIntrinsicHeight 600
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { motion, useAnimation } from "framer-motion"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
@@ -29,6 +29,9 @@ interface Props {
     exitAnimation: "fade" | "slideUp" | "slideDown" | "scale" | "none"
     exitDuration: number
     exitDelay: number
+    // Noise
+    noise: boolean
+    noiseOpacity: number
     // Layout
     progressWidth: string
     numberSize: string
@@ -51,6 +54,30 @@ const positionMap = {
     "top-left": { top: "0.1em", left: "0.23em", bottom: "auto", right: "auto" },
 }
 
+function NoiseOverlay({ opacity, filterId }: { opacity: number; filterId: string }) {
+    return (
+        <div
+            aria-hidden
+            style={{
+                position: "absolute",
+                inset: 0,
+                opacity,
+                pointerEvents: "none",
+                zIndex: 1,
+            }}
+        >
+            <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                <filter id={filterId}>
+                    <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch" />
+                </filter>
+                <rect width="100%" height="100%" filter={`url(#${filterId})`} />
+            </svg>
+        </div>
+    )
+}
+
+const numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+
 const exitAnimations = {
     fade: { opacity: 0 },
     slideUp: { y: "-100%" },
@@ -60,9 +87,9 @@ const exitAnimations = {
 }
 
 function LoadingScreen({
-    backgroundColor = "#E2E1DF",
-    progressColor = "#ff4c24",
-    textColor = "#000000",
+    backgroundColor = "#F0EDE6",
+    progressColor = "#00E045",
+    textColor = "#1A1A1A",
     font = { fontSize: 48, fontWeight: 700 },
     duration = 1.2,
     easing = "expo",
@@ -72,12 +99,15 @@ function LoadingScreen({
     exitAnimation = "slideUp",
     exitDuration = 0.8,
     exitDelay = 0.3,
+    noise = false,
+    noiseOpacity = 0.15,
     progressWidth = "1em",
     numberSize = "calc(10vw + 10vh)",
     numberPosition = "bottom-left",
     onComplete,
 }: Props) {
     const isStatic = useIsStaticRenderer()
+    const noiseId = `noise-${useId()}`
 
     const [key, setKey] = useState(0)
     const [isVisible, setIsVisible] = useState(true)
@@ -92,6 +122,26 @@ function LoadingScreen({
         mq.addEventListener("change", handler)
         return () => mq.removeEventListener("change", handler)
     }, [])
+
+    // Lock page scroll while the loader is visible.
+    // Use scrollbar-gutter on <html> so the scrollbar space is always
+    // reserved, preventing a layout shift when overflow toggles.
+    useEffect(() => {
+        if (isStatic || !isVisible || typeof document === "undefined") return
+        const html = document.documentElement
+        const prevOverflow = html.style.overflow
+        const prevGutter = html.style.scrollbarGutter
+        html.style.scrollbarGutter = "stable"
+        html.style.overflow = "hidden"
+        return () => {
+            html.style.overflow = prevOverflow
+            html.style.scrollbarGutter = prevGutter
+        }
+    }, [isStatic, isVisible])
+
+    // Extract fontSize and lineHeight from font control — the roller
+    // relies on inherited fontSize (numberSize) and lineHeight: 1 for its math.
+    const { fontSize: _fs, lineHeight: _lh, ...fontStyle } = font as Record<string, unknown>
 
     const containerControls = useAnimation()
     const progressControls = useAnimation()
@@ -121,9 +171,9 @@ function LoadingScreen({
             await Promise.all([
                 progressControls.set({ scaleY: 0 }),
                 percentageControls.set({ y: "100%" }),
-                firstGroupControls.set({ y: "100%" }),
-                secondGroupControls.set({ y: "10%" }),
-                thirdGroupControls.set({ y: "10%" }),
+                firstGroupControls.set({ y: "110%" }),
+                secondGroupControls.set({ y: "12%" }),
+                thirdGroupControls.set({ y: "12%" }),
             ])
             if (cancelled) return
 
@@ -203,7 +253,8 @@ function LoadingScreen({
                     justifyContent: "center",
                 }}
             >
-                <span style={{ ...font, color: textColor, fontSize: numberSize }}>
+                {noise && <NoiseOverlay opacity={noiseOpacity} filterId={noiseId} />}
+                <span style={{ ...fontStyle, color: textColor, fontSize: numberSize, lineHeight: 1, position: "relative", zIndex: 2 }}>
                     100%
                 </span>
             </div>
@@ -211,8 +262,6 @@ function LoadingScreen({
     }
 
     if (!isVisible) return null
-
-    const numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
 
     return (
         <motion.div
@@ -228,9 +277,11 @@ function LoadingScreen({
                 overflow: "hidden",
                 backgroundColor,
                 zIndex: 9999,
-                pointerEvents: isExiting ? "none" : "auto",
+                pointerEvents: "auto",
             }}
         >
+            {noise && <NoiseOverlay opacity={noiseOpacity} filterId={noiseId} />}
+
             {/* Progress Bar */}
             <div
                 style={{
@@ -240,9 +291,11 @@ function LoadingScreen({
                     width: progressWidth,
                     height: "100%",
                     fontSize: numberSize,
+                    zIndex: 2,
                 }}
             >
                 <motion.div
+                    initial={{ scaleY: 0 }}
                     animate={progressControls}
                     style={{
                         position: "absolute",
@@ -265,20 +318,21 @@ function LoadingScreen({
                     flexFlow: "row",
                     alignItems: "flex-start",
                     fontSize: numberSize,
+                    zIndex: 2,
                 }}
             >
                 {/* First digit (1 for 100) */}
                 <div style={styles.numberGroup}>
-                    <motion.div animate={firstGroupControls} style={styles.numberWrap}>
-                        <span style={{ ...styles.number, ...font, color: textColor }}>1</span>
+                    <motion.div initial={{ y: "110%" }} animate={firstGroupControls} style={styles.numberWrap}>
+                        <span style={{ ...styles.number, ...fontStyle, color: textColor }}>1</span>
                     </motion.div>
                 </div>
 
                 {/* Second digit */}
                 <div style={styles.numberGroup}>
-                    <motion.div animate={secondGroupControls} style={styles.numberWrap}>
+                    <motion.div initial={{ y: "12%" }} animate={secondGroupControls} style={styles.numberWrap}>
                         {numbers.map((num, i) => (
-                            <span key={i} style={{ ...styles.number, ...font, color: textColor }}>
+                            <span key={i} style={{ ...styles.number, ...fontStyle, color: textColor }}>
                                 {num}
                             </span>
                         ))}
@@ -287,9 +341,9 @@ function LoadingScreen({
 
                 {/* Third digit */}
                 <div style={styles.numberGroup}>
-                    <motion.div animate={thirdGroupControls} style={styles.numberWrap}>
+                    <motion.div initial={{ y: "12%" }} animate={thirdGroupControls} style={styles.numberWrap}>
                         {numbers.map((num, i) => (
-                            <span key={i} style={{ ...styles.number, ...font, color: textColor }}>
+                            <span key={i} style={{ ...styles.number, ...fontStyle, color: textColor }}>
                                 {num}
                             </span>
                         ))}
@@ -299,8 +353,9 @@ function LoadingScreen({
                 {/* Percentage sign */}
                 <div style={styles.percentageWrap}>
                     <motion.span
+                        initial={{ y: "100%" }}
                         animate={percentageControls}
-                        style={{ ...styles.percentage, ...font, color: textColor }}
+                        style={{ ...styles.percentage, ...fontStyle, color: textColor }}
                     >
                         %
                     </motion.span>
@@ -352,17 +407,17 @@ addPropertyControls(LoadingScreen, {
     backgroundColor: {
         type: ControlType.Color,
         title: "Background",
-        defaultValue: "#E2E1DF",
+        defaultValue: "#F0EDE6",
     },
     progressColor: {
         type: ControlType.Color,
         title: "Progress Bar",
-        defaultValue: "#ff4c24",
+        defaultValue: "#00E045",
     },
     textColor: {
         type: ControlType.Color,
         title: "Text",
-        defaultValue: "#000000",
+        defaultValue: "#1A1A1A",
     },
 
     // ─────────────────────────────────────
@@ -453,6 +508,26 @@ addPropertyControls(LoadingScreen, {
         unit: "s",
         displayStepper: true,
         hidden: (props) => props.loop || props.exitAnimation === "none",
+    },
+
+    // ─────────────────────────────────────
+    // NOISE
+    // ─────────────────────────────────────
+    noise: {
+        type: ControlType.Boolean,
+        title: "Noise",
+        defaultValue: false,
+        enabledTitle: "On",
+        disabledTitle: "Off",
+    },
+    noiseOpacity: {
+        type: ControlType.Number,
+        title: "Noise Opacity",
+        defaultValue: 0.15,
+        min: 0.01,
+        max: 0.5,
+        step: 0.01,
+        hidden: (props) => !props.noise,
     },
 
     // ─────────────────────────────────────
