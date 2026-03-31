@@ -29,6 +29,7 @@ interface GlassSettings {
 
 type Shape = "torus" | "sphere" | "torusKnot" | "icosahedron" | "octahedron" | "cylinder"
 type TextLayout = "center" | "tiled" | "tiledDiagonal"
+type Interaction = "none" | "tilt" | "drag"
 
 interface Props {
     shape?: Shape
@@ -38,6 +39,7 @@ interface Props {
     backgroundColor?: string
     textLayout?: TextLayout
     glass?: GlassSettings
+    interaction?: Interaction
     rotationSpeed?: number
     torusScale?: number
     environmentIntensity?: number
@@ -155,7 +157,7 @@ void main() {
     // Stronger at the center (NdotV ≈ 1), fades toward edges.
     float lensScale = 1.0 - (uIOR - 1.0) * 0.15 * NdotV * uThickness;
     vec2 lensedUV = vScreenUV + refractionOffset;
-    vec2 uvCenter = lensedUV;
+    vec2 uvCenter = vScreenUV;
     lensedUV = uvCenter + (lensedUV - uvCenter) * lensScale;
 
     // Chromatic aberration — stronger at edges (curvature-modulated)
@@ -250,7 +252,7 @@ function createTextTexture(
     ctx.fillRect(0, 0, width, height)
 
     // Font — Framer's ControlType.Font passes CSS-style values (e.g. "64px")
-    const rawSize = font.fontSize || 64
+    const rawSize = font.fontSize || 128
     const fontSize = typeof rawSize === "string" ? parseFloat(rawSize) || 64 : rawSize
     const fontWeight = font.fontWeight || 700
     const fontFamily = font.fontFamily || "Inter, system-ui, sans-serif"
@@ -434,6 +436,7 @@ function GlassTorus(props: Props) {
         backgroundColor = "#000000",
         textLayout = "center",
         glass = {},
+        interaction = "tilt" as Interaction,
         rotationSpeed = 1.0,
         torusScale = 1.0,
         environmentIntensity = 1.0,
@@ -480,6 +483,10 @@ function GlassTorus(props: Props) {
     torusScaleRef.current = torusScale
     const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const mouseRef = useRef({ x: 0, y: 0 })
+    const interactionRef = useRef(interaction)
+    interactionRef.current = interaction
+    const dragRef = useRef({ active: false, rotX: 0, rotY: 0, startX: 0, startY: 0, baseRotX: 0, baseRotY: 0 })
+    const fontKey = JSON.stringify(font)
 
     // Reduced motion
     useEffect(() => {
@@ -578,9 +585,16 @@ function GlassTorus(props: Props) {
             },
         })
         mainBgMaterialRef.current = mainBgMaterial
-        const mainBgGeometry = new THREE.PlaneGeometry(10, 10)
+        // Size the background plane to exactly fill the frustum at z=-2,
+        // matching the viewport aspect ratio so the text isn't squished.
+        const bgZ = -2
+        const bgDist = camera.position.z - bgZ // distance from camera to plane
+        const bgVFov = (camera.fov * Math.PI) / 180
+        const bgH = 2 * Math.tan(bgVFov / 2) * bgDist
+        const bgW = bgH * (width / height)
+        const mainBgGeometry = new THREE.PlaneGeometry(bgW, bgH)
         const mainBgMesh = new THREE.Mesh(mainBgGeometry, mainBgMaterial)
-        mainBgMesh.position.z = -2
+        mainBgMesh.position.z = bgZ
         scene.add(mainBgMesh)
 
         // Shape geometry
@@ -623,6 +637,16 @@ function GlassTorus(props: Props) {
         const scaleFactor = Math.min(viewWidth, viewHeight) / 3.75
         torus.scale.setScalar(scaleFactor * torusScale)
 
+        // Create initial text texture so the background isn't blank
+        {
+            const { text: t, font: f, textColor: tc, backgroundColor: bg, textLayout: tl } = textPropsRef.current
+            if (textTextureRef.current) textTextureRef.current.dispose()
+            const tex = createTextTexture(t, f, tc, bg, width, height, tl)
+            textTextureRef.current = tex
+            bgMaterial.uniforms.uTextTexture.value = tex
+            mainBgMaterial.uniforms.uTextTexture.value = tex
+        }
+
         startTimeRef.current = performance.now()
 
         // Render a single frame (used after resize or when motion is reduced)
@@ -635,17 +659,43 @@ function GlassTorus(props: Props) {
             renderer.render(scene, camera)
         }
 
-        // Mouse tilt — track normalized pointer position over the container
+        // Interaction: tilt (hover follow) or drag (click-drag to rotate)
         const onPointerMove = (e: PointerEvent) => {
-            const rect = container.getBoundingClientRect()
-            mouseRef.current.x = ((e.clientX - rect.left) / rect.width - 0.5) * 2
-            mouseRef.current.y = ((e.clientY - rect.top) / rect.height - 0.5) * 2
+            const mode = interactionRef.current
+            if (mode === "tilt") {
+                const rect = container.getBoundingClientRect()
+                mouseRef.current.x = ((e.clientX - rect.left) / rect.width - 0.5) * 2
+                mouseRef.current.y = ((e.clientY - rect.top) / rect.height - 0.5) * 2
+            } else if (mode === "drag" && dragRef.current.active) {
+                const dx = (e.clientX - dragRef.current.startX) * 0.01
+                const dy = (e.clientY - dragRef.current.startY) * 0.01
+                dragRef.current.rotY = dragRef.current.baseRotY + dx
+                dragRef.current.rotX = dragRef.current.baseRotX + dy
+            }
+        }
+        const onPointerDown = (e: PointerEvent) => {
+            if (interactionRef.current !== "drag") return
+            dragRef.current.active = true
+            dragRef.current.startX = e.clientX
+            dragRef.current.startY = e.clientY
+            dragRef.current.baseRotX = dragRef.current.rotX
+            dragRef.current.baseRotY = dragRef.current.rotY
+            container.setPointerCapture(e.pointerId)
+        }
+        const onPointerUp = (e: PointerEvent) => {
+            if (interactionRef.current !== "drag") return
+            dragRef.current.active = false
+            container.releasePointerCapture(e.pointerId)
         }
         const onPointerLeave = () => {
-            mouseRef.current.x = 0
-            mouseRef.current.y = 0
+            if (interactionRef.current === "tilt") {
+                mouseRef.current.x = 0
+                mouseRef.current.y = 0
+            }
         }
         container.addEventListener("pointermove", onPointerMove)
+        container.addEventListener("pointerdown", onPointerDown)
+        container.addEventListener("pointerup", onPointerUp)
         container.addEventListener("pointerleave", onPointerLeave)
 
         // Smoothed mouse values for the animation loop
@@ -658,14 +708,23 @@ function GlassTorus(props: Props) {
 
             const elapsed =
                 (performance.now() - startTimeRef.current) * 0.001
+            const mode = interactionRef.current
 
-            // Smooth mouse follow (lerp toward target)
-            smoothX += (mouseRef.current.x - smoothX) * 0.08
-            smoothY += (mouseRef.current.y - smoothY) * 0.08
-
-            // Base rotation + mouse tilt (mouse adds up to ~0.4 rad)
-            torus.rotation.x = elapsed * 0.5 * rotationSpeedRef.current + smoothY * 0.4
-            torus.rotation.y = elapsed * 0.3 * rotationSpeedRef.current + smoothX * 0.4
+            if (mode === "tilt") {
+                // Smooth mouse follow (lerp toward target)
+                smoothX += (mouseRef.current.x - smoothX) * 0.08
+                smoothY += (mouseRef.current.y - smoothY) * 0.08
+                torus.rotation.x = elapsed * 0.5 * rotationSpeedRef.current + smoothY * 0.4
+                torus.rotation.y = elapsed * 0.3 * rotationSpeedRef.current + smoothX * 0.4
+            } else if (mode === "drag") {
+                // Auto-rotation + drag offset
+                torus.rotation.x = elapsed * 0.5 * rotationSpeedRef.current + dragRef.current.rotX
+                torus.rotation.y = elapsed * 0.3 * rotationSpeedRef.current + dragRef.current.rotY
+            } else {
+                // No interaction — auto-rotation only
+                torus.rotation.x = elapsed * 0.5 * rotationSpeedRef.current
+                torus.rotation.y = elapsed * 0.3 * rotationSpeedRef.current
+            }
 
             glassMaterial.uniforms.uTime.value = elapsed
 
@@ -691,8 +750,14 @@ function GlassTorus(props: Props) {
             camera.updateProjectionMatrix()
             fbo.setSize(w * dpr, h * dpr)
 
-            // Rescale torus (read from ref to avoid stale closure)
+            // Resize background plane to match new aspect ratio
             const vFov2 = (camera.fov * Math.PI) / 180
+            const rBgH = 2 * Math.tan(vFov2 / 2) * (camera.position.z - mainBgMesh.position.z)
+            const rBgW = rBgH * (w / h)
+            mainBgMesh.geometry.dispose()
+            mainBgMesh.geometry = new THREE.PlaneGeometry(rBgW, rBgH)
+
+            // Rescale torus (read from ref to avoid stale closure)
             const vh = 2 * Math.tan(vFov2 / 2) * camera.position.z
             const vw = vh * (w / h)
             const sf = Math.min(vw, vh) / 3.75
@@ -714,6 +779,8 @@ function GlassTorus(props: Props) {
 
         return () => {
             container.removeEventListener("pointermove", onPointerMove)
+            container.removeEventListener("pointerdown", onPointerDown)
+            container.removeEventListener("pointerup", onPointerUp)
             container.removeEventListener("pointerleave", onPointerLeave)
             ro.disconnect()
             cancelAnimationFrame(rafRef.current)
@@ -779,8 +846,8 @@ function GlassTorus(props: Props) {
             rendererRef.current.setRenderTarget(null)
             rendererRef.current.render(sceneRef.current, cameraRef.current)
         }
-        return () => {}
-    }, [text, font, textColor, backgroundColor, textLayout])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [text, fontKey, textColor, backgroundColor, textLayout])
 
     // Update glass uniforms
     useEffect(() => {
@@ -804,7 +871,6 @@ function GlassTorus(props: Props) {
             rendererRef.current.setRenderTarget(null)
             rendererRef.current.render(sceneRef.current, cameraRef.current)
         }
-        return () => {}
     }, [
         thickness,
         roughness,
@@ -837,7 +903,6 @@ function GlassTorus(props: Props) {
             rendererRef.current.setRenderTarget(null)
             rendererRef.current.render(sceneRef.current, cameraRef.current)
         }
-        return () => {}
     }, [torusScale])
 
     if (isStaticRenderer) {
@@ -866,6 +931,7 @@ function GlassTorus(props: Props) {
                 minWidth: 200,
                 minHeight: 200,
                 background: backgroundColor,
+                cursor: interaction === "drag" ? "grab" : "default",
             }}
         />
     )
@@ -901,10 +967,10 @@ addPropertyControls(GlassTorus, {
         controls: "extended",
         defaultFontType: "sans-serif",
         defaultValue: {
-            fontSize: 64,
+            fontSize: 128,
             fontWeight: 700,
             lineHeight: 1.1,
-            letterSpacing: -1.5,
+            letterSpacing: 0,
         },
     },
     textColor: {
@@ -964,6 +1030,13 @@ addPropertyControls(GlassTorus, {
                 defaultValue: 2.0,
             },
         },
+    },
+    interaction: {
+        type: ControlType.Enum,
+        title: "Interaction",
+        options: ["none", "tilt", "drag"],
+        optionTitles: ["None", "Tilt", "Drag"],
+        defaultValue: "tilt",
     },
     rotationSpeed: {
         type: ControlType.Number,

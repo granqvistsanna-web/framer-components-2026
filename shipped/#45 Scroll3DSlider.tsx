@@ -10,7 +10,7 @@
  * @framerIntrinsicWidth 1200
  * @framerIntrinsicHeight 800
  */
-import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
+import { addPropertyControls, ControlType, RenderTarget, useIsStaticRenderer } from "framer"
 import * as React from "react"
 import { startTransition, useEffect, useRef, useState } from "react"
 import * as THREE from "three"
@@ -19,15 +19,20 @@ import * as THREE from "three"
 // Config defaults
 // ---------------------------------------------------------------------------
 
-const PLACEHOLDER_IMAGE =
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='600'%3E%3Crect fill='%23262626' width='800' height='600'/%3E%3Cpath d='M360 260h80v80h-80z' fill='%23444'/%3E%3C/svg%3E"
+const PLACEHOLDERS = [
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdodD0iNjAwIiB2aWV3Qm94PSIwIDAgODAwIDYwMCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMWEwNTMzIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMzUlIiBzdG9wLWNvbG9yPSIjNkIzRkEwIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iNjUlIiBzdG9wLWNvbG9yPSIjRTg0NzVGIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI0ZGQzg1NyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9IjgwMCIgaGVpZ2h0PSI2MDAiIGZpbGw9InVybCgjZykiLz4KICA8Y2lyY2xlIGN4PSIyNTAiIGN5PSIyMDAiIHI9IjEwMCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wNyIvPgogIDxjaXJjbGUgY3g9IjU1MCIgY3k9IjQwMCIgcj0iMTQwIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjA1Ii8+CiAgPGNpcmNsZSBjeD0iNjUwIiBjeT0iMTUwIiByPSI2MCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wOCIvPgo8L3N2Zz4=",
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdodD0iNjAwIiB2aWV3Qm94PSIwIDAgODAwIDYwMCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMGEyYTJhIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMzUlIiBzdG9wLWNvbG9yPSIjMEQ3Mzc3Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iNjUlIiBzdG9wLWNvbG9yPSIjMTRGRkVDIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzBENzM3NyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9IjgwMCIgaGVpZ2h0PSI2MDAiIGZpbGw9InVybCgjZykiLz4KICA8Y2lyY2xlIGN4PSIyNTAiIGN5PSIyMDAiIHI9IjEwMCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wNyIvPgogIDxjaXJjbGUgY3g9IjU1MCIgY3k9IjQwMCIgcj0iMTQwIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjA1Ii8+CiAgPGNpcmNsZSBjeD0iNjUwIiBjeT0iMTUwIiByPSI2MCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wOCIvPgo8L3N2Zz4=",
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdodD0iNjAwIiB2aWV3Qm94PSIwIDAgODAwIDYwMCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMGEwZTI3Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMzUlIiBzdG9wLWNvbG9yPSIjMWEzYThhIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iNjUlIiBzdG9wLWNvbG9yPSIjNGU4ZWY3Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzg5Q0ZGMCIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9IjgwMCIgaGVpZ2h0PSI2MDAiIGZpbGw9InVybCgjZykiLz4KICA8Y2lyY2xlIGN4PSIyNTAiIGN5PSIyMDAiIHI9IjEwMCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wNyIvPgogIDxjaXJjbGUgY3g9IjU1MCIgY3k9IjQwMCIgcj0iMTQwIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjA1Ii8+CiAgPGNpcmNsZSBjeD0iNjUwIiBjeT0iMTUwIiByPSI2MCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wOCIvPgo8L3N2Zz4=",
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdodD0iNjAwIiB2aWV3Qm94PSIwIDAgODAwIDYwMCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMWEwYTAwIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMzUlIiBzdG9wLWNvbG9yPSIjOEI0NTEzIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iNjUlIiBzdG9wLWNvbG9yPSIjRTA3MDIwIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI0ZGQjM0NyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9IjgwMCIgaGVpZ2h0PSI2MDAiIGZpbGw9InVybCgjZykiLz4KICA8Y2lyY2xlIGN4PSIyNTAiIGN5PSIyMDAiIHI9IjEwMCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wNyIvPgogIDxjaXJjbGUgY3g9IjU1MCIgY3k9IjQwMCIgcj0iMTQwIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjA1Ii8+CiAgPGNpcmNsZSBjeD0iNjUwIiBjeT0iMTUwIiByPSI2MCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wOCIvPgo8L3N2Zz4=",
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4MDAiIGhlaWdodD0iNjAwIiB2aWV3Qm94PSIwIDAgODAwIDYwMCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMWEwNTE1Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMzUlIiBzdG9wLWNvbG9yPSIjN0IyRDVGIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iNjUlIiBzdG9wLWNvbG9yPSIjRTg0MzkzIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI0ZENzlBOCIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9IjgwMCIgaGVpZ2h0PSI2MDAiIGZpbGw9InVybCgjZykiLz4KICA8Y2lyY2xlIGN4PSIyNTAiIGN5PSIyMDAiIHI9IjEwMCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wNyIvPgogIDxjaXJjbGUgY3g9IjU1MCIgY3k9IjQwMCIgcj0iMTQwIiBmaWxsPSIjZmZmZmZmIiBvcGFjaXR5PSIwLjA1Ii8+CiAgPGNpcmNsZSBjeD0iNjUwIiBjeT0iMTUwIiByPSI2MCIgZmlsbD0iI2ZmZmZmZiIgb3BhY2l0eT0iMC4wOCIvPgo8L3N2Zz4=",
+]
 
 const DEFAULT_SLIDES = [
-    { image: PLACEHOLDER_IMAGE, title: "Slide 1" },
-    { image: PLACEHOLDER_IMAGE, title: "Slide 2" },
-    { image: PLACEHOLDER_IMAGE, title: "Slide 3" },
-    { image: PLACEHOLDER_IMAGE, title: "Slide 4" },
-    { image: PLACEHOLDER_IMAGE, title: "Slide 5" },
+    { image: { src: PLACEHOLDERS[0], srcSet: "", alt: "Slide 1" }, title: "Architecture" },
+    { image: { src: PLACEHOLDERS[1], srcSet: "", alt: "Slide 2" }, title: "Landscape" },
+    { image: { src: PLACEHOLDERS[2], srcSet: "", alt: "Slide 3" }, title: "Portrait" },
+    { image: { src: PLACEHOLDERS[3], srcSet: "", alt: "Slide 4" }, title: "Abstract" },
+    { image: { src: PLACEHOLDERS[4], srcSet: "", alt: "Slide 5" }, title: "Editorial" },
 ]
 
 // ---------------------------------------------------------------------------
@@ -36,8 +41,14 @@ const DEFAULT_SLIDES = [
 
 type EffectPreset = "distortion" | "carousel" | "coverflow" | "cube" | "cards"
 
+interface ResponsiveImageData {
+    src?: string
+    srcSet?: string
+    alt?: string
+}
+
 interface SlideData {
-    image?: string
+    image?: ResponsiveImageData
     title?: string
     link?: string
 }
@@ -126,6 +137,48 @@ const wrap = (value: number, range: number) =>
     ((value % range) + range) % range
 const zeroPad = (n: number) => String(n).padStart(2, "0")
 
+const parseOverlayPosition = (
+    position: string
+): {
+    v: string
+    h: string
+    isSplit: boolean
+    isCenter: boolean
+    justify: string
+    direction: "column" | "row"
+    top: string | undefined
+    bottom: string | undefined
+    transform: string | undefined
+} => {
+    const [v, h] = position.includes("-")
+        ? (position.split("-") as [string, string])
+        : (["center", position] as [string, string])
+    const isSplit = h === "split"
+    const isCenter = h === "center"
+    return {
+        v,
+        h,
+        isSplit,
+        isCenter,
+        justify: isSplit
+            ? "space-between"
+            : isCenter
+              ? "center"
+              : h === "right"
+                ? "flex-end"
+                : "flex-start",
+        direction: isCenter ? "column" : "row",
+        top:
+            v === "top"
+                ? "2rem"
+                : v === "bottom"
+                  ? undefined
+                  : "50%",
+        bottom: v === "bottom" ? "2rem" : undefined,
+        transform: v === "center" ? "translateY(-50%)" : undefined,
+    }
+}
+
 const parseColor = (color: string): string => {
     const rgba = color.match(
         /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/
@@ -151,6 +204,7 @@ function StaticFallback({
     counterSize,
     overlayPosition,
     showOverlay,
+    slideAspectRatio,
     style,
 }: {
     slides: SlideData[]
@@ -161,38 +215,50 @@ function StaticFallback({
     counterSize: number
     overlayPosition: string
     showOverlay: boolean
+    slideAspectRatio: number
     style?: React.CSSProperties
 }) {
-    const validSlides = slides.filter((s) => s.image)
+    const isCanvas = RenderTarget.current() === RenderTarget.canvas
+    const validSlides = slides.filter((s) => s.image?.src)
+
+    if (validSlides.length === 0) {
+        return (
+            <div
+                style={{
+                    ...style,
+                    width: "100%",
+                    height: "100%",
+                    minWidth: 200,
+                    minHeight: 200,
+                    background: backgroundColor,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                }}
+            >
+                {isCanvas && (
+                    <div
+                        style={{
+                            border: `1px dashed ${overlayColor}40`,
+                            borderRadius: 12,
+                            padding: "2rem",
+                            color: overlayColor,
+                            opacity: 0.5,
+                            fontSize: 14,
+                        }}
+                    >
+                        Add images to slides
+                    </div>
+                )}
+            </div>
+        )
+    }
+
     const firstWithImage = validSlides[0]
     const firstTitle = firstWithImage?.title || ""
     const slideCount = validSlides.length
 
-    const [overlayV, overlayH] = overlayPosition.includes("-")
-        ? (overlayPosition.split("-") as [string, string])
-        : (["center", overlayPosition] as [string, string])
-
-    const isSplit = overlayH === "split"
-    const isCenter = overlayH === "center"
-    const overlayJustify = isSplit
-        ? "space-between"
-        : isCenter
-          ? "center"
-          : overlayH === "right"
-            ? "flex-end"
-            : "flex-start"
-    const overlayDirection = isCenter
-        ? ("column" as const)
-        : ("row" as const)
-    const overlayTop =
-        overlayV === "top"
-            ? "2rem"
-            : overlayV === "bottom"
-              ? undefined
-              : "50%"
-    const overlayBottom = overlayV === "bottom" ? "2rem" : undefined
-    const overlayTransform =
-        overlayV === "center" ? "translateY(-50%)" : undefined
+    const pos = parseOverlayPosition(overlayPosition)
 
     return (
         <div
@@ -210,34 +276,44 @@ function StaticFallback({
                 justifyContent: "center",
             }}
         >
-            {firstWithImage?.image && (
-                <img
-                    src={firstWithImage.image}
-                    alt={firstTitle}
+            {firstWithImage?.image?.src && (
+                <div
                     style={{
                         maxWidth: "60%",
                         maxHeight: "70%",
-                        objectFit: "cover",
+                        aspectRatio: `${slideAspectRatio}`,
+                        overflow: "hidden",
                         borderRadius: 2,
                     }}
-                />
+                >
+                    <img
+                        src={firstWithImage.image.src}
+                        srcSet={firstWithImage.image.srcSet}
+                        alt={firstWithImage.image.alt || firstTitle}
+                        style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                        }}
+                    />
+                </div>
             )}
             {showOverlay && slideCount > 0 && (
                 <div
                     style={{
                         position: "absolute",
-                        top: overlayTop,
-                        bottom: overlayBottom,
+                        top: pos.top,
+                        bottom: pos.bottom,
                         left: 0,
-                        transform: overlayTransform,
+                        transform: pos.transform,
                         width: "100%",
                         padding: "0 2rem",
                         display: "flex",
-                        flexDirection: overlayDirection,
-                        justifyContent: overlayJustify,
+                        flexDirection: pos.direction,
+                        justifyContent: pos.justify,
                         alignItems: "center",
                         pointerEvents: "none",
-                        gap: isCenter ? 4 : 16,
+                        gap: pos.isCenter ? 4 : 16,
                     }}
                 >
                     <p
@@ -298,6 +374,9 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         style,
     } = props
 
+    // Convert pixel border radius to GL units (0–30px → 0–0.15)
+    const glBorderRadius = borderRadius / 200
+
     // Resolve nested defaults — slideSize
     const slideAspectRatio = slideSize?.aspectRatio ?? 1.5
     const slideMinHeight = slideSize?.minHeight ?? 1
@@ -348,7 +427,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
     const slidesRef = useRef(slides)
     const slidesKey = JSON.stringify(
         slides.map(
-            (s) => `${s.image || ""}|${s.title || ""}|${s.link || ""}`
+            (s) => `${s.image?.src || ""}|${s.title || ""}|${s.link || ""}`
         )
     )
     const slidesKeyRef = useRef(slidesKey)
@@ -384,7 +463,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         effectPerspective,
         effectRotation,
         effectDepth,
-        borderRadius,
+        glBorderRadius,
         activeScale,
         scrollSmoothing,
         momentumFriction,
@@ -412,7 +491,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         effectPerspective,
         effectRotation,
         effectDepth,
-        borderRadius,
+        glBorderRadius,
         activeScale,
         scrollSmoothing,
         momentumFriction,
@@ -436,7 +515,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         const container = canvasContainerRef.current
         if (!container) return () => {}
 
-        const validSlides = slidesRef.current.filter((s) => s.image)
+        const validSlides = slidesRef.current.filter((s) => s.image?.src)
         if (validSlides.length === 0) return () => {}
 
         const totalSlides = validSlides.length
@@ -592,7 +671,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
                     },
                     uImageAspect: { value: new THREE.Vector2(1, 1) },
                     uOpacity: { value: 0.0 },
-                    uBorderRadius: { value: borderRadius },
+                    uBorderRadius: { value: glBorderRadius },
                 },
                 transparent: true,
                 side: THREE.DoubleSide,
@@ -607,7 +686,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
                 index: i,
             }
 
-            const imgUrl = validSlides[i].image
+            const imgUrl = validSlides[i].image?.src
             if (imgUrl) {
                 textureLoader.load(imgUrl, (texture) => {
                     if (disposed) {
@@ -1209,7 +1288,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
                 }
 
                 mat.uniforms.uBorderRadius.value =
-                    cfg.borderRadius
+                    cfg.glBorderRadius
 
                 // Apply selected effect
                 const maxSlideExtent = isHoriz
@@ -1312,7 +1391,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
     }, [isStatic, slidesKey, direction, geometryKey])
 
     // Determine valid slides for overlay
-    const validSlides = slides.filter((s) => s.image)
+    const validSlides = slides.filter((s) => s.image?.src)
     const slideCount = validSlides.length
     const clampedActive = Math.min(activeSlide, slideCount - 1)
     const currentTitle = validSlides[clampedActive]?.title || ""
@@ -1329,12 +1408,14 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
                 counterSize={counterSize}
                 overlayPosition={overlayPosition}
                 showOverlay={showOverlay}
+                slideAspectRatio={slideAspectRatio}
                 style={style}
             />
         )
     }
 
     if (validSlides.length === 0) {
+        const isCanvas = RenderTarget.current() === RenderTarget.canvas
         return (
             <div
                 style={{
@@ -1349,18 +1430,20 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
                     justifyContent: "center",
                 }}
             >
-                <div
-                    style={{
-                        border: "1px dashed rgba(255,255,255,0.25)",
-                        borderRadius: 12,
-                        padding: "2rem",
-                        color: overlayColor,
-                        opacity: 0.5,
-                        fontSize: 14,
-                    }}
-                >
-                    Add images to slides
-                </div>
+                {isCanvas && (
+                    <div
+                        style={{
+                            border: `1px dashed ${overlayColor}40`,
+                            borderRadius: 12,
+                            padding: "2rem",
+                            color: overlayColor,
+                            opacity: 0.5,
+                            fontSize: 14,
+                        }}
+                    >
+                        Add images to slides
+                    </div>
+                )}
             </div>
         )
     }
@@ -1391,32 +1474,7 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
         }
     }
 
-    const [overlayV, overlayH] = overlayPosition.includes("-")
-        ? (overlayPosition.split("-") as [string, string])
-        : (["center", overlayPosition] as [string, string])
-
-    const isSplit = overlayH === "split"
-    const isCenter = overlayH === "center"
-    const overlayJustify = isSplit
-        ? "space-between"
-        : isCenter
-          ? "center"
-          : overlayH === "right"
-            ? "flex-end"
-            : "flex-start"
-    const overlayDirection = isCenter
-        ? ("column" as const)
-        : ("row" as const)
-    const overlayAlign = "center"
-    const overlayTop =
-        overlayV === "top"
-            ? "2rem"
-            : overlayV === "bottom"
-              ? undefined
-              : "50%"
-    const overlayBottom = overlayV === "bottom" ? "2rem" : undefined
-    const overlayTransform =
-        overlayV === "center" ? "translateY(-50%)" : undefined
+    const pos = parseOverlayPosition(overlayPosition)
 
     return (
         <div
@@ -1468,19 +1526,19 @@ export default function Scroll3DSlider(props: Scroll3DSliderProps) {
                 <div
                     style={{
                         position: "absolute",
-                        top: overlayTop,
-                        bottom: overlayBottom,
+                        top: pos.top,
+                        bottom: pos.bottom,
                         left: 0,
-                        transform: overlayTransform,
+                        transform: pos.transform,
                         width: "100%",
                         padding: "0 2rem",
                         display: "flex",
-                        flexDirection: overlayDirection,
-                        justifyContent: overlayJustify,
-                        alignItems: overlayAlign,
+                        flexDirection: pos.direction,
+                        justifyContent: pos.justify,
+                        alignItems: "center",
                         pointerEvents: "none",
                         zIndex: 2,
-                        gap: isCenter ? 4 : 16,
+                        gap: pos.isCenter ? 4 : 16,
                     }}
                 >
                     {currentLink && showLinkIndicator ? (
@@ -1574,7 +1632,7 @@ addPropertyControls(Scroll3DSlider, {
             type: ControlType.Object,
             controls: {
                 image: {
-                    type: ControlType.Image,
+                    type: ControlType.ResponsiveImage,
                     title: "Image",
                 },
                 title: {
@@ -1612,8 +1670,9 @@ addPropertyControls(Scroll3DSlider, {
         type: ControlType.Number,
         title: "Corner Radius",
         min: 0,
-        max: 0.15,
-        step: 0.005,
+        max: 30,
+        step: 1,
+        unit: "px",
         defaultValue: 0,
         section: "Style",
     },

@@ -8,7 +8,7 @@
  * @framerIntrinsicHeight 600
  */
 
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { motion, useAnimation } from "framer-motion"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
@@ -23,6 +23,7 @@ interface Props {
     duration: number
     easing: "expo" | "ease" | "spring" | "linear"
     autoPlay: boolean
+    playFrequency: "always" | "session" | "once"
     loop: boolean
     loopDelay: number
     // Exit
@@ -94,6 +95,7 @@ function LoadingScreen({
     duration = 1.2,
     easing = "expo",
     autoPlay = true,
+    playFrequency = "always",
     loop = false,
     loopDelay = 1,
     exitAnimation = "slideUp",
@@ -108,9 +110,20 @@ function LoadingScreen({
 }: Props) {
     const isStatic = useIsStaticRenderer()
     const noiseId = `noise-${useId()}`
+    const rootRef = useRef<HTMLDivElement>(null)
+
+    // Check if the loader has already played (session/localStorage).
+    const STORAGE_KEY = "framer-loader-10-played"
+    const alreadyPlayed = (() => {
+        if (playFrequency === "always" || typeof window === "undefined") return false
+        try {
+            const store = playFrequency === "session" ? sessionStorage : localStorage
+            return store.getItem(STORAGE_KEY) === "1"
+        } catch { return false }
+    })()
 
     const [key, setKey] = useState(0)
-    const [isVisible, setIsVisible] = useState(true)
+    const [isVisible, setIsVisible] = useState(!alreadyPlayed)
     const [isExiting, setIsExiting] = useState(false)
 
     const [reducedMotion, setReducedMotion] = useState(false)
@@ -139,6 +152,16 @@ function LoadingScreen({
         }
     }, [isStatic, isVisible])
 
+    // Disable pointer events on Framer's wrapper Frame when the loader
+    // is done so clicks pass through to content underneath.
+    useEffect(() => {
+        const wrapper = rootRef.current?.parentElement
+        if (!wrapper) return
+        const shouldBlock = isVisible && !isExiting
+        wrapper.style.pointerEvents = shouldBlock ? "auto" : "none"
+        return () => { wrapper.style.pointerEvents = "" }
+    }, [isVisible, isExiting])
+
     // Extract fontSize and lineHeight from font control — the roller
     // relies on inherited fontSize (numberSize) and lineHeight: 1 for its math.
     const { fontSize: _fs, lineHeight: _lh, ...fontStyle } = font as Record<string, unknown>
@@ -151,7 +174,15 @@ function LoadingScreen({
     const thirdGroupControls = useAnimation()
 
     useEffect(() => {
-        if (!autoPlay || reducedMotion) return
+        if (!autoPlay || reducedMotion || alreadyPlayed) return
+
+        const markPlayed = () => {
+            if (playFrequency === "always") return
+            try {
+                const store = playFrequency === "session" ? sessionStorage : localStorage
+                store.setItem(STORAGE_KEY, "1")
+            } catch { /* storage full or blocked */ }
+        }
 
         let cancelled = false
         const timeoutIds: ReturnType<typeof setTimeout>[] = []
@@ -218,12 +249,15 @@ function LoadingScreen({
                     transition: { duration: exitDuration, ease },
                 })
                 if (cancelled) return
+                markPlayed()
                 setIsVisible(false)
                 if (onComplete) onComplete()
             } else if (loop) {
                 const tid = setTimeout(() => setKey((k) => k + 1), loopDelay * 1000)
                 timeoutIds.push(tid)
             } else {
+                markPlayed()
+                setIsVisible(false)
                 if (onComplete) onComplete()
             }
         }
@@ -234,12 +268,13 @@ function LoadingScreen({
             cancelled = true
             timeoutIds.forEach((id) => clearTimeout(id))
         }
-    }, [key, autoPlay, reducedMotion, duration, easing, loop, loopDelay, exitAnimation, exitDuration, exitDelay, onComplete])
+    }, [key, autoPlay, reducedMotion, alreadyPlayed, playFrequency, duration, easing, loop, loopDelay, exitAnimation, exitDuration, exitDelay, onComplete])
 
     // Static fallback for Framer canvas / static renders
     if (isStatic || reducedMotion) {
         return (
             <div
+                ref={rootRef}
                 role="status"
                 aria-label="Loading complete"
                 style={{
@@ -261,10 +296,13 @@ function LoadingScreen({
         )
     }
 
-    if (!isVisible) return null
+    if (!isVisible) {
+        return <div ref={rootRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }} />
+    }
 
     return (
         <motion.div
+            ref={rootRef}
             key={key}
             animate={containerControls}
             role="status"
@@ -277,7 +315,7 @@ function LoadingScreen({
                 overflow: "hidden",
                 backgroundColor,
                 zIndex: 9999,
-                pointerEvents: "auto",
+                pointerEvents: isExiting ? "none" : "auto",
             }}
         >
             {noise && <NoiseOverlay opacity={noiseOpacity} filterId={noiseId} />}
@@ -439,6 +477,14 @@ addPropertyControls(LoadingScreen, {
         defaultValue: true,
         enabledTitle: "Yes",
         disabledTitle: "No",
+    },
+    playFrequency: {
+        type: ControlType.Enum,
+        title: "Play",
+        defaultValue: "always",
+        options: ["always", "session", "once"],
+        optionTitles: ["Every Visit", "Once Per Session", "First Visit Only"],
+        hidden: (props) => !props.autoPlay,
     },
     duration: {
         type: ControlType.Number,

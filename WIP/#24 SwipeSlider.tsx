@@ -130,6 +130,14 @@ interface SwipeSliderProps {
         elasticity: number
         dragThreshold: number
     }
+    dots: {
+        show: boolean
+        activeColor: string
+        inactiveColor: string
+        size: number
+        gap: number
+        offset: number
+    }
     autoPlay: boolean
     autoPlayInterval: number
     showAppearEffect: boolean
@@ -185,6 +193,16 @@ function SwipeSlider(props: SwipeSliderProps) {
     const elasticity = animation?.elasticity ?? 1.2
     const dragThreshold = animation?.dragThreshold ?? 0.1
 
+    const {
+        dots,
+    } = props
+    const showDots = dots?.show ?? false
+    const dotActiveColor = dots?.activeColor ?? "#ffffff"
+    const dotInactiveColor = dots?.inactiveColor ?? "rgba(255,255,255,0.35)"
+    const dotSize = dots?.size ?? 8
+    const dotGap = dots?.gap ?? 8
+    const dotOffset = dots?.offset ?? 16
+
     const isStatic = useIsStaticRenderer()
     const reducedMotion = useReducedMotion()
     const instanceId = useId()
@@ -197,6 +215,7 @@ function SwipeSlider(props: SwipeSliderProps) {
     const liveRegionRef = useRef<HTMLDivElement>(null)
     const [ready, setReady] = useState(false)
     const [isDragging, setIsDragging] = useState(false)
+    const [displayIndex, setDisplayIndex] = useState(0)
     const hasAppearedRef = useRef(false)
     const runtimeRef = useRef<RuntimeState>({
         activeIndex: 0,
@@ -378,6 +397,7 @@ function SwipeSlider(props: SwipeSliderProps) {
 
         // Reset active index
         state.activeIndex = 0
+        setDisplayIndex(0)
         state.pendingRafs = []
 
         const updateLiveRegion = (idx: number) => {
@@ -421,6 +441,7 @@ function SwipeSlider(props: SwipeSliderProps) {
             const idx = ((targetIndex % total) + total) % total
             if (idx === state.activeIndex) return
             state.activeIndex = idx
+            setDisplayIndex(idx)
             renderCards(idx)
             updateLiveRegion(idx)
         }
@@ -531,6 +552,7 @@ function SwipeSlider(props: SwipeSliderProps) {
                         (state.activeIndex + shift + total) % total
                 }
 
+                setDisplayIndex(state.activeIndex)
                 renderCards(state.activeIndex)
                 updateLiveRegion(state.activeIndex)
 
@@ -606,6 +628,7 @@ function SwipeSlider(props: SwipeSliderProps) {
 
         // Appear animation — integrated to avoid race with card positioning
         let appearObserver: IntersectionObserver | null = null
+        let appearTimeout: ReturnType<typeof setTimeout> | null = null
         if (showAppearEffect && !hasAppearedRef.current && !reducedMotion) {
             const triggerAppear = () => {
                 if (hasAppearedRef.current) return
@@ -631,10 +654,17 @@ function SwipeSlider(props: SwipeSliderProps) {
                 })
             }
 
+            // Fallback: if the observer hasn't fired within 800ms, trigger
+            // appear anyway (handles Framer canvas and edge cases)
+            appearTimeout = window.setTimeout(() => {
+                triggerAppear()
+            }, 800)
+
             appearObserver = new IntersectionObserver(
                 (entries) => {
                     for (const entry of entries) {
                         if (entry.isIntersecting) {
+                            window.clearTimeout(appearTimeout)
                             triggerAppear()
                             appearObserver?.disconnect()
                             appearObserver = null
@@ -650,6 +680,7 @@ function SwipeSlider(props: SwipeSliderProps) {
 
         // Cleanup
         return () => {
+            if (appearTimeout !== null) window.clearTimeout(appearTimeout)
             if (appearObserver) {
                 appearObserver.disconnect()
                 appearObserver = null
@@ -745,6 +776,37 @@ function SwipeSlider(props: SwipeSliderProps) {
                         </div>
                     )
                 })}
+
+                {/* Dots (static) */}
+                {showDots && (
+                    <div
+                        style={{
+                            position: "absolute",
+                            bottom: dotOffset,
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            display: "flex",
+                            gap: dotGap,
+                            zIndex: 10,
+                        }}
+                    >
+                        {items.map((_, i) => (
+                            <div
+                                key={i}
+                                style={{
+                                    width: dotSize,
+                                    height: dotSize,
+                                    borderRadius: "50%",
+                                    background:
+                                        i === 0
+                                            ? dotActiveColor
+                                            : dotInactiveColor,
+                                    transition: "background 0.2s ease",
+                                }}
+                            />
+                        ))}
+                    </div>
+                )}
             </div>
         )
     }
@@ -915,6 +977,51 @@ function SwipeSlider(props: SwipeSliderProps) {
                     opacity: 1 !important;
                 }
             `}</style>
+
+            {/* Progress dots */}
+            {showDots && (
+                <div
+                    style={{
+                        position: "absolute",
+                        bottom: dotOffset,
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        display: "flex",
+                        gap: dotGap,
+                        zIndex: 10,
+                    }}
+                >
+                    {items.map((_, i) => (
+                        <button
+                            key={i}
+                            aria-label={`Go to card ${i + 1}`}
+                            onClick={() => {
+                                const state = runtimeRef.current
+                                if (state.navigateTo) state.navigateTo(i)
+                            }}
+                            style={{
+                                width: dotSize,
+                                height: dotSize,
+                                borderRadius: "50%",
+                                background:
+                                    i === displayIndex
+                                        ? dotActiveColor
+                                        : dotInactiveColor,
+                                border: "none",
+                                padding: 0,
+                                cursor: "pointer",
+                                transition: reducedMotion
+                                    ? "none"
+                                    : "background 0.2s ease, transform 0.15s ease",
+                                transform:
+                                    i === displayIndex
+                                        ? "scale(1.25)"
+                                        : "scale(1)",
+                            }}
+                        />
+                    ))}
+                </div>
+            )}
         </div>
     )
 }
@@ -1141,6 +1248,64 @@ addPropertyControls(SwipeSlider, {
                 step: 0.01,
                 unit: "x",
                 defaultValue: 0.1,
+            },
+        },
+    },
+
+    // ─── Dots (flyout) ────────────────────────────────────────
+    dots: {
+        type: ControlType.Object,
+        title: "Dots",
+        controls: {
+            show: {
+                type: ControlType.Boolean,
+                title: "Show",
+                defaultValue: false,
+            },
+            activeColor: {
+                type: ControlType.Color,
+                title: "Active",
+                defaultValue: "#ffffff",
+                hidden: (props: any) => !props.show,
+            },
+            inactiveColor: {
+                type: ControlType.Color,
+                title: "Inactive",
+                defaultValue: "rgba(255,255,255,0.35)",
+                hidden: (props: any) => !props.show,
+            },
+            size: {
+                type: ControlType.Number,
+                title: "Size",
+                min: 4,
+                max: 20,
+                step: 1,
+                unit: "px",
+                displayStepper: true,
+                defaultValue: 8,
+                hidden: (props: any) => !props.show,
+            },
+            gap: {
+                type: ControlType.Number,
+                title: "Gap",
+                min: 2,
+                max: 20,
+                step: 1,
+                unit: "px",
+                displayStepper: true,
+                defaultValue: 8,
+                hidden: (props: any) => !props.show,
+            },
+            offset: {
+                type: ControlType.Number,
+                title: "Offset",
+                min: 0,
+                max: 60,
+                step: 1,
+                unit: "px",
+                displayStepper: true,
+                defaultValue: 16,
+                hidden: (props: any) => !props.show,
             },
         },
     },

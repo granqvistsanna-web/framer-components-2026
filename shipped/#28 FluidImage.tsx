@@ -611,6 +611,10 @@ export default function FluidImage(props: FluidImageProps) {
     const hostRef = React.useRef<HTMLDivElement>(null)
     const isStaticRenderer = useIsStaticRenderer()
     const [loadError, setLoadError] = React.useState<string | null>(null)
+    const [imageNaturalSize, setImageNaturalSize] = React.useState<{
+        w: number
+        h: number
+    } | null>(null)
     const reducedMotionRef = React.useRef(false)
 
     React.useEffect(() => {
@@ -889,7 +893,17 @@ export default function FluidImage(props: FluidImageProps) {
         const loadImage = (url: string) => {
             const gen = ++loadGen
             const img = new Image()
-            img.crossOrigin = "anonymous"
+            // Only set crossOrigin for truly cross-origin URLs;
+            // Framer-hosted assets on the same origin don't need it,
+            // and setting it can cause CORS failures in preview.
+            try {
+                const imgUrl = new URL(url, window.location.href)
+                if (imgUrl.origin !== window.location.origin) {
+                    img.crossOrigin = "anonymous"
+                }
+            } catch {
+                img.crossOrigin = "anonymous"
+            }
             img.onload = () => {
                 if (cancelled || gen !== loadGen) return
                 if (
@@ -904,6 +918,10 @@ export default function FluidImage(props: FluidImageProps) {
                     w: img.naturalWidth,
                     h: img.naturalHeight,
                 }
+                setImageNaturalSize({
+                    w: img.naturalWidth,
+                    h: img.naturalHeight,
+                })
                 gl.activeTexture(gl.TEXTURE0)
                 gl.bindTexture(gl.TEXTURE_2D, texture)
                 gl.texImage2D(
@@ -920,8 +938,19 @@ export default function FluidImage(props: FluidImageProps) {
                 ensureRAF()
             }
             img.onerror = () => {
-                if (!cancelled && gen === loadGen)
-                    setLoadError("Failed to load image")
+                if (cancelled || gen !== loadGen) return
+                // Retry without crossOrigin if CORS was the issue
+                if (img.crossOrigin) {
+                    const retry = new Image()
+                    retry.onload = img.onload as typeof retry.onload
+                    retry.onerror = () => {
+                        if (!cancelled && gen === loadGen)
+                            setLoadError("Failed to load image")
+                    }
+                    retry.src = url
+                    return
+                }
+                setLoadError("Failed to load image")
             }
             img.src = url
         }
@@ -1313,8 +1342,7 @@ export default function FluidImage(props: FluidImageProps) {
                     alt=""
                     style={{
                         width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
+                        height: "auto",
                         display: "block",
                     }}
                 />
@@ -1332,6 +1360,19 @@ export default function FluidImage(props: FluidImageProps) {
                 overflow: "visible",
             }}
         >
+            {/* Flow-participating sizer for fit-content layouts */}
+            {imageNaturalSize && (
+                <img
+                    src={imageSrc}
+                    alt=""
+                    style={{
+                        display: "block",
+                        width: "100%",
+                        height: "auto",
+                        visibility: "hidden",
+                    }}
+                />
+            )}
             {loadError ? (
                 <div
                     style={{

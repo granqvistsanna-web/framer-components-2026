@@ -3,7 +3,7 @@
  * Animated grid of SDF shapes (crosses, squares, lines) driven by simplex noise.
  * Adapted from ShaderToy "Oriented Box - distance 2D" by iq / Patricio Gonzalez Vivo.
  */
-import { addPropertyControls, ControlType } from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 import * as React from "react"
 import { startTransition, useEffect, useRef, useState } from "react"
 import * as THREE from "three"
@@ -24,6 +24,14 @@ uniform float uSpeed;
 uniform vec3 uShapeColor;
 uniform vec3 uBgColor;
 uniform float uLineThickness;
+uniform float uNoiseScale;
+uniform float uShapeScale;
+
+uniform float uOpacity;
+
+uniform int uUseGradient;
+uniform vec3 uGradientColorA;
+uniform vec3 uGradientColorB;
 
 varying vec2 vUv;
 
@@ -113,13 +121,13 @@ float sdCross(in vec2 p, float th, float crossRadius) {
     vec2 v22 = vec2(upper, upper);
     float d1 = sdOrientedBox(p, v1, v12, th);
     float d2 = sdOrientedBox(p, v2, v22, th);
-    d1 = step(d1, 0.01);
-    d2 = step(d2, 0.01);
+    d1 = 1.0 - smoothstep(-0.01, 0.01, d1);
+    d2 = 1.0 - smoothstep(-0.01, 0.01, d2);
     return d1 + d2;
 }
 
 float square(in vec2 p, float radius) {
-    p = step(radius, p) - step(1.0 - radius, p);
+    p = smoothstep(radius - 0.01, radius + 0.01, p) - smoothstep(1.0 - radius - 0.01, 1.0 - radius + 0.01, p);
     return p.x * p.y;
 }
 
@@ -128,14 +136,15 @@ float line(in vec2 p, float radius) {
     float lower = radius;
     vec2 v1 = vec2(lower, lower);
     vec2 v12 = vec2(upper, upper);
-    return step(sdOrientedBox(p, v1, v12, 0.028), 0.01);
+    return 1.0 - smoothstep(-0.01, 0.01, sdOrientedBox(p, v1, v12, uLineThickness));
 }
 
 float getGridColor(vec2 p, float v) {
-    return v < 0.25 ? square(p, 0.47) - 0.7
-         : v < 0.5  ? line(p, 0.68)
-         : v < 0.75 ? sdCross(p, uLineThickness, 0.68)
-         :            square(p, 0.94);
+    float s = uShapeScale;
+    return v < 0.25 ? square(p, 1.0 - s * 0.53) - 0.7
+         : v < 0.5  ? line(p, 1.0 - s * 0.32)
+         : v < 0.75 ? sdCross(p, uLineThickness, 1.0 - s * 0.32)
+         :            square(p, 1.0 - s * 0.06);
 }
 
 void main() {
@@ -146,14 +155,25 @@ void main() {
     vec2 uv_i = floor(uv1);
     vec2 uv_f = fract(uv1);
 
-    float noise = snoise(vec3(uv_i * gridSizeInverse * 2.2, iTime * uSpeed));
+    float noise = snoise(vec3(uv_i * gridSizeInverse * uNoiseScale, iTime * uSpeed));
     noise *= 1.4;
     noise -= 0.2;
 
     float shape = getGridColor(uv_f, noise);
 
-    vec3 color = mix(uBgColor, uShapeColor, clamp(shape, 0.0, 1.0));
-    gl_FragColor = vec4(color, 1.0);
+    // Noise-driven visibility: fade shapes in/out as noise evolves
+    float visibility = clamp(noise, 0.0, 1.0);
+    shape *= visibility;
+
+    // Color: flat or gradient mapped to noise
+    vec3 shapeCol = uShapeColor;
+    if (uUseGradient == 1) {
+        float noiseNorm = clamp((noise + 0.2) / 1.4, 0.0, 1.0);
+        shapeCol = mix(uGradientColorA, uGradientColorB, noiseNorm);
+    }
+
+    vec3 color = mix(uBgColor, shapeCol, clamp(shape, 0.0, 1.0));
+    gl_FragColor = vec4(color, uOpacity);
 }
 `
 
@@ -167,8 +187,15 @@ type SDFGridBGProps = {
     shapeColor?: string
     bgColor?: string
     lineThickness?: number
+    noiseScale?: number
+    shapeScale?: number
+    opacity?: number
     maxDpr?: number
     respectReducedMotion?: boolean
+
+    useGradient?: boolean
+    gradientColorA?: string
+    gradientColorB?: string
     style?: React.CSSProperties
 }
 
@@ -196,11 +223,20 @@ export default function SDFGridBG(props: SDFGridBGProps) {
         shapeColor = "#ffffff",
         bgColor = "#000000",
         lineThickness = 0.028,
+        noiseScale = 2.2,
+        shapeScale = 1,
+
+        opacity = 1,
         maxDpr = 2,
         respectReducedMotion = true,
+
+        useGradient = false,
+        gradientColorA = "#ff6600",
+        gradientColorB = "#0066ff",
         style,
     } = props
 
+    const isStatic = useIsStaticRenderer()
     const containerRef = useRef<HTMLDivElement | null>(null)
     const [isClient, setIsClient] = useState(false)
 
@@ -210,8 +246,16 @@ export default function SDFGridBG(props: SDFGridBGProps) {
         shapeColor,
         bgColor,
         lineThickness,
+        noiseScale,
+        shapeScale,
+
+        opacity,
         maxDpr,
         respectReducedMotion,
+
+        useGradient,
+        gradientColorA,
+        gradientColorB,
     })
     configRef.current = {
         gridSize,
@@ -219,12 +263,21 @@ export default function SDFGridBG(props: SDFGridBGProps) {
         shapeColor,
         bgColor,
         lineThickness,
+        noiseScale,
+        shapeScale,
+
+        opacity,
         maxDpr,
         respectReducedMotion,
+
+        useGradient,
+        gradientColorA,
+        gradientColorB,
     }
 
     useEffect(() => {
         startTransition(() => setIsClient(true))
+        return () => {}
     }, [])
 
     useEffect(() => {
@@ -261,6 +314,7 @@ export default function SDFGridBG(props: SDFGridBGProps) {
         const bgRgb = hexToRgb01(configRef.current.bgColor)
 
         const material = new THREE.ShaderMaterial({
+            transparent: true,
             uniforms: {
                 iTime: { value: 0 },
                 iResolution: { value: new THREE.Vector2(1, 1) },
@@ -269,6 +323,13 @@ export default function SDFGridBG(props: SDFGridBGProps) {
                 uShapeColor: { value: new THREE.Vector3(...shapeRgb) },
                 uBgColor: { value: new THREE.Vector3(...bgRgb) },
                 uLineThickness: { value: configRef.current.lineThickness },
+                uNoiseScale: { value: configRef.current.noiseScale },
+                uShapeScale: { value: configRef.current.shapeScale },
+
+                uOpacity: { value: configRef.current.opacity },
+                uUseGradient: { value: configRef.current.useGradient ? 1 : 0 },
+                uGradientColorA: { value: new THREE.Vector3(...hexToRgb01(configRef.current.gradientColorA)) },
+                uGradientColorB: { value: new THREE.Vector3(...hexToRgb01(configRef.current.gradientColorB)) },
             },
             vertexShader,
             fragmentShader,
@@ -306,9 +367,16 @@ export default function SDFGridBG(props: SDFGridBGProps) {
         }
         resize()
 
-        const prefersReduced =
-            typeof window !== "undefined" &&
-            window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        let prefersReduced = false
+        let reducedMotionMq: MediaQueryList | null = null
+        const onChangeRM = (e: MediaQueryListEvent) => {
+            prefersReduced = e.matches
+        }
+        if (typeof window !== "undefined" && window.matchMedia) {
+            reducedMotionMq = window.matchMedia("(prefers-reduced-motion: reduce)")
+            prefersReduced = reducedMotionMq.matches
+            reducedMotionMq.addEventListener("change", onChangeRM)
+        }
 
         const animate = () => {
             rafId = requestAnimationFrame(animate)
@@ -331,8 +399,17 @@ export default function SDFGridBG(props: SDFGridBGProps) {
             material.uniforms.uGridSize.value = cfg.gridSize
             material.uniforms.uSpeed.value = cfg.speed
             material.uniforms.uLineThickness.value = cfg.lineThickness
+            material.uniforms.uNoiseScale.value = cfg.noiseScale
+            material.uniforms.uShapeScale.value = cfg.shapeScale
+
+            material.uniforms.uOpacity.value = cfg.opacity
             material.uniforms.uShapeColor.value.set(...hexToRgb01(cfg.shapeColor))
             material.uniforms.uBgColor.value.set(...hexToRgb01(cfg.bgColor))
+
+            // Gradient uniforms
+            material.uniforms.uUseGradient.value = cfg.useGradient ? 1 : 0
+            material.uniforms.uGradientColorA.value.set(...hexToRgb01(cfg.gradientColorA))
+            material.uniforms.uGradientColorB.value.set(...hexToRgb01(cfg.gradientColorB))
 
             const targetDpr = Math.min(
                 window.devicePixelRatio || 1,
@@ -351,6 +428,9 @@ export default function SDFGridBG(props: SDFGridBGProps) {
 
         return () => {
             cancelAnimationFrame(rafId)
+            if (reducedMotionMq) {
+                reducedMotionMq.removeEventListener("change", onChangeRM)
+            }
             if (resizeObserver) {
                 resizeObserver.disconnect()
             } else {
@@ -365,6 +445,21 @@ export default function SDFGridBG(props: SDFGridBGProps) {
         }
     }, [isClient])
 
+    if (isStatic) {
+        return (
+            <div
+                style={{
+                    ...style,
+                    width: "100%",
+                    height: "100%",
+                    minWidth: 200,
+                    minHeight: 120,
+                    background: bgColor,
+                }}
+            />
+        )
+    }
+
     return (
         <div
             ref={containerRef}
@@ -372,6 +467,7 @@ export default function SDFGridBG(props: SDFGridBGProps) {
                 ...style,
                 width: "100%",
                 height: "100%",
+                minWidth: 200,
                 minHeight: 120,
                 position: "relative",
                 overflow: "hidden",
@@ -405,6 +501,24 @@ addPropertyControls(SDFGridBG, {
         type: ControlType.Color,
         title: "Shape Color",
         defaultValue: "#ffffff",
+        hidden: (props) => props.useGradient === true,
+    },
+    useGradient: {
+        type: ControlType.Boolean,
+        title: "Color Gradient",
+        defaultValue: false,
+    },
+    gradientColorA: {
+        type: ControlType.Color,
+        title: "Gradient Start",
+        defaultValue: "#ff6600",
+        hidden: (props) => props.useGradient !== true,
+    },
+    gradientColorB: {
+        type: ControlType.Color,
+        title: "Gradient End",
+        defaultValue: "#0066ff",
+        hidden: (props) => props.useGradient !== true,
     },
     bgColor: {
         type: ControlType.Color,
@@ -418,6 +532,31 @@ addPropertyControls(SDFGridBG, {
         max: 0.08,
         step: 0.001,
         defaultValue: 0.028,
+    },
+    noiseScale: {
+        type: ControlType.Number,
+        title: "Noise Scale",
+        min: 0.5,
+        max: 8,
+        step: 0.1,
+        defaultValue: 2.2,
+    },
+    shapeScale: {
+        type: ControlType.Number,
+        title: "Shape Scale",
+        min: 0.2,
+        max: 2,
+        step: 0.05,
+        unit: "x",
+        defaultValue: 1,
+    },
+    opacity: {
+        type: ControlType.Number,
+        title: "Opacity",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        defaultValue: 1,
     },
     maxDpr: {
         type: ControlType.Number,

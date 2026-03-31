@@ -398,41 +398,18 @@ export default function WebGLInteractiveGradient(props: WebGLInteractiveGradient
     })
     const needsRenderRef = useRef(true)
 
-    const prevConfig = configRef.current
     configRef.current = resolvedConfig
-    const newColors = {
+    colorsRef.current = {
         c1: parseColorToRgb01(resolvedConfig.color1),
         c2: parseColorToRgb01(resolvedConfig.color2),
         c3: parseColorToRgb01(resolvedConfig.color3),
         c4: parseColorToRgb01(resolvedConfig.color4),
     }
-    colorsRef.current = newColors
-
-    if (
-        prevConfig.color1 !== resolvedConfig.color1 ||
-        prevConfig.color2 !== resolvedConfig.color2 ||
-        prevConfig.color3 !== resolvedConfig.color3 ||
-        prevConfig.color4 !== resolvedConfig.color4 ||
-        prevConfig.colorIntensity !== resolvedConfig.colorIntensity ||
-        prevConfig.softness !== resolvedConfig.softness ||
-        prevConfig.distortionAmount !== resolvedConfig.distortionAmount ||
-        prevConfig.scale !== resolvedConfig.scale ||
-        prevConfig.rotation !== resolvedConfig.rotation ||
-        prevConfig.swirl !== resolvedConfig.swirl ||
-        prevConfig.swirlRadius !== resolvedConfig.swirlRadius ||
-        prevConfig.speed !== resolvedConfig.speed ||
-        prevConfig.brushSize !== resolvedConfig.brushSize ||
-        prevConfig.brushStrength !== resolvedConfig.brushStrength ||
-        prevConfig.fluidDecay !== resolvedConfig.fluidDecay ||
-        prevConfig.trailLength !== resolvedConfig.trailLength ||
-        prevConfig.stopDecay !== resolvedConfig.stopDecay ||
-        prevConfig.maxDpr !== resolvedConfig.maxDpr ||
-        prevConfig.enableMotion !== resolvedConfig.enableMotion ||
-        prevConfig.respectReducedMotion !== resolvedConfig.respectReducedMotion ||
-        prevConfig.interactive !== resolvedConfig.interactive
-    ) {
-        needsRenderRef.current = true
-    }
+    // Signal the animate loop to render at least once when props change. This
+    // handles the paused-animation case (motion disabled) where shouldRender would
+    // otherwise stay false. Setting a boolean ref is negligible cost vs the old
+    // 20-property diff + color object allocation that ran here previously.
+    needsRenderRef.current = true
 
     useEffect(() => {
         startTransition(() => {
@@ -464,7 +441,7 @@ export default function WebGLInteractiveGradient(props: WebGLInteractiveGradient
     }, [isClient])
 
     useEffect(() => {
-        if (!isClient) return () => {}
+        if (!isClient || isStatic) return () => {}
         const container = containerRef.current
         if (!container) return () => {}
 
@@ -542,8 +519,11 @@ export default function WebGLInteractiveGradient(props: WebGLInteractiveGradient
         }
 
         const initialSize = getSize()
-        const fluidTarget1 = createTarget(initialSize.width, initialSize.height)
-        const fluidTarget2 = createTarget(initialSize.width, initialSize.height)
+        // Fluid simulation runs at half resolution — LinearFilter upsampling in the
+        // display pass makes the reduction imperceptible while cutting VRAM and GPU
+        // fill rate by 4×.
+        const fluidTarget1 = createTarget(Math.ceil(initialSize.width / 2), Math.ceil(initialSize.height / 2))
+        const fluidTarget2 = createTarget(Math.ceil(initialSize.width / 2), Math.ceil(initialSize.height / 2))
         let currentFluidTarget = fluidTarget1
         let previousFluidTarget = fluidTarget2
 
@@ -597,10 +577,13 @@ export default function WebGLInteractiveGradient(props: WebGLInteractiveGradient
         const resize = () => {
             const size = getSize()
             renderer.setSize(size.width, size.height, false)
+            // iResolution stays at full logical size so mouse-position math in the
+            // fluid shader remains correct in screen-pixel coordinates.
             fluidMaterial.uniforms.iResolution.value.set(size.width, size.height)
             displayMaterial.uniforms.iResolution.value.set(size.width, size.height)
-            fluidTarget1.setSize(size.width, size.height)
-            fluidTarget2.setSize(size.width, size.height)
+            // Fluid render targets stay at half resolution for GPU performance.
+            fluidTarget1.setSize(Math.ceil(size.width / 2), Math.ceil(size.height / 2))
+            fluidTarget2.setSize(Math.ceil(size.width / 2), Math.ceil(size.height / 2))
             frameCount = 0
             needsRenderRef.current = true
         }
@@ -663,12 +646,23 @@ export default function WebGLInteractiveGradient(props: WebGLInteractiveGradient
         container.addEventListener("pointerleave", onPointerLeave)
         container.addEventListener("pointerdown", onPointerDown)
 
+        // Debounce resize to avoid GPU reallocation on every pixel change during
+        // panel drags or Framer layout shifts.
+        let resizeTimer: ReturnType<typeof setTimeout> | null = null
+        const debouncedResize = () => {
+            if (resizeTimer !== null) clearTimeout(resizeTimer)
+            resizeTimer = setTimeout(() => {
+                resizeTimer = null
+                resize()
+            }, 150)
+        }
+
         let resizeObserver: ResizeObserver | null = null
         if (typeof ResizeObserver === "function") {
-            resizeObserver = new ResizeObserver(resize)
+            resizeObserver = new ResizeObserver(debouncedResize)
             resizeObserver.observe(container)
         } else {
-            window.addEventListener("resize", resize)
+            window.addEventListener("resize", debouncedResize)
         }
         resize()
 
@@ -689,12 +683,13 @@ export default function WebGLInteractiveGradient(props: WebGLInteractiveGradient
             if (!shouldRender) return
             needsRenderRef.current = false
 
-            // Live-update DPR without tearing down the renderer
+            // Live-update DPR without tearing down the renderer. DPR only changes on
+            // display switch, so we debounce rather than resize() synchronously mid-frame.
             const targetDpr = Math.min(window.devicePixelRatio || 1, Math.max(1, config.maxDpr))
             if (targetDpr !== currentDpr) {
                 currentDpr = targetDpr
                 renderer.setPixelRatio(currentDpr)
-                resize()
+                debouncedResize()
             }
 
             if (baseMotionEnabled) {
@@ -741,10 +736,11 @@ export default function WebGLInteractiveGradient(props: WebGLInteractiveGradient
 
         return () => {
             cancelAnimationFrame(rafId)
+            if (resizeTimer !== null) clearTimeout(resizeTimer)
             if (resizeObserver) {
                 resizeObserver.disconnect()
             } else {
-                window.removeEventListener("resize", resize)
+                window.removeEventListener("resize", debouncedResize)
             }
             container.removeEventListener("pointerenter", onPointerEnter)
             container.removeEventListener("pointermove", onPointerMove)
@@ -765,20 +761,37 @@ export default function WebGLInteractiveGradient(props: WebGLInteractiveGradient
 
     const config = configRef.current
 
+    const fallbackStyle = buildFallbackStyle(config)
+    const sharedContainerStyle: React.CSSProperties = {
+        ...style,
+        width: "100%",
+        height: "100%",
+        minWidth: 200,
+        minHeight: 120,
+        position: "relative",
+        overflow: "hidden",
+    }
+
+    if (isStatic || webglUnavailable) {
+        return (
+            <div
+                style={{
+                    ...sharedContainerStyle,
+                    ...fallbackStyle,
+                }}
+            />
+        )
+    }
+
     return (
         <div
             ref={containerRef}
             style={{
-                ...style,
-                width: "100%",
-                height: "100%",
-                minHeight: 120,
-                position: "relative",
-                overflow: "hidden",
+                ...sharedContainerStyle,
                 background: config.fallbackColor,
                 touchAction: config.interactive ? "none" : undefined,
             }}
-            data-webgl={webglUnavailable ? "unavailable" : "ready"}
+            data-webgl="ready"
         />
     )
 }

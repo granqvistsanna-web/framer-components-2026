@@ -107,6 +107,7 @@ function StaticFallback({
     overlayColor: string
     style?: React.CSSProperties
 }) {
+    const hasImages = slides.some((s) => s.image)
     const firstWithImage = slides.find((s) => s.image)
     return (
         <div
@@ -122,31 +123,46 @@ function StaticFallback({
                 justifyContent: "center",
             }}
         >
-            {firstWithImage?.image && (
+            {hasImages && firstWithImage?.image ? (
                 <img
                     src={firstWithImage.image}
                     alt={firstWithImage.title || ""}
                     style={{
-                        maxWidth: "60%",
-                        maxHeight: "70%",
+                        width: "100%",
+                        height: "100%",
                         objectFit: "cover",
-                        borderRadius: 2,
                     }}
                 />
+            ) : (
+                <div
+                    style={{
+                        border: "1px dashed rgba(255,255,255,0.25)",
+                        borderRadius: 12,
+                        padding: "2rem",
+                        color: overlayColor,
+                        opacity: 0.5,
+                        fontSize: 14,
+                        fontFamily: "Inter, sans-serif",
+                    }}
+                >
+                    Add images to slides
+                </div>
             )}
-            <div
-                style={{
-                    position: "absolute",
-                    bottom: 24,
-                    left: 24,
-                    color: overlayColor,
-                    fontFamily: "Inter, sans-serif",
-                    fontSize: 14,
-                    opacity: 0.7,
-                }}
-            >
-                {slides.length} slides
-            </div>
+            {hasImages && (
+                <div
+                    style={{
+                        position: "absolute",
+                        bottom: 24,
+                        left: 24,
+                        color: overlayColor,
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 14,
+                        opacity: 0.7,
+                    }}
+                >
+                    {slides.length} slides
+                </div>
+            )}
         </div>
     )
 }
@@ -274,6 +290,7 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
     // Check reduced motion preference
     const prefersReducedMotionRef = useRef(false)
     useEffect(() => {
+        if (typeof window === "undefined") return
         const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
         const update = () => {
             prefersReducedMotionRef.current = mq.matches
@@ -959,24 +976,8 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
                     width: "100%",
                     height: "100%",
                     background: backgroundColor,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
                 }}
-            >
-                <div
-                    style={{
-                        border: "1px dashed rgba(255,255,255,0.25)",
-                        borderRadius: 12,
-                        padding: "2rem",
-                        color: overlayColor,
-                        opacity: 0.5,
-                        fontSize: 14,
-                    }}
-                >
-                    Add images to slides
-                </div>
-            </div>
+            />
         )
     }
 
@@ -1027,6 +1028,8 @@ export default function ThreeJSSlider(props: ThreeJSSliderProps) {
                 ...style,
                 width: "100%",
                 height: "100%",
+                minWidth: 200,
+                minHeight: 200,
                 position: "relative",
                 overflow: "hidden",
                 background: backgroundColor,
