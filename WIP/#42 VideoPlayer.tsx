@@ -4,16 +4,12 @@ import {
     useEffect,
     useMemo,
     useCallback,
-    cloneElement,
-    isValidElement,
 } from "react"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 import { motion, AnimatePresence } from "framer-motion"
-import { useVideoStore } from "https://framer.com/m/VidStore-UIeQ.js@qErBa8F3a3y8M7HDVLe9"
-
 /**
  * FramePlay
- * Custom video player with playlist, chapters, glow, and PiP support
+ * Custom video player with playlist and PiP support
  *
  * @framerDisableUnlink
  * @framerSupportedLayoutWidth any
@@ -21,314 +17,6 @@ import { useVideoStore } from "https://framer.com/m/VidStore-UIeQ.js@qErBa8F3a3y
  * @framerIntrinsicWidth 640
  * @framerIntrinsicHeight 360
  */
-
-// ==============================
-// SegmentedChapterTimeline.tsx
-// ==============================
-
-/**
- * @typedef {Object} Chapter
- * @property {string} title
- * @property {number} [start] - backwards compatibility
- * @property {number} [minutes]
- * @property {number} [seconds]
- */
-
-/**
- * @param {Object} props
- * @param {number} props.duration
- * @param {number} props.progress
- * @param {Chapter[]} props.chapters
- * @param {function(number): void} props.onSeek
- * @param {string} [props.color="#FF0000"]
- * @param {string} [props.bg="rgba(255,255,255,0.18)"]
- * @param {number} [props.height=6]
- * @param {number} [props.radius=999]
- * @param {number} [props.hoverHeight=10] - height ONLY on hover (px)
- * @param {number} [props.segmentGap=1] - gap between segments (px)
- */
-function SegmentedChapterTimeline({
-    duration,
-    progress,
-    chapters,
-    onSeek,
-    color = "#FF0000",
-    bg = "rgba(255,255,255,0.18)",
-    height = 6,
-    radius = 999,
-    hoverHeight = 10, // height ONLY on hover (px)
-    segmentGap = 1, // gap between segments (px)
-}) {
-    const ref = useRef(null)
-    const [hover, setHover] = useState(null)
-    const [dragging, setDragging] = useState(false)
-
-    const clamp = (n, min, max) => Math.max(min, Math.min(max, n))
-
-    // Convert chapters to have consistent start times in seconds
-    const normalizedChapters = useMemo(() => {
-        return chapters.map((chapter) => ({
-            ...chapter,
-            start:
-                chapter.start ??
-                (chapter.minutes ?? 0) * 60 + (chapter.seconds ?? 0),
-        }))
-    }, [chapters])
-
-    const pct = (sec) => {
-        const effectiveDuration =
-            duration > 0
-                ? duration
-                : normalizedChapters.length > 0
-                  ? Math.max(...normalizedChapters.map((c) => c.start)) + 60
-                  : 0
-        return effectiveDuration ? (sec / effectiveDuration) * 100 : 0
-    }
-
-    // Build contiguous segments from chapter starts
-    const segments = useMemo(() => {
-        // For YouTube, use the last chapter's start time + 60 seconds as fallback duration
-        const effectiveDuration =
-            duration > 0
-                ? duration
-                : normalizedChapters.length > 0
-                  ? Math.max(...normalizedChapters.map((c) => c.start)) + 60
-                  : 0
-
-        if (!effectiveDuration || effectiveDuration <= 0) return []
-        const sorted = [...normalizedChapters]
-            .filter((c) => c.start < effectiveDuration)
-            .sort((a, b) => a.start - b.start)
-        const starts = sorted.map((c) => c.start)
-        if (starts[0] !== 0) starts.unshift(0)
-        if (starts[starts.length - 1] !== effectiveDuration)
-            starts.push(effectiveDuration)
-
-        const segs = []
-        for (let i = 0; i < starts.length - 1; i++) {
-            const start = starts[i]
-            const end = starts[i + 1]
-            const title =
-                sorted.find((c) => c.start === start)?.title ??
-                `Chapter ${i + 1}`
-            segs.push({ start, end, title })
-        }
-
-        return segs
-    }, [normalizedChapters, duration])
-
-    const seekFromClientX = (clientX) => {
-        const el = ref.current
-        const effectiveDuration =
-            duration > 0
-                ? duration
-                : normalizedChapters.length > 0
-                  ? Math.max(...normalizedChapters.map((c) => c.start)) + 60
-                  : 0
-        if (!el || !effectiveDuration) return
-        const rect = el.getBoundingClientRect()
-        const rel = clamp(clientX - rect.left, 0, rect.width)
-        const t = (rel / rect.width) * effectiveDuration
-        onSeek(t)
-    }
-
-    const handlePointerDown = (e) => {
-        e.target.setPointerCapture?.(e.pointerId)
-        setDragging(true)
-        seekFromClientX(e.clientX)
-    }
-    const handlePointerMove = (e) => {
-        const effectiveDuration =
-            duration > 0
-                ? duration
-                : normalizedChapters.length > 0
-                  ? Math.max(...normalizedChapters.map((c) => c.start)) + 60
-                  : 0
-        if (!ref.current || !effectiveDuration) return
-        const rect = ref.current.getBoundingClientRect()
-        const x = clamp(e.clientX - rect.left, 0, rect.width)
-        const t = (x / rect.width) * effectiveDuration
-
-        // More robust segment finding
-        let idx = -1
-        for (let i = 0; i < segments.length; i++) {
-            if (
-                t >= segments[i].start &&
-                (t < segments[i].end ||
-                    (i === segments.length - 1 && t <= segments[i].end))
-            ) {
-                idx = i
-                break
-            }
-        }
-
-        // If still not found, find the closest segment
-        if (idx === -1 && segments.length > 0) {
-            idx = 0
-            for (let i = 1; i < segments.length; i++) {
-                if (
-                    Math.abs(t - segments[i].start) <
-                    Math.abs(t - segments[idx].start)
-                ) {
-                    idx = i
-                }
-            }
-        }
-
-        if (idx >= 0) {
-            setHover({ x, idx })
-        }
-        if (dragging) seekFromClientX(e.clientX)
-    }
-    const handlePointerUp = () => setDragging(false)
-
-    return (
-        <div style={{ position: "relative" }}>
-            {/* Hover label (title) */}
-            {hover && segments[hover.idx] && (
-                <div
-                    style={{
-                        position: "absolute",
-                        left: hover.x,
-                        bottom: height + 12,
-                        transform: "translateX(-50%)",
-                        background: "rgba(28,28,30,0.92)",
-                        color: "#fff",
-                        fontSize: 12,
-                        padding: "6px 8px",
-                        borderRadius: 8,
-                        border: "1px solid rgba(255,255,255,0.15)",
-                        whiteSpace: "nowrap",
-                        pointerEvents: "none",
-                        zIndex: 2,
-                    }}
-                >
-                    {segments[hover.idx].title}
-                </div>
-            )}
-
-            {/* Track container (no separate base bar — avoids "double line") */}
-            <div
-                ref={ref}
-                role="slider"
-                aria-valuemin={0}
-                aria-valuemax={Math.floor(
-                    duration > 0
-                        ? duration
-                        : normalizedChapters.length > 0
-                          ? Math.max(
-                                ...normalizedChapters.map((c) => c.start)
-                            ) + 60
-                          : 0
-                )}
-                aria-valuenow={Math.floor(progress || 0)}
-                tabIndex={0}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
-                onPointerLeave={() => setHover(null)}
-                onKeyDown={(e) => {
-                    const effectiveDuration =
-                        duration > 0
-                            ? duration
-                            : normalizedChapters.length > 0
-                              ? Math.max(
-                                    ...normalizedChapters.map((c) => c.start)
-                                ) + 60
-                              : 0
-                    if (!effectiveDuration) return
-                    if (e.key === "ArrowLeft") onSeek(Math.max(0, progress - 5))
-                    if (e.key === "ArrowRight")
-                        onSeek(Math.min(effectiveDuration, progress + 5))
-                    if (e.key === "Home") onSeek(0)
-                    if (e.key === "End") onSeek(effectiveDuration)
-                }}
-                style={{
-                    position: "relative",
-                    width: "100%",
-                    height: hover ? hoverHeight : height, // overall track height grows only while hovering
-                    cursor: "pointer",
-                    userSelect: "none",
-                    touchAction: "none",
-                    outline: "none",
-                    transition: "height 120ms ease",
-                    display: "flex",
-                }}
-            >
-                {/* Segments fill the full width; each enlarges only when it's hovered */}
-                {segments.map((s, i) => {
-                    const widthPct = `${pct(s.end - s.start)}%`
-                    const playedPctWithin =
-                        progress <= s.start
-                            ? 0
-                            : progress >= s.end
-                              ? 100
-                              : ((progress - s.start) / (s.end - s.start)) * 100
-
-                    // Direct hover detection - no reversal needed
-                    const isHover = hover?.idx === i
-
-                    return (
-                        <div
-                            key={i}
-                            style={{
-                                position: "relative",
-                                width: widthPct,
-                                height: "100%",
-                                paddingLeft: i > 0 ? `${segmentGap}px` : "0", // Customizable gap between segments
-                            }}
-                            onClick={(e) => {
-                                const el = e.currentTarget
-                                const rect = el.getBoundingClientRect()
-                                const x = clamp(
-                                    e.clientX - rect.left,
-                                    0,
-                                    rect.width
-                                )
-                                const t =
-                                    s.start +
-                                    (x / rect.width) * (s.end - s.start)
-                                onSeek(t)
-                            }}
-                        >
-                            {/* Segment background */}
-                            <div
-                                style={{
-                                    position: "absolute",
-                                    left: i > 0 ? `${segmentGap}px` : "0", // Account for gap
-                                    right: 0,
-                                    top: "50%",
-                                    transform: `translateY(-50%)`,
-                                    height: isHover ? hoverHeight : height,
-                                    background: bg,
-                                    borderRadius: radius,
-                                    overflow: "hidden",
-                                    transition: "height 120ms ease",
-                                }}
-                            >
-                                {/* Played overlay for this segment */}
-                                <div
-                                    style={{
-                                        position: "absolute",
-                                        left: 0,
-                                        top: 0,
-                                        bottom: 0,
-                                        width: `${playedPctWithin}%`,
-                                        background: color,
-                                        transition: dragging
-                                            ? "none"
-                                            : "width 80ms linear",
-                                    }}
-                                />
-                            </div>
-                        </div>
-                    )
-                })}
-            </div>
-        </div>
-    )
-}
 
 interface Props {
     sourceType?: "file" | "url" | "youtube" | "vimeo"
@@ -346,9 +34,8 @@ interface Props {
     debug?: boolean
     showControls?: boolean
     controlsMode?: "default" | "minimal"
+    controlsPreset?: "glass" | "solid" | "pill"
     loop?: boolean
-    manualChapters?: { title?: string; minutes?: number; seconds?: number; start?: number }[]
-    chaptersMode?: "embedded" | "external"
     posterImage?: string | null
     useCustomPlayButton?: boolean
     customPlayButton?: React.ReactNode
@@ -356,63 +43,15 @@ interface Props {
     fullscreenOnMobilePlay?: boolean
     playOverlay?: { enabled?: boolean; color?: string }
     accessibility?: { title?: string; description?: string; language?: string; hasSubtitles?: boolean; hasAudioDescription?: boolean }
-    style?: { backgroundColor?: string; cornerRadius?: number; videoFit?: string; controlsColor?: string; controlsOpacity?: number }
-    controlsStyle?: { controlsColor?: string; accentColor?: string; progressColor?: string; controlsOpacity?: number; thumbSize?: number; thumbColor?: string; thumbBorder?: string; segmentGap?: number }
+    style?: { backgroundColor?: string; cornerRadius?: number; videoFit?: string }
+    controlsStyle?: { controlsColor?: string; accentColor?: string; progressColor?: string; controlsOpacity?: number; thumbSize?: number; thumbColor?: string; thumbBorder?: string }
     controls?: { showPlayPause?: boolean; showProgress?: boolean; showTime?: boolean; showVolume?: boolean; showSpeed?: boolean; showFullscreen?: boolean; showPictureInPicture?: boolean }
     defaultSettings?: { muted?: boolean; volume?: number; speed?: number }
     buttonStyle?: { playButtonSize?: number; playIconSize?: number; playIconColor?: string; playButtonBackgroundColor?: string; playButtonBlur?: number; playButtonBorderRadius?: number; customPlayIcon?: string | null }
-    glow?: { enabled?: boolean; intensity?: number; blur?: number; spread?: number; color?: string }
 }
 
 export default function CustomVideoPlayer(props: Props) {
     const isStaticRenderer = useIsStaticRenderer()
-
-    if (isStaticRenderer) {
-        return (
-            <div
-                style={{
-                    width: "100%",
-                    height: "100%",
-                    position: "relative",
-                    background: props.style?.backgroundColor || "#000",
-                    borderRadius: props.style?.cornerRadius || 0,
-                    overflow: "hidden",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                }}
-            >
-                {props.posterImage && (
-                    <img
-                        src={props.posterImage}
-                        style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: props.style?.videoFit || "cover",
-                            position: "absolute",
-                            top: 0,
-                            left: 0,
-                        }}
-                    />
-                )}
-                <svg
-                    width="50"
-                    height="50"
-                    viewBox="0 0 50 50"
-                    fill="none"
-                    style={{ position: "relative", zIndex: 1, opacity: 0.8 }}
-                >
-                    <rect
-                        width="50"
-                        height="50"
-                        rx={props.buttonStyle?.playButtonBorderRadius || 8}
-                        fill={props.buttonStyle?.playButtonBackgroundColor || "rgba(0,0,0,0.5)"}
-                    />
-                    <path d="M20 15L35 25L20 35V15Z" fill={props.buttonStyle?.playIconColor || "#fff"} />
-                </svg>
-            </div>
-        )
-    }
 
     // Debug logging helper - only logs when debug prop is enabled
     const debugLog = useCallback((...args: any[]) => {
@@ -436,16 +75,16 @@ export default function CustomVideoPlayer(props: Props) {
     // When autoPlay is enabled, browsers require videos to be muted
     const initialMuted = props.autoPlay
         ? true
-        : props.defaultSettings?.muted || false
+        : props.defaultSettings?.muted ?? false
     const [state, setState] = useState({
         isPlaying: false,
         isInView: false,
         userInteracted: false,
         hasPlayedOnce: false,
         muted: initialMuted,
-        speed: props.defaultSettings?.speed || 1,
-        volume: props.defaultSettings?.volume || 1,
-        previousVolume: props.defaultSettings?.volume || 1, // Store volume before muting
+        speed: props.defaultSettings?.speed ?? 1,
+        volume: props.defaultSettings?.volume ?? 1,
+        previousVolume: props.defaultSettings?.volume ?? 1, // Store volume before muting
         progress: 0,
         duration: 0,
         fileUrl: null,
@@ -453,24 +92,20 @@ export default function CustomVideoPlayer(props: Props) {
         fullscreen: false,
         loading: true,
         isPiP: false,
-        loop: props.loop || false,
+        loop: props.loop ?? false,
         currentVideoIndex: 0, // NEW: Track current video in playlist
         totalVideos: 1, // NEW: Total number of videos
         isPlaylistComplete: false, // NEW: Track if playlist finished
         volumeHover: false, // For minimal mode volume slider
         showPlayPauseFeedback: false, // Visual feedback for play/pause
         feedbackIcon: null, // 'play' or 'pause'
+        showSpeedMenu: false,
         isTransitioning: false, // Video transition animation
         userPaused: false, // Track if user manually paused (prevents auto-resume)
     })
 
-    // Add store hook for chapter sync
-    const [videoStore, setVideoStore] = useVideoStore()
-
     const [isDragging, setIsDragging] = useState(false)
     const [pipSupported, setPipSupported] = useState(false)
-    const [isVimeoReady, setIsVimeoReady] = useState(false)
-    const [hasAudio, setHasAudio] = useState(true) // Assume true until we can detect
     const vimeoPlayer = useRef(null)
     const preloadVideoRef = useRef(null) // For preloading next video
 
@@ -487,13 +122,6 @@ export default function CustomVideoPlayer(props: Props) {
     const isResizingRef = useRef(false)
     const resizeTimeoutRef = useRef(null)
 
-    // --- Glow refs/state + helpers ---
-    const canvasRef = useRef(null)
-    const [glowColor, setGlowColor] = useState("rgba(100,100,100,0.3)")
-
-    const isBlobUrl = (u) => typeof u === "string" && u.startsWith("blob:")
-    const [canSample, setCanSample] = useState(false)
-
     // Helper to detect mobile/touch devices
     const isMobileDevice = useCallback(() => {
         if (typeof window === "undefined") return false
@@ -507,7 +135,7 @@ export default function CustomVideoPlayer(props: Props) {
         )
     }, [])
 
-    const isMediaUrl = (u) =>
+    const isMediaUrl = (u: unknown): boolean =>
         typeof u === "string" &&
         (u.startsWith("blob:") ||
             u.startsWith("data:video/") ||
@@ -517,12 +145,7 @@ export default function CustomVideoPlayer(props: Props) {
         props.sourceType === "url" && isMediaUrl(props.videoUrl)
     const usingVideoTag = props.sourceType === "file" || usingVideoForUrl
 
-    const cornerRadius = props.style?.cornerRadius || 0
-
-    const glowEnabled = !!props.glow?.enabled
-    const glowIntensity = props.glow?.intensity ?? 0.6
-    const glowBlur = props.glow?.blur ?? 50
-    const glowSpread = props.glow?.spread ?? 20
+    const cornerRadius = props.style?.cornerRadius ?? 8
 
     // Move iframeRef here (before it's used)
     const iframeRef = useRef(null)
@@ -799,46 +422,7 @@ export default function CustomVideoPlayer(props: Props) {
         [advanceToNextVideo, state.currentVideoIndex]
     )
 
-    const hexToRgba = (hex, a = 1) => {
-        if (!hex) return `rgba(0,0,0,${a})`
-        let c = hex.replace("#", "")
-        if (c.length === 3)
-            c = c
-                .split("")
-                .map((x) => x + x)
-                .join("")
-        const n = parseInt(c, 16)
-        const r = (n >> 16) & 255,
-            g = (n >> 8) & 255,
-            b = n & 255
-        return `rgba(${r}, ${g}, ${b}, ${a})`
-    }
-    const withAlpha = (color, a = 1) => {
-        if (!color) return `rgba(0,0,0,${a})`
-        if (color.startsWith("#")) return hexToRgba(color, a)
-        if (color.startsWith("rgba(")) {
-            const parts = color
-                .slice(5, -1)
-                .split(",")
-                .map((s) => s.trim())
-            return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${a})`
-        }
-        if (color.startsWith("rgb(")) {
-            return `rgba(${color.slice(4, -1)}, ${a})`
-        }
-        return color
-    }
 
-    // Glow should be based on video colors, not accent color - use neutral fallback
-    const fallbackGlowBase = props.glow?.color || "rgba(100, 100, 100, 0.5)"
-    const fallbackGlowColor = withAlpha(fallbackGlowBase, glowIntensity)
-    // File = sampled glow; others = fallback color
-    const effectiveGlowColor =
-        usingVideoTag && canSample ? glowColor : fallbackGlowColor
-
-    const mediaBoxShadow = glowEnabled
-        ? `0 0 ${glowBlur}px ${glowSpread}px ${effectiveGlowColor}`
-        : "none"
 
     useEffect(() => {
         const video = refs.video.current
@@ -856,12 +440,14 @@ export default function CustomVideoPlayer(props: Props) {
             video.loop = false
             debugLog("Multiple mode: Video loop forced to false")
         }
+        return () => {}
     }, [props.loop, props.mode])
 
     useEffect(() => {
         if (props.sourceType !== "vimeo" || !iframeRef.current) return
 
         let pollInterval = null
+        let vimeoLoadedTimeout = null
 
         function loadVimeoAPI() {
             if (window.Vimeo) {
@@ -993,9 +579,9 @@ export default function CustomVideoPlayer(props: Props) {
 
                     // If not autoPlay and user didn't want muted, try to unmute
                     if (!props.autoPlay && !props.defaultSettings?.muted) {
-                        setTimeout(() => {
+                        vimeoLoadedTimeout = setTimeout(() => {
                             vimeoPlayer.current
-                                .setVolume(state.volume || 1)
+                                ?.setVolume(state.volume ?? 1)
                                 .catch(() => {
                                     // Silently handle if unmuting fails due to browser policies
                                 })
@@ -1006,7 +592,6 @@ export default function CustomVideoPlayer(props: Props) {
                 }
             })
 
-            setIsVimeoReady(true)
         }
 
         loadVimeoAPI()
@@ -1015,29 +600,14 @@ export default function CustomVideoPlayer(props: Props) {
             if (pollInterval) {
                 clearInterval(pollInterval)
             }
+            if (vimeoLoadedTimeout) {
+                clearTimeout(vimeoLoadedTimeout)
+            }
             if (vimeoPlayer.current) {
                 vimeoPlayer.current.destroy().catch(() => {})
             }
         }
     }, [props.sourceType, props.vimeoId, props.autoPlay, props.loop])
-
-    const controlEmbeddedVideo = (action) => {
-        if (!vimeoPlayer.current) return
-
-        const vimeoActions = {
-            play: () => vimeoPlayer.current.play(),
-            pause: () => vimeoPlayer.current.pause(),
-            mute: () => vimeoPlayer.current.setVolume(0),
-            unmute: () => vimeoPlayer.current.setVolume(state.volume || 1),
-            seek: () => vimeoPlayer.current.setCurrentTime(state.progress),
-        }
-
-        try {
-            vimeoActions[action]?.()
-        } catch (error) {
-            console.error("Vimeo control error:", error)
-        }
-    }
 
     // Unified Intersection Observer for autoplay-on-view behavior
     // Works for all video types: HTML5, Vimeo, YouTube
@@ -1230,20 +800,20 @@ export default function CustomVideoPlayer(props: Props) {
     ])
 
     useEffect(() => {
-        const thumbSize = props.controlsStyle?.thumbSize || 12
+        const thumbSize = props.controlsStyle?.thumbSize ?? 12
         const trackHeight = 4 // Adjust this if needed
 
         const style = document.createElement("style")
         style.textContent = `
-            input[type='range'] {
+            .frameplay-range input[type='range'] {
                 -webkit-appearance: none;
                 appearance: none;
                 width: 100%;
                 background: transparent;
                 position: relative;
             }
-            
-            input[type='range']::-webkit-slider-runnable-track {
+
+            .frameplay-range input[type='range']::-webkit-slider-runnable-track {
                 width: 100%;
                 height: ${trackHeight}px;
                 border-radius: ${trackHeight / 2}px;
@@ -1251,7 +821,7 @@ export default function CustomVideoPlayer(props: Props) {
                 cursor: pointer;
             }
 
-            input[type='range']::-webkit-slider-thumb {
+            .frameplay-range input[type='range']::-webkit-slider-thumb {
                 -webkit-appearance: none;
                 appearance: none;
                 width: ${thumbSize}px;
@@ -1263,7 +833,7 @@ export default function CustomVideoPlayer(props: Props) {
                 margin-top: -${(thumbSize - trackHeight) / 2}px; /* Ensures proper centering */
             }
 
-            input[type='range']::-moz-range-track {
+            .frameplay-range input[type='range']::-moz-range-track {
                 width: 100%;
                 height: ${trackHeight}px;
                 border-radius: ${trackHeight / 2}px;
@@ -1271,7 +841,7 @@ export default function CustomVideoPlayer(props: Props) {
                 cursor: pointer;
             }
 
-            input[type='range']::-moz-range-thumb {
+            .frameplay-range input[type='range']::-moz-range-thumb {
                 width: ${thumbSize}px;
                 height: ${thumbSize}px;
                 background-color: ${props.controlsStyle?.thumbColor || "#FFFFFF"};
@@ -1292,41 +862,43 @@ export default function CustomVideoPlayer(props: Props) {
     // Add focus styles for accessibility and fullscreen support
     useEffect(() => {
         const focusStyles = `
-            .video-player-button:focus {
+            .frameplay-container .frameplay-btn:focus {
                 outline: none; /* Remove outline */
                 opacity: 1;
             }
-            
-            .video-player-button:focus:not(:focus-visible) {
+
+            .frameplay-container .frameplay-btn:focus:not(:focus-visible) {
                 outline: none;
             }
-            
-            .video-player-button:focus-visible {
-                outline: none; /* Remove outline */
+
+            .frameplay-container .frameplay-btn:focus-visible {
+                outline: 2px solid currentColor;
+                outline-offset: -2px;
             }
-            
-            .video-player-play-button:focus {
+
+            .frameplay-container .frameplay-play-btn:focus {
                 outline: none; /* Remove outline */
                 transform: translate(-50%, -50%) scale(1.05);
             }
 
-            .video-player-container:focus {
+            .frameplay-container:focus {
                 outline: none; /* Remove outline */
             }
 
-            .video-player-container:focus:not(:focus-visible) {
+            .frameplay-container:focus:not(:focus-visible) {
                 outline: none;
             }
 
-            .video-player-container:focus-visible {
-                outline: none; /* Remove outline */
+            .frameplay-container:focus-visible {
+                outline: 2px solid currentColor;
+                outline-offset: -2px;
             }
-            
+
             /* Fullscreen styles for container and iframe */
-            .video-player-container:fullscreen,
-            .video-player-container:-webkit-full-screen,
-            .video-player-container:-moz-full-screen,
-            .video-player-container:-ms-fullscreen {
+            .frameplay-container:fullscreen,
+            .frameplay-container:-webkit-full-screen,
+            .frameplay-container:-moz-full-screen,
+            .frameplay-container:-ms-fullscreen {
                 width: 100% !important;
                 height: 100% !important;
                 max-width: 100vw !important;
@@ -1334,10 +906,10 @@ export default function CustomVideoPlayer(props: Props) {
                 background-color: #000 !important;
             }
             
-            .video-player-container:fullscreen iframe,
-            .video-player-container:-webkit-full-screen iframe,
-            .video-player-container:-moz-full-screen iframe,
-            .video-player-container:-ms-fullscreen iframe {
+            .frameplay-container:fullscreen iframe,
+            .frameplay-container:-webkit-full-screen iframe,
+            .frameplay-container:-moz-full-screen iframe,
+            .frameplay-container:-ms-fullscreen iframe {
                 width: 100% !important;
                 height: 100% !important;
                 position: absolute !important;
@@ -1345,10 +917,10 @@ export default function CustomVideoPlayer(props: Props) {
                 left: 0 !important;
             }
             
-            .video-player-container:fullscreen video,
-            .video-player-container:-webkit-full-screen video,
-            .video-player-container:-moz-full-screen video,
-            .video-player-container:-ms-fullscreen video {
+            .frameplay-container:fullscreen video,
+            .frameplay-container:-webkit-full-screen video,
+            .frameplay-container:-moz-full-screen video,
+            .frameplay-container:-ms-fullscreen video {
                 width: 100% !important;
                 height: 100% !important;
                 object-fit: contain !important;
@@ -1378,17 +950,17 @@ export default function CustomVideoPlayer(props: Props) {
         button: {
             background: "none",
             border: "none",
-            minWidth: "44px", // Ensure 44px minimum tap target
-            minHeight: "44px",
-            padding: "8px",
+            minWidth: props.controlsPreset === "pill" ? "36px" : "44px",
+            minHeight: props.controlsPreset === "pill" ? "36px" : "44px",
+            padding: props.controlsPreset === "pill" ? "6px" : "8px",
             cursor: "pointer",
-            color: props.style?.controlsColor || "#FFF",
+            color: props.controlsStyle?.controlsColor || "#FFF",
             opacity: 0.9,
             transition: "all 0.2s ease",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            borderRadius: "4px", // Add for focus outline
+            borderRadius: "4px",
             position: "relative",
         },
         playButton: {
@@ -1403,19 +975,54 @@ export default function CustomVideoPlayer(props: Props) {
         },
         controlsStyle: {
             position: state.fullscreen ? "fixed" : "absolute",
-            bottom: "16px",
-            left: "16px",
-            right: "16px",
-            padding: "12px 16px",
-            backdropFilter: "blur(16px)",
-            backgroundColor: `rgba(28, 28, 30, ${props.style?.controlsOpacity || 0.6})`,
-            borderRadius: "12px",
             display: "flex",
             alignItems: "center",
-            gap: "12px",
-            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
-            border: "1px solid rgba(255, 255, 255, 0.1)",
-            zIndex: "10000", // Ensure it's always above the YouTube iframe
+            zIndex: "10000",
+            // Preset: Glass (default)
+            ...((!props.controlsPreset || props.controlsPreset === "glass") && {
+                bottom: "16px",
+                left: "16px",
+                right: "16px",
+                padding: "12px 16px",
+                gap: "12px",
+                backdropFilter: "blur(16px) saturate(1.2)",
+                WebkitBackdropFilter: "blur(16px) saturate(1.2)",
+                backgroundColor: `rgba(28, 28, 30, ${props.controlsStyle?.controlsOpacity ?? 0.6})`,
+                borderRadius: "12px",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+            }),
+            // Preset: Solid
+            ...(props.controlsPreset === "solid" && {
+                bottom: "0",
+                left: "0",
+                right: "0",
+                padding: "10px 16px",
+                gap: "12px",
+                backdropFilter: "none",
+                WebkitBackdropFilter: "none",
+                backgroundColor: `rgba(0, 0, 0, ${props.controlsStyle?.controlsOpacity ?? 0.85})`,
+                borderRadius: "0",
+                boxShadow: "none",
+                border: "none",
+                borderTop: "1px solid rgba(255, 255, 255, 0.06)",
+            }),
+            // Preset: Pill
+            ...(props.controlsPreset === "pill" && {
+                bottom: "12px",
+                left: "50%",
+                right: "auto",
+                transform: "translateX(-50%)",
+                padding: "6px 14px",
+                gap: "8px",
+                backdropFilter: "blur(24px) saturate(1.6)",
+                WebkitBackdropFilter: "blur(24px) saturate(1.6)",
+                backgroundColor: `rgba(0, 0, 0, ${props.controlsStyle?.controlsOpacity ?? 0.5})`,
+                borderRadius: "100px",
+                boxShadow: "0 2px 12px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(255, 255, 255, 0.08) inset",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                width: "auto",
+            }),
         },
     }
     // Effects
@@ -1432,13 +1039,8 @@ export default function CustomVideoPlayer(props: Props) {
 
     // Video source effect (updated for playlist support)
     useEffect(() => {
+        let mounted = true
         const currentSource = getCurrentVideoSource()
-        debugLog(
-            "[Glow] current source =",
-            currentSource,
-            "| is File =",
-            currentSource instanceof File
-        )
         debugLog(
             "[Playlist Debug] Video source effect - mode:",
             props.mode,
@@ -1448,10 +1050,9 @@ export default function CustomVideoPlayer(props: Props) {
 
         if (currentSource instanceof File) {
             const objectURL = URL.createObjectURL(currentSource)
-            debugLog("[Glow] created objectURL =", objectURL)
-            setState((prev) => ({ ...prev, fileUrl: objectURL }))
+            if (mounted) setState((prev) => ({ ...prev, fileUrl: objectURL }))
             return () => {
-                debugLog("[Glow] revoke objectURL =", objectURL)
+                mounted = false
                 URL.revokeObjectURL(objectURL)
             }
         } else {
@@ -1475,42 +1076,33 @@ export default function CustomVideoPlayer(props: Props) {
                 )
 
                 if (hasCorsIssues) {
-                    debugLog(
-                        "[Glow] (url) skipping fetch for CORS-problematic domain, using direct URL"
-                    )
-                    setState((prev) => ({ ...prev, fileUrl: currentSource }))
-                    return
+                    if (mounted) setState((prev) => ({ ...prev, fileUrl: currentSource }))
+                    return () => { mounted = false }
                 }
 
                 ;(async () => {
                     try {
-                        debugLog(
-                            "[Glow] (url) trying to fetch video to blob:",
-                            currentSource
-                        )
                         const res = await fetch(currentSource, {
                             mode: "cors",
                         })
                         if (!res.ok) throw new Error(`HTTP ${res.status}`)
                         const blob = await res.blob()
                         const objectURL = URL.createObjectURL(blob)
-                        debugLog(
-                            "[Glow] (url) fetched blob, objectURL =",
-                            objectURL
-                        )
+                        if (!mounted) return
                         setState((prev) => ({ ...prev, fileUrl: objectURL }))
                     } catch (err) {
                         console.warn(
-                            "[Glow] (url) fetch->blob failed; using direct URL (no sampling):",
+                            "[Video] (url) fetch->blob failed; using direct URL:",
                             err
                         )
+                        if (!mounted) return
                         setState((prev) => ({
                             ...prev,
                             fileUrl: currentSource,
                         }))
                     }
                 })()
-                return
+                return () => { mounted = false }
             }
 
             // Original file mode
@@ -1521,32 +1113,30 @@ export default function CustomVideoPlayer(props: Props) {
             ) {
                 ;(async () => {
                     try {
-                        debugLog(
-                            "[Glow] trying to fetch video to blob:",
-                            currentSource
-                        )
                         const res = await fetch(currentSource, {
                             mode: "cors",
                         })
                         if (!res.ok) throw new Error(`HTTP ${res.status}`)
                         const blob = await res.blob()
                         const objectURL = URL.createObjectURL(blob)
-                        debugLog("[Glow] fetched blob, objectURL =", objectURL)
+                        if (!mounted) return
                         setState((prev) => ({ ...prev, fileUrl: objectURL }))
                     } catch (err) {
                         console.warn(
-                            "[Glow] fetch->blob failed; using direct URL (no sampling):",
+                            "[Video] fetch->blob failed; using direct URL:",
                             err
                         )
+                        if (!mounted) return
                         setState((prev) => ({
                             ...prev,
                             fileUrl: currentSource,
                         }))
                     }
                 })()
+                return () => { mounted = false }
             } else {
-                debugLog("[Glow] using direct URL =", currentSource)
-                setState((prev) => ({ ...prev, fileUrl: currentSource }))
+                if (mounted) setState((prev) => ({ ...prev, fileUrl: currentSource }))
+                return () => { mounted = false }
             }
         }
     }, [
@@ -1555,11 +1145,6 @@ export default function CustomVideoPlayer(props: Props) {
         props.mode,
         state.currentVideoIndex,
     ]) // Add dependency on current video
-
-    useEffect(() => {
-        setCanSample(isBlobUrl(state.fileUrl || ""))
-    }, [state.fileUrl])
-
     // Update total videos when playlist changes
     useEffect(() => {
         const totalVideos = getTotalVideos()
@@ -1573,6 +1158,7 @@ export default function CustomVideoPlayer(props: Props) {
                     : prev.currentVideoIndex,
             isPlaylistComplete: false,
         }))
+        return () => {}
     }, [getTotalVideos])
 
     // Auto-play when video source changes in playlist mode
@@ -1695,47 +1281,6 @@ export default function CustomVideoPlayer(props: Props) {
             }
         }
     }, [])
-
-    // Probe once on load to allow sampling from CORS-enabled direct URLs
-    useEffect(() => {
-        if (!glowEnabled || !usingVideoTag) return
-        const video = refs.video.current
-        const canvas = canvasRef.current
-        if (!video || !canvas) return
-        const ctx = canvas.getContext("2d", { willReadFrequently: true })
-        if (!ctx) return
-        const tryProbe = () => {
-            if (video.readyState < 2) return
-            try {
-                canvas.width = 1
-                canvas.height = 1
-                ctx.drawImage(video, 0, 0, 1, 1)
-                ctx.getImageData(0, 0, 1, 1) // if this succeeds, we can sample
-                setCanSample(true)
-                debugLog("[Glow] probe success: sampling enabled (CORS OK)")
-            } catch (e) {
-                debugLog("[Glow] probe failed: sampling disabled (likely CORS)")
-                setCanSample(isBlobUrl(state.fileUrl || "")) // keep blob-only if any
-            }
-        }
-        video.addEventListener("loadeddata", tryProbe, { once: true })
-        return () => video.removeEventListener("loadeddata", tryProbe)
-    }, [glowEnabled, usingVideoTag, state.fileUrl])
-
-    const videoStyle = {
-        width: "100%",
-        height: "100%",
-        objectFit: props.style?.videoFit || "cover",
-        position: "absolute", // Ensures full stretching
-        top: 0,
-        left: 0,
-    }
-
-    // Ensure "fill" truly fills without gaps
-    if (props.style?.videoFit === "fill") {
-        videoStyle.width = "100vw" // Forces full width
-        videoStyle.height = "100vh" // Forces full height
-    }
 
     useEffect(() => {
         const video = refs.video.current
@@ -2484,12 +2029,12 @@ export default function CustomVideoPlayer(props: Props) {
                         previousVolume:
                             prev.volume > 0
                                 ? prev.volume
-                                : prev.previousVolume || 1,
+                                : prev.previousVolume ?? 1,
                     }))
                 } else {
                     // Currently muted, restore previous volume
                     const volumeToRestore =
-                        state.previousVolume || state.volume || 1
+                        state.previousVolume ?? state.volume ?? 1
                     await vimeoPlayer.current.setVolume(volumeToRestore)
                     setState((prev) => ({
                         ...prev,
@@ -2509,18 +2054,18 @@ export default function CustomVideoPlayer(props: Props) {
                     setState((prev) => ({
                         ...prev,
                         muted: false,
-                        volume: volume > 0 ? volume : prev.previousVolume || 1,
+                        volume: volume > 0 ? volume : prev.previousVolume ?? 1,
                     }))
                 } else {
+                    youtubePlayer.current.mute()
                     setState((prev) => ({
                         ...prev,
+                        muted: true,
                         previousVolume:
                             prev.volume > 0
                                 ? prev.volume
-                                : prev.previousVolume || 1,
+                                : prev.previousVolume ?? 1,
                     }))
-                    youtubePlayer.current.mute()
-                    setState((prev) => ({ ...prev, muted: true }))
                 }
             } catch (error) {
                 console.error("YouTube mute/unmute error:", error)
@@ -2550,7 +2095,7 @@ export default function CustomVideoPlayer(props: Props) {
                         previousVolume:
                             prev.volume > 0
                                 ? prev.volume
-                                : prev.previousVolume || 1,
+                                : prev.previousVolume ?? 1,
                     }))
                     video.muted = true
                     setState((prev) => ({ ...prev, muted: true }))
@@ -2558,7 +2103,7 @@ export default function CustomVideoPlayer(props: Props) {
                     // Currently muted, restore previous volume
                     video.muted = false
                     const volumeToRestore =
-                        state.previousVolume || state.volume || 1
+                        state.previousVolume ?? state.volume ?? 1
                     video.volume = volumeToRestore
                     setState((prev) => ({
                         ...prev,
@@ -2584,7 +2129,7 @@ export default function CustomVideoPlayer(props: Props) {
             // Prevent default for these specific keys
             if (
                 [
-                    " ",
+                    "Space",
                     "ArrowLeft",
                     "ArrowRight",
                     "ArrowUp",
@@ -3082,6 +2627,15 @@ export default function CustomVideoPlayer(props: Props) {
                 debugLog("[YouTube Init] Adding YouTube API script tag")
                 const tag = document.createElement("script")
                 tag.src = "https://www.youtube.com/iframe_api"
+                tag.onerror = () => {
+                    console.warn("[YouTube Init] Failed to load YouTube IFrame API")
+                }
+                const ytTimeout = setTimeout(() => {
+                    if (!window.YT?.Player) {
+                        console.warn("[YouTube Init] YouTube API load timed out")
+                    }
+                }, 10000)
+                tag.onload = () => clearTimeout(ytTimeout)
                 document.body.appendChild(tag)
             } else {
                 debugLog("[YouTube Init] Script tag already exists")
@@ -3098,7 +2652,10 @@ export default function CustomVideoPlayer(props: Props) {
             }
         }
 
-        return () => clearInterval(progressInterval.current)
+        return () => {
+            clearInterval(progressInterval.current)
+            progressInterval.current = null
+        }
     }, [props.sourceType])
 
     // Add effect to handle changes to autoplay and loop settings
@@ -3263,18 +2820,6 @@ export default function CustomVideoPlayer(props: Props) {
         }
     }
 
-    const handleLoop = () => {
-        const video = refs.video.current
-        if (video) {
-            const shouldLoop = props.mode === "single" ? props.loop : false
-            video.loop = shouldLoop
-            setState((prev) => ({
-                ...prev,
-                loop: shouldLoop,
-            }))
-        }
-    }
-
     const togglePictureInPicture = async () => {
         const video = refs.video.current
         if (!video || !document.pictureInPictureEnabled) return
@@ -3301,40 +2846,16 @@ export default function CustomVideoPlayer(props: Props) {
         }
     }
 
-    const pipStyles = {
-        position: "fixed",
-        bottom: "10px",
-        right: "10px",
-        width: "auto",
-        height: "auto",
-        transform: "scale(0.5)", // Reduce size to half
-        transformOrigin: "bottom right", // Ensure scaling keeps it in the right place
-        zIndex: 9999,
-    }
-
-    // Modify Property Controls to Hide Speed Control
     const showSpeedControl =
         props.sourceType === "file" || props.sourceType === "url"
 
-    const speedControl = {
-        showSpeed: {
-            type: ControlType.Boolean,
-            title: "Speed Control",
-            defaultValue: true,
-            hidden: (props) =>
-                props.sourceType !== "file" && props.sourceType !== "url",
-        },
-    }
-
     // JSX
     const controlsVisible =
-        (state.hovering || !state.isPlaying || state.fullscreen) &&
-        !(props.useCustomPlayButton && !state.hasPlayedOnce)
-
-    const showChapterTimeline =
-        props.chaptersMode === "embedded" &&
-        (props.manualChapters?.length ?? 0) > 0 &&
-        ((state.duration || 0) > 0 || props.sourceType === "youtube")
+        props.controlsMode === "minimal"
+            ? state.isPlaying && (state.hovering || state.fullscreen) &&
+              !(props.useCustomPlayButton && !state.hasPlayedOnce)
+            : (state.hovering || !state.isPlaying || state.fullscreen) &&
+              !(props.useCustomPlayButton && !state.hasPlayedOnce)
 
     const shouldShowOverlay = !(
         state.isPlaying ||
@@ -3383,41 +2904,6 @@ export default function CustomVideoPlayer(props: Props) {
         props.vimeoIds,
     ])
 
-    // Optional small renderer to normalize the custom instance positioning
-    const renderCustomPlay = () => {
-        const inst = props.customPlayButton
-        if (isValidElement(inst)) {
-            const prev = inst.props?.style || {}
-            return cloneElement(inst, {
-                style: {
-                    ...prev,
-                    // 1) Remove canvas positioning/frame
-                    position: "relative",
-                    left: "auto",
-                    top: "auto",
-                    right: "auto",
-                    bottom: "auto",
-                    inset: "unset",
-                    transform: "none",
-                    margin: 0,
-
-                    // 2) Size to content so its own center is true center
-                    width: "max-content",
-                    height: "max-content",
-
-                    // 3) Center its own internal content too
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    transformOrigin: "center center",
-                    verticalAlign: "middle",
-                },
-                onClick: undefined, // wrapper handles click
-            })
-        }
-        return <div style={{ display: "contents" }}>{inst}</div>
-    }
-
     const handleContainerClickCapture = useCallback(
         (e) => {
             const target = e.target
@@ -3432,7 +2918,9 @@ export default function CustomVideoPlayer(props: Props) {
             if (closestInteractive) {
                 // Ignore hidden/disabled-by-pointer-events interactives (like our hidden overlay)
                 const pe =
-                    window.getComputedStyle(closestInteractive).pointerEvents
+                    typeof window !== "undefined"
+                        ? window.getComputedStyle(closestInteractive).pointerEvents
+                        : ""
                 isInteractive = pe !== "none"
             }
 
@@ -3486,206 +2974,66 @@ export default function CustomVideoPlayer(props: Props) {
         })
     }, [])
 
-    useEffect(() => {
-        debugLog(
-            "[Glow] sampler effect mount | glowEnabled =",
-            glowEnabled,
-            "| sourceType =",
-            props.sourceType,
-            "| canSample =",
-            canSample
+
+    if (isStaticRenderer) {
+        return (
+            <div
+                style={{
+                    width: "100%",
+                    height: "100%",
+                    position: "relative",
+                    background: props.style?.backgroundColor ?? "#000000",
+                    borderRadius: props.style?.cornerRadius ?? 8,
+                    overflow: "hidden",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                }}
+            >
+                {props.posterImage && (
+                    <img
+                        alt={props.accessibility?.title || "Video poster"}
+                        src={props.posterImage}
+                        style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: props.style?.videoFit || "cover",
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                        }}
+                    />
+                )}
+                <svg
+                    width="50"
+                    height="50"
+                    viewBox="0 0 50 50"
+                    fill="none"
+                    style={{ position: "relative", zIndex: 1, opacity: 0.8 }}
+                >
+                    <rect
+                        width="50"
+                        height="50"
+                        rx={props.buttonStyle?.playButtonBorderRadius ?? 8}
+                        fill={props.buttonStyle?.playButtonBackgroundColor || "rgba(0,0,0,0.5)"}
+                    />
+                    <path d="M20 15L35 25L20 35V15Z" fill={props.buttonStyle?.playIconColor || "#fff"} />
+                </svg>
+            </div>
         )
-        if (!glowEnabled) return
-        if (!usingVideoTag || !canSample) return
-
-        const video = refs.video.current
-        const canvas = canvasRef.current
-        if (!video || !canvas) {
-            debugLog(
-                "[Glow] missing elements | video =",
-                !!video,
-                "| canvas =",
-                !!canvas
-            )
-            return
-        }
-
-        const ctx = canvas.getContext("2d", { willReadFrequently: true })
-        if (!ctx) {
-            debugLog("[Glow] 2d context unavailable")
-            return
-        }
-
-        let intervalId
-
-        const extract = () => {
-            if (video.readyState < 2) {
-                debugLog(
-                    "[Glow] extract skipped; readyState =",
-                    video.readyState,
-                    "(need >= 2)"
-                )
-                return
-            }
-            try {
-                canvas.width = 1
-                canvas.height = 1
-                ctx.drawImage(video, 0, 0, 1, 1)
-                const d = ctx.getImageData(0, 0, 1, 1).data
-                const col = `rgba(${d[0]}, ${d[1]}, ${d[2]}, ${glowIntensity})`
-                debugLog(
-                    "[Glow] sampled RGBA =",
-                    d[0],
-                    d[1],
-                    d[2],
-                    "| color =",
-                    col
-                )
-                setGlowColor(col)
-            } catch (err) {
-                console.warn(
-                    "[Glow] sampling failed (likely CORS if not Blob URL):",
-                    err
-                )
-            }
-        }
-
-        const start = () => {
-            clearInterval(intervalId)
-            extract()
-            intervalId = setInterval(extract, 250)
-            debugLog("[Glow] sampler started")
-        }
-        const stop = () => {
-            clearInterval(intervalId)
-            debugLog("[Glow] sampler stopped")
-        }
-
-        const onPlay = () => {
-            debugLog("[Glow] video play -> start sampler")
-            start()
-        }
-        const onPause = () => {
-            debugLog("[Glow] video pause -> stop sampler")
-            stop()
-        }
-        const onEnded = () => {
-            debugLog("[Glow] video ended -> stop sampler")
-            stop()
-        }
-        const onLoaded = () => {
-            debugLog("[Glow] loadeddata | readyState =", video.readyState)
-            extract()
-        }
-
-        debugLog(
-            "[Glow] attaching listeners | src =",
-            video.currentSrc || state.fileUrl
-        )
-        video.addEventListener("play", onPlay)
-        video.addEventListener("pause", onPause)
-        video.addEventListener("ended", onEnded)
-        video.addEventListener("loadeddata", onLoaded)
-
-        if (!video.paused) start()
-
-        return () => {
-            stop()
-            debugLog("[Glow] detach listeners")
-            video.removeEventListener("play", onPlay)
-            video.removeEventListener("pause", onPause)
-            video.removeEventListener("ended", onEnded)
-            video.removeEventListener("loadeddata", onLoaded)
-        }
-    }, [glowEnabled, glowIntensity, props.sourceType, state.fileUrl, canSample])
-
-    // Sync chapters to store
-    useEffect(() => {
-        if (props.chaptersMode !== "external") return // Only sync if external mode
-
-        const normalizedChapters = (props.manualChapters || []).map(
-            (chapter) => ({
-                ...chapter,
-                start: (chapter.minutes ?? 0) * 60 + (chapter.seconds ?? 0),
-            })
-        )
-
-        setVideoStore({
-            chapters: normalizedChapters,
-        })
-        return () => setVideoStore({ chapters: [] })
-    }, [props.manualChapters, props.chaptersMode])
-
-    // Sync playback state to store
-    useEffect(() => {
-        if (props.chaptersMode !== "external") return
-
-        setVideoStore({
-            isPlaying: state.isPlaying,
-            progress: state.progress,
-            duration: state.duration,
-        })
-        return () => setVideoStore({ isPlaying: false, progress: 0, duration: 0 })
-    }, [state.isPlaying, state.progress, state.duration, props.chaptersMode])
-
-    // Update active chapter based on progress
-    useEffect(() => {
-        if (props.chaptersMode !== "external") return
-
-        const chapters = videoStore.chapters
-        if (chapters.length === 0) return
-
-        let activeIndex = 0
-        for (let i = chapters.length - 1; i >= 0; i--) {
-            if (state.progress >= (chapters[i].start ?? 0)) {
-                activeIndex = i
-                break
-            }
-        }
-
-        if (activeIndex !== videoStore.activeChapterIndex) {
-            setVideoStore({ activeChapterIndex: activeIndex })
-        }
-        return () => setVideoStore({ activeChapterIndex: 0 })
-    }, [state.progress, videoStore.chapters, props.chaptersMode])
-
-    // Expose control functions to store
-    useEffect(() => {
-        if (props.chaptersMode !== "external") return
-
-        setVideoStore({
-            seekTo: (time) => {
-                if (
-                    props.sourceType === "youtube" &&
-                    youtubePlayer.current?.seekTo
-                ) {
-                    youtubePlayer.current.seekTo(time, true)
-                } else if (
-                    props.sourceType === "vimeo" &&
-                    vimeoPlayer.current?.setCurrentTime
-                ) {
-                    vimeoPlayer.current.setCurrentTime(time).catch(() => {})
-                } else if (refs.video.current) {
-                    refs.video.current.currentTime = time
-                }
-                setState((prev) => ({ ...prev, progress: time }))
-            },
-            togglePlayPause: handlePlayPause,
-        })
-        return () => setVideoStore({ seekTo: undefined, togglePlayPause: undefined })
-    }, [handlePlayPause, props.sourceType, props.chaptersMode])
+    }
 
     return (
         <div
             ref={refs.container}
-            className="video-player-container"
+            className="frameplay-container"
             style={{
                 width: "100%",
                 height: "100%",
                 position: "relative",
                 backgroundColor: props.style?.backgroundColor || "#000",
-                borderRadius: props.style?.cornerRadius || 0,
-                overflow: glowEnabled ? "visible" : "hidden",
+                borderRadius: props.style?.cornerRadius ?? 8,
+                overflow: "hidden",
             }}
             onMouseEnter={() =>
                 setState((prev) => ({ ...prev, hovering: true }))
@@ -3696,12 +3044,14 @@ export default function CustomVideoPlayer(props: Props) {
             onPointerDown={() => {
                 markUserInteracted()
                 // On mobile, tap shows controls (no hover) so user can access volume/unmute
-                const isTouch =
-                    "ontouchstart" in window ||
-                    navigator.maxTouchPoints > 0 ||
-                    window.matchMedia("(pointer: coarse)").matches
-                if (isTouch) {
-                    setState((prev) => ({ ...prev, hovering: true }))
+                if (typeof window !== "undefined") {
+                    const isTouch =
+                        "ontouchstart" in window ||
+                        navigator.maxTouchPoints > 0 ||
+                        window.matchMedia("(pointer: coarse)").matches
+                    if (isTouch) {
+                        setState((prev) => ({ ...prev, hovering: true }))
+                    }
                 }
             }}
             onKeyDown={(e) => {
@@ -3748,7 +3098,7 @@ export default function CustomVideoPlayer(props: Props) {
                         alignItems: "center",
                         justifyContent: "center",
                         gap: "12px",
-                        borderRadius: props.style?.cornerRadius || 0,
+                        borderRadius: props.style?.cornerRadius ?? 8,
                         background: props.style?.backgroundColor || "#000",
                         color: "rgba(255, 255, 255, 0.4)",
                         fontFamily:
@@ -3809,7 +3159,7 @@ export default function CustomVideoPlayer(props: Props) {
                         Configure in the properties panel
                     </span>
                 </div>
-            ) : props.sourceType === "file" ? (
+            ) : usingVideoTag ? (
                 <video
                     ref={refs.video}
                     src={state.fileUrl}
@@ -3818,265 +3168,33 @@ export default function CustomVideoPlayer(props: Props) {
                         width: "100%",
                         height: "100%",
                         objectFit: props.style?.videoFit || "cover",
-                        borderRadius: props.style?.cornerRadius || 0,
-                        boxShadow: mediaBoxShadow,
+                        borderRadius: props.style?.cornerRadius ?? 8,
                         opacity: state.isTransitioning ? 0 : 1,
-                        transition: glowEnabled
-                            ? "box-shadow 0.25s ease, opacity 0.15s ease-out"
-                            : "opacity 0.15s ease-out",
+                        transition: "opacity 0.15s ease-out",
                     }}
                     onTimeUpdate={handleTimeUpdate}
-                    onLoadedData={() => {
-                        const v = refs.video.current
-                        debugLog("[Playlist Debug] onLoadedData called")
-                        debugLog(
-                            "[Playlist Debug] Video readyState:",
-                            v?.readyState
-                        )
-                        debugLog(
-                            "[Playlist Debug] Video duration:",
-                            v?.duration
-                        )
-                        debugLog(
-                            "[Playlist Debug] Current index:",
-                            state.currentVideoIndex
-                        )
-                        debugLog("[Playlist Debug] Event handlers attached:", {
-                            onEnded: !!handleVideoEnded,
-                            onError: !!handleVideoError,
-                        })
-                        debugLog(
-                            "[Glow] onLoadedData | readyState =",
-                            v?.readyState,
-                            "| src =",
-                            v?.currentSrc
-                        )
-                        handleLoadedData()
-                    }}
-                    onLoadedMetadata={() => {
-                        const video = refs.video.current
-                        if (video) {
-                            // Detect if video has audio
-                            const audioDetected =
-                                (video.audioTracks &&
-                                    video.audioTracks.length > 0) ||
-                                video.mozHasAudio ||
-                                Boolean(video.webkitAudioDecodedByteCount) ||
-                                Boolean(video.audioTracks?.length)
-                            setHasAudio(audioDetected)
-                            debugLog(
-                                "[FramePlay] Audio detected:",
-                                audioDetected
-                            )
-                        }
-                    }}
+                    onLoadedData={handleLoadedData}
                     onPlay={() => {
-                        debugLog(
-                            "[Playlist Debug] onPlay fired for video at index:",
-                            state.currentVideoIndex
-                        )
-                        debugLog(
-                            "[Playlist Debug] Video src:",
-                            refs.video.current?.currentSrc
-                        )
-                        debugLog("[FramePlay] <video> onPlay fired")
                         setState((prev) => ({
                             ...prev,
                             isPlaying: true,
                             hasPlayedOnce: true,
                         }))
-                        debugLog(
-                            "[Glow] play | computed boxShadow should be:",
-                            mediaBoxShadow
-                        )
                     }}
                     onPause={() => {
-                        debugLog(
-                            "[Playlist Debug] onPause fired for video at index:",
-                            state.currentVideoIndex
-                        )
-                        debugLog("[FramePlay] <video> onPause fired")
                         setState((prev) => ({ ...prev, isPlaying: false }))
                     }}
-                    onEnded={(e) => {
-                        debugLog("[Playlist Debug] onEnded event fired!")
-                        debugLog(
-                            "[Playlist Debug] Current video index:",
-                            state.currentVideoIndex
-                        )
-                        debugLog("[Playlist Debug] Event target:", e.target)
-                        debugLog(
-                            "[Playlist Debug] Video currentTime:",
-                            e.target.currentTime
-                        )
-                        debugLog(
-                            "[Playlist Debug] Video duration:",
-                            e.target.duration
-                        )
-                        debugLog("[Playlist Debug] Calling handleVideoEnded...")
-                        handleVideoEnded()
-                    }}
-                    onError={(e) => {
-                        debugLog("[Playlist Debug] onError event fired!")
-                        debugLog("[Playlist Debug] Error:", e)
-                        debugLog(
-                            "[Playlist Debug] Current video index:",
-                            state.currentVideoIndex
-                        )
-                        debugLog("[Playlist Debug] Calling handleVideoError...")
-                        handleVideoError(e)
-                    }}
+                    onEnded={handleVideoEnded}
+                    onError={handleVideoError}
                     onClick={(e) => {
-                        debugLog("[FramePlay] <video> direct click")
                         e.stopPropagation()
                         safeToggle()
                     }}
-                    loop={props.mode === "single" ? props.loop : false} // KEY FIX: Only allow individual video looping in single mode
+                    loop={props.mode === "single" ? props.loop : false}
                     muted={state.muted}
                     playsInline
                     webkit-playsinline="true"
                     x-webkit-airplay="allow"
-                    allowFullScreen
-                    aria-label={props.accessibility?.title || "Video"}
-                    aria-describedby={
-                        props.accessibility?.description
-                            ? "video-description"
-                            : undefined
-                    }
-                    lang={props.accessibility?.language || "en"}
-                />
-            ) : props.sourceType === "url" && usingVideoForUrl ? (
-                <video
-                    ref={refs.video}
-                    src={state.fileUrl}
-                    poster={props.posterImage || undefined}
-                    style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: props.style?.videoFit || "cover",
-                        borderRadius: props.style?.cornerRadius || 0,
-                        boxShadow: mediaBoxShadow,
-                        opacity: state.isTransitioning ? 0 : 1,
-                        transition: glowEnabled
-                            ? "box-shadow 0.25s ease, opacity 0.15s ease-out"
-                            : "opacity 0.15s ease-out",
-                    }}
-                    onTimeUpdate={handleTimeUpdate}
-                    onLoadedData={() => {
-                        const v = refs.video.current
-                        debugLog(
-                            "[Playlist Debug] onLoadedData called (URL media)"
-                        )
-                        debugLog(
-                            "[Playlist Debug] Video readyState:",
-                            v?.readyState
-                        )
-                        debugLog(
-                            "[Playlist Debug] Video duration:",
-                            v?.duration
-                        )
-                        debugLog(
-                            "[Playlist Debug] Current index:",
-                            state.currentVideoIndex
-                        )
-                        debugLog("[Playlist Debug] Event handlers attached:", {
-                            onEnded: !!handleVideoEnded,
-                            onError: !!handleVideoError,
-                        })
-                        debugLog(
-                            "[Glow] onLoadedData (URL media) | readyState =",
-                            v?.readyState,
-                            "| src =",
-                            v?.currentSrc
-                        )
-                        handleLoadedData()
-                    }}
-                    onLoadedMetadata={() => {
-                        const video = refs.video.current
-                        if (video) {
-                            // Detect if video has audio
-                            const audioDetected =
-                                (video.audioTracks &&
-                                    video.audioTracks.length > 0) ||
-                                video.mozHasAudio ||
-                                Boolean(video.webkitAudioDecodedByteCount) ||
-                                Boolean(video.audioTracks?.length)
-                            setHasAudio(audioDetected)
-                            debugLog(
-                                "[FramePlay] Audio detected (URL):",
-                                audioDetected
-                            )
-                        }
-                    }}
-                    onPlay={() => {
-                        debugLog(
-                            "[Playlist Debug] onPlay fired for video at index:",
-                            state.currentVideoIndex,
-                            "(URL media)"
-                        )
-                        debugLog(
-                            "[Playlist Debug] Video src:",
-                            refs.video.current?.currentSrc
-                        )
-                        debugLog("[FramePlay] <video:url> onPlay fired")
-                        setState((prev) => ({
-                            ...prev,
-                            isPlaying: true,
-                            hasPlayedOnce: true,
-                        }))
-                        debugLog(
-                            "[Glow] play | computed boxShadow should be:",
-                            mediaBoxShadow
-                        )
-                    }}
-                    onPause={() => {
-                        debugLog(
-                            "[Playlist Debug] onPause fired for video at index:",
-                            state.currentVideoIndex,
-                            "(URL media)"
-                        )
-                        debugLog("[FramePlay] <video:url> onPause fired")
-                        setState((prev) => ({ ...prev, isPlaying: false }))
-                    }}
-                    onEnded={(e) => {
-                        debugLog(
-                            "[Playlist Debug] onEnded event fired! (URL media)"
-                        )
-                        debugLog(
-                            "[Playlist Debug] Current video index:",
-                            state.currentVideoIndex
-                        )
-                        debugLog("[Playlist Debug] Event target:", e.target)
-                        debugLog(
-                            "[Playlist Debug] Video currentTime:",
-                            e.target.currentTime
-                        )
-                        debugLog(
-                            "[Playlist Debug] Video duration:",
-                            e.target.duration
-                        )
-                        debugLog("[Playlist Debug] Calling handleVideoEnded...")
-                        handleVideoEnded()
-                    }}
-                    onError={(e) => {
-                        debugLog(
-                            "[Playlist Debug] onError event fired! (URL media)"
-                        )
-                        debugLog("[Playlist Debug] Error:", e)
-                        debugLog(
-                            "[Playlist Debug] Current video index:",
-                            state.currentVideoIndex
-                        )
-                        debugLog("[Playlist Debug] Calling handleVideoError...")
-                        handleVideoError(e)
-                    }}
-                    onClick={(e) => {
-                        e.stopPropagation()
-                        safeToggle()
-                    }}
-                    loop={props.mode === "single" ? props.loop : false} // KEY FIX: Only allow individual video looping in single mode
-                    muted={state.muted}
-                    playsInline
                     allowFullScreen
                     aria-label={props.accessibility?.title || "Video"}
                     aria-describedby={
@@ -4096,11 +3214,7 @@ export default function CustomVideoPlayer(props: Props) {
                         height: "100%",
                         border: "none",
                         objectFit: props.style?.videoFit || "cover",
-                        borderRadius: props.style?.cornerRadius || 0,
-                        boxShadow: mediaBoxShadow,
-                        transition: glowEnabled
-                            ? "box-shadow 0.25s ease"
-                            : undefined,
+                        borderRadius: props.style?.cornerRadius ?? 8,
                     }}
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                     allowFullScreen
@@ -4127,11 +3241,7 @@ export default function CustomVideoPlayer(props: Props) {
                             height: "100%",
                             border: "none",
                             objectFit: props.style?.videoFit || "cover",
-                            borderRadius: props.style?.cornerRadius || 0,
-                            boxShadow: mediaBoxShadow,
-                            transition: glowEnabled
-                                ? "box-shadow 0.25s ease"
-                                : undefined,
+                            borderRadius: props.style?.cornerRadius ?? 8,
                             pointerEvents: "none", // Disable pointer events on iframe
                         }}
                         allow="autoplay; fullscreen"
@@ -4159,7 +3269,7 @@ export default function CustomVideoPlayer(props: Props) {
                                     props.style?.videoFit || "cover",
                                 backgroundPosition: "center",
                                 backgroundRepeat: "no-repeat",
-                                borderRadius: props.style?.cornerRadius || 0,
+                                borderRadius: props.style?.cornerRadius ?? 8,
                                 zIndex: 1,
                                 pointerEvents: "none",
                             }}
@@ -4204,7 +3314,7 @@ export default function CustomVideoPlayer(props: Props) {
                             height: "100%",
                             border: "none",
                             objectFit: props.style?.videoFit || "cover",
-                            borderRadius: props.style?.cornerRadius || 0,
+                            borderRadius: props.style?.cornerRadius ?? 8,
                             pointerEvents: "none",
                         }}
                         allow="autoplay; fullscreen"
@@ -4229,7 +3339,7 @@ export default function CustomVideoPlayer(props: Props) {
                                     props.style?.videoFit || "cover",
                                 backgroundPosition: "center",
                                 backgroundRepeat: "no-repeat",
-                                borderRadius: props.style?.cornerRadius || 0,
+                                borderRadius: props.style?.cornerRadius ?? 8,
                                 zIndex: 1,
                                 pointerEvents: "none",
                             }}
@@ -4262,16 +3372,6 @@ export default function CustomVideoPlayer(props: Props) {
                     />
                 </div>
             ) : null}
-
-            {/* Hidden canvas for glow frame sampling */}
-            {glowEnabled && (
-                <canvas
-                    ref={canvasRef}
-                    width={1}
-                    height={1}
-                    style={{ display: "none" }}
-                />
-            )}
 
             {/* Scrim Overlay (Always Mounted, Behind Play Button) */}
             <motion.div
@@ -4384,9 +3484,9 @@ export default function CustomVideoPlayer(props: Props) {
                             >
                                 {props.customPlayButton}
                             </div>
-                        ) : props.customPlayIcon ? (
+                        ) : props.buttonStyle?.customPlayIcon ? (
                             <img
-                                src={props.customPlayIcon}
+                                src={props.buttonStyle?.customPlayIcon}
                                 alt="Play Icon"
                                 style={{
                                     width: props.buttonStyle?.playIconSize,
@@ -4486,589 +3586,342 @@ export default function CustomVideoPlayer(props: Props) {
             {hasSource && props.showControls && (
                 <motion.div
                     ref={controlsRef}
-                    initial={reducedMotion ? false : { opacity: 0 }}
+                    className="frameplay-range"
+                    initial={reducedMotion ? false : { opacity: 0, scale: props.controlsMode === "minimal" || props.controlsPreset === "pill" ? 0.96 : 1 }}
                     animate={{
                         opacity: controlsVisible ? 1 : 0,
-                        y: controlsVisible ? 0 : 10,
+                        y: controlsVisible ? 0 : (props.controlsMode === "minimal" || props.controlsPreset === "pill" ? 4 : 10),
+                        scale: controlsVisible ? 1 : (props.controlsMode === "minimal" || props.controlsPreset === "pill" ? 0.96 : 1),
                     }}
-                    transition={reducedMotion ? { duration: 0 } : { duration: 0.2 }}
+                    transition={reducedMotion ? { duration: 0 } : { duration: props.controlsMode === "minimal" ? 0.15 : 0.2, ease: "easeOut" }}
                     style={{
                         ...styles.controlsStyle,
                         ...(props.controlsMode === "minimal" && {
-                            justifyContent: "space-between",
-                            gap: 0,
-                            padding: 0,
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            border: "none",
-                            borderRadius: 0,
-                            backgroundColor: "transparent",
-                            backdropFilter: "none",
-                            boxShadow: "none",
+                            justifyContent: "center",
+                            gap: "2px",
+                            padding: "4px 6px",
+                            bottom: "12px",
+                            left: "50%",
+                            right: "auto",
+                            transform: "translateX(-50%)",
+                            border: "1px solid rgba(255, 255, 255, 0.08)",
+                            borderRadius: "10px",
+                            backgroundColor: "rgba(0, 0, 0, 0.45)",
+                            backdropFilter: "blur(20px) saturate(1.4)",
+                            WebkitBackdropFilter: "blur(20px) saturate(1.4)",
+                            boxShadow: "0 2px 12px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(255, 255, 255, 0.05) inset",
+                            width: "auto",
+                            pointerEvents: controlsVisible ? "auto" : "none",
                         }),
+                        pointerEvents: controlsVisible ? "auto" : "none",
                     }}
                 >
                     {/* Minimal Mode Controls */}
                     {props.controlsMode === "minimal" ? (
                         <>
-                            {/* Left Side: Play Button */}
-                            <div
-                                style={{
-                                    display: "flex",
-                                    gap: 0,
-                                    alignItems: "center",
-                                }}
-                            >
-                                {props.controls?.showPlayPause && (
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            safeToggle()
-                                        }}
-                                        className="video-player-button minimal-button"
-                                        style={{
-                                            background: "rgba(0, 0, 0, 0.6)",
-                                            backdropFilter: "blur(10px)",
-                                            border: "none",
-                                            borderRadius: 0,
-                                            padding: "12px",
-                                            cursor: "pointer",
-                                            display: "flex",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            transition: "background 0.2s ease",
-                                            height: "44px",
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            e.currentTarget.style.background =
-                                                "rgba(0, 0, 0, 0.75)"
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.currentTarget.style.background =
-                                                "rgba(0, 0, 0, 0.6)"
-                                        }}
-                                        onKeyDown={(e) => {
-                                            if (
-                                                e.key === " " ||
-                                                e.key === "Enter"
-                                            ) {
-                                                e.preventDefault()
-                                                handlePlayPause()
-                                            }
-                                        }}
-                                        aria-label={
-                                            state.isPlaying
-                                                ? "Pause video"
-                                                : "Play video"
+                            {/* Play/Pause */}
+                            {props.controls?.showPlayPause && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        safeToggle()
+                                    }}
+                                    className="frameplay-btn minimal-button"
+                                    style={{
+                                        background: "transparent",
+                                        border: "none",
+                                        borderRadius: "6px",
+                                        padding: "6px",
+                                        cursor: "pointer",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        transition: "background 0.15s ease",
+                                        width: "32px",
+                                        height: "32px",
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background =
+                                            "rgba(255, 255, 255, 0.1)"
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background =
+                                            "transparent"
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === " " || e.key === "Enter") {
+                                            e.preventDefault()
+                                            handlePlayPause()
                                         }
-                                        aria-pressed={state.isPlaying}
-                                        tabIndex={0}
-                                    >
-                                        <svg
-                                            width="20"
-                                            height="20"
-                                            viewBox="0 0 24 24"
-                                            fill={
-                                                props.controlsStyle
-                                                    ?.controlsColor || "#FFF"
-                                            }
-                                            aria-hidden="true"
-                                        >
-                                            {state.isPlaying ? (
-                                                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                                            ) : (
-                                                <path d="M8 5v14l11-7z" />
-                                            )}
-                                        </svg>
-                                    </button>
-                                )}
-                            </div>
+                                    }}
+                                    aria-label={state.isPlaying ? "Pause video" : "Play video"}
+                                    aria-pressed={state.isPlaying}
+                                    tabIndex={0}
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill={props.controlsStyle?.controlsColor || "#FFF"} aria-hidden="true">
+                                        {state.isPlaying ? (
+                                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                                        ) : (
+                                            <path d="M8 5v14l11-7z" />
+                                        )}
+                                    </svg>
+                                </button>
+                            )}
 
-                            {/* Right Side: Control Buttons */}
-                            <div
-                                style={{
-                                    display: "flex",
-                                    gap: 0,
-                                    alignItems: "center",
-                                }}
-                            >
-                                {/* Volume Control */}
-                                {props.controls?.showVolume && (
-                                    <div
-                                        style={{
-                                            position: "relative",
-                                            display: "flex",
-                                            alignItems: "center",
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            setState((prev) => ({
-                                                ...prev,
-                                                volumeHover: true,
-                                            }))
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            setState((prev) => ({
-                                                ...prev,
-                                                volumeHover: false,
-                                            }))
-                                        }}
-                                    >
-                                        {state.volumeHover && (
+                            {/* Volume */}
+                            {props.controls?.showVolume && (
+                                <div
+                                    style={{ position: "relative", display: "flex", alignItems: "center" }}
+                                    onMouseEnter={() => setState((prev) => ({ ...prev, volumeHover: true }))}
+                                    onMouseLeave={() => setState((prev) => ({ ...prev, volumeHover: false }))}
+                                >
+                                    {state.volumeHover && (
+                                        <div
+                                            style={{
+                                                position: "absolute",
+                                                bottom: "100%",
+                                                left: "50%",
+                                                transform: "translateX(-50%)",
+                                                paddingBottom: "8px",
+                                            }}
+                                            onMouseEnter={() => setState((prev) => ({ ...prev, volumeHover: true }))}
+                                        >
                                             <div
                                                 style={{
-                                                    position: "absolute",
-                                                    bottom: "100%",
-                                                    left: "50%",
-                                                    transform:
-                                                        "translateX(-50%)",
-                                                    paddingBottom: "8px",
-                                                }}
-                                                onMouseEnter={(e) => {
-                                                    setState((prev) => ({
-                                                        ...prev,
-                                                        volumeHover: true,
-                                                    }))
+                                                    background: "rgba(0, 0, 0, 0.55)",
+                                                    backdropFilter: "blur(20px) saturate(1.4)",
+                                                    WebkitBackdropFilter: "blur(20px) saturate(1.4)",
+                                                    borderRadius: "8px",
+                                                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                                                    padding: "12px 10px",
+                                                    display: "flex",
+                                                    flexDirection: "column",
+                                                    alignItems: "center",
+                                                    zIndex: 10003,
+                                                    boxShadow: "0 4px 16px rgba(0, 0, 0, 0.25)",
                                                 }}
                                             >
                                                 <div
-                                                    style={{
-                                                        background:
-                                                            "rgba(0, 0, 0, 0.9)",
-                                                        backdropFilter:
-                                                            "blur(10px)",
-                                                        borderRadius: "8px",
-                                                        padding: "16px 12px",
-                                                        display: "flex",
-                                                        flexDirection: "column",
-                                                        alignItems: "center",
-                                                        zIndex: 10003,
-                                                        boxShadow:
-                                                            "0 4px 12px rgba(0, 0, 0, 0.3)",
+                                                    style={{ position: "relative", width: "24px", height: "80px", display: "flex", alignItems: "center", justifyContent: "center" }}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        const rect = e.currentTarget.getBoundingClientRect()
+                                                        const clickY = e.clientY - rect.top
+                                                        const newVolume = Math.max(0, Math.min(1, 1 - clickY / rect.height))
+                                                        handleVolumeChange({ target: { value: newVolume } })
                                                     }}
                                                 >
-                                                    {/* Vertical Volume Slider - Custom Implementation */}
+                                                    <div style={{ position: "absolute", width: "3px", height: "100%", background: "rgba(255, 255, 255, 0.15)", borderRadius: "2px" }} />
+                                                    <div style={{ position: "absolute", bottom: 0, width: "3px", height: `${(state.muted ? 0 : state.volume) * 100}%`, background: props.controlsStyle?.controlsColor || "#FFF", borderRadius: "2px", transition: "height 0.1s ease" }} />
                                                     <div
-                                                        style={{
-                                                            position:
-                                                                "relative",
-                                                            width: "32px",
-                                                            height: "100px",
-                                                            display: "flex",
-                                                            alignItems:
-                                                                "center",
-                                                            justifyContent:
-                                                                "center",
-                                                        }}
-                                                        onClick={(e) => {
+                                                        style={{ position: "absolute", bottom: `calc(${(state.muted ? 0 : state.volume) * 100}% - 5px)`, width: "10px", height: "10px", background: "white", borderRadius: "50%", boxShadow: "0 1px 3px rgba(0, 0, 0, 0.3)", cursor: "pointer", transition: "bottom 0.1s ease" }}
+                                                        onMouseDown={(e) => {
                                                             e.stopPropagation()
-                                                            const rect =
-                                                                e.currentTarget.getBoundingClientRect()
-                                                            const clickY =
-                                                                e.clientY -
-                                                                rect.top
-                                                            const newVolume =
-                                                                Math.max(
-                                                                    0,
-                                                                    Math.min(
-                                                                        1,
-                                                                        1 -
-                                                                            clickY /
-                                                                                rect.height
-                                                                    )
-                                                                )
-                                                            handleVolumeChange({
-                                                                target: {
-                                                                    value: newVolume,
-                                                                },
-                                                            })
+                                                            const container = e.currentTarget.parentElement
+                                                            const handleDrag = (moveEvent) => {
+                                                                const rect = container.getBoundingClientRect()
+                                                                const clickY = moveEvent.clientY - rect.top
+                                                                const newVolume = Math.max(0, Math.min(1, 1 - clickY / rect.height))
+                                                                handleVolumeChange({ target: { value: newVolume } })
+                                                            }
+                                                            const handleUp = () => {
+                                                                document.removeEventListener("mousemove", handleDrag)
+                                                                document.removeEventListener("mouseup", handleUp)
+                                                            }
+                                                            document.addEventListener("mousemove", handleDrag)
+                                                            document.addEventListener("mouseup", handleUp)
                                                         }}
-                                                    >
-                                                        {/* Track background */}
-                                                        <div
-                                                            style={{
-                                                                position:
-                                                                    "absolute",
-                                                                width: "6px",
-                                                                height: "100%",
-                                                                background:
-                                                                    "rgba(255, 255, 255, 0.2)",
-                                                                borderRadius:
-                                                                    "3px",
-                                                            }}
-                                                        />
-                                                        {/* Progress fill */}
-                                                        <div
-                                                            style={{
-                                                                position:
-                                                                    "absolute",
-                                                                bottom: 0,
-                                                                width: "6px",
-                                                                height: `${(state.muted ? 0 : state.volume) * 100}%`,
-                                                                background:
-                                                                    props
-                                                                        .controlsStyle
-                                                                        ?.accentColor ||
-                                                                    props
-                                                                        .controlsStyle
-                                                                        ?.progressColor ||
-                                                                    "#FF0000",
-                                                                borderRadius:
-                                                                    "3px",
-                                                                transition:
-                                                                    "height 0.1s ease",
-                                                            }}
-                                                        />
-                                                        {/* Thumb */}
-                                                        <div
-                                                            style={{
-                                                                position:
-                                                                    "absolute",
-                                                                bottom: `calc(${(state.muted ? 0 : state.volume) * 100}% - 7px)`,
-                                                                width: "14px",
-                                                                height: "14px",
-                                                                background:
-                                                                    "white",
-                                                                borderRadius:
-                                                                    "50%",
-                                                                boxShadow:
-                                                                    "0 2px 4px rgba(0, 0, 0, 0.3)",
-                                                                cursor: "pointer",
-                                                                transition:
-                                                                    "bottom 0.1s ease",
-                                                            }}
-                                                            onMouseDown={(
-                                                                e
-                                                            ) => {
-                                                                e.stopPropagation()
-                                                                const container =
-                                                                    e
-                                                                        .currentTarget
-                                                                        .parentElement
-                                                                const handleDrag =
-                                                                    (
-                                                                        moveEvent
-                                                                    ) => {
-                                                                        const rect =
-                                                                            container.getBoundingClientRect()
-                                                                        const clickY =
-                                                                            moveEvent.clientY -
-                                                                            rect.top
-                                                                        const newVolume =
-                                                                            Math.max(
-                                                                                0,
-                                                                                Math.min(
-                                                                                    1,
-                                                                                    1 -
-                                                                                        clickY /
-                                                                                            rect.height
-                                                                                )
-                                                                            )
-                                                                        handleVolumeChange(
-                                                                            {
-                                                                                target: {
-                                                                                    value: newVolume,
-                                                                                },
-                                                                            }
-                                                                        )
-                                                                    }
-                                                                const handleUp =
-                                                                    () => {
-                                                                        document.removeEventListener(
-                                                                            "mousemove",
-                                                                            handleDrag
-                                                                        )
-                                                                        document.removeEventListener(
-                                                                            "mouseup",
-                                                                            handleUp
-                                                                        )
-                                                                    }
-                                                                document.addEventListener(
-                                                                    "mousemove",
-                                                                    handleDrag
-                                                                )
-                                                                document.addEventListener(
-                                                                    "mouseup",
-                                                                    handleUp
-                                                                )
-                                                            }}
-                                                        />
-                                                    </div>
+                                                    />
                                                 </div>
                                             </div>
-                                        )}
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                handleMute()
-                                            }}
-                                            className="video-player-button minimal-button"
-                                            style={{
-                                                background:
-                                                    "rgba(0, 0, 0, 0.6)",
-                                                backdropFilter: "blur(10px)",
-                                                border: "none",
-                                                borderRadius: 0,
-                                                padding: "12px",
-                                                cursor: "pointer",
-                                                display: "flex",
-                                                alignItems: "center",
-                                                justifyContent: "center",
-                                                transition:
-                                                    "background 0.2s ease",
-                                                height: "44px",
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.background =
-                                                    "rgba(0, 0, 0, 0.75)"
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.background =
-                                                    "rgba(0, 0, 0, 0.6)"
-                                            }}
-                                            aria-label={
-                                                state.muted ? "Unmute" : "Mute"
-                                            }
-                                            aria-pressed={state.muted}
-                                            tabIndex={0}
-                                        >
-                                            <svg
-                                                width="20"
-                                                height="20"
-                                                viewBox="0 0 24 24"
-                                                fill={
-                                                    props.controlsStyle
-                                                        ?.controlsColor ||
-                                                    "#FFF"
-                                                }
-                                                aria-hidden="true"
-                                            >
-                                                {state.muted ||
-                                                state.volume === 0 ? (
-                                                    <path d="M3.63 3.63a.996.996 0 000 1.41L7.29 8.7 7 9H4c-.55 0-1 .45-1 1v4c0 .55.45 1 1 1h3l3.29 3.29c.63.63 1.71.18 1.71-.71v-4.17l4.18 4.18c-.49.37-1.02.68-1.6.91-.36.15-.58.53-.58.92 0 .72.73 1.18 1.39.91.8-.33 1.55-.77 2.22-1.31l1.34 1.34a.996.996 0 101.41-1.41L5.05 3.63c-.39-.39-1.02-.39-1.42 0zM19 12c0 .82-.15 1.61-.41 2.34l1.53 1.53c.56-1.17.88-2.48.88-3.87 0-3.83-2.4-7.11-5.78-8.4-.59-.23-1.22.23-1.22.86v.19c0 .38.25.71.61.85C17.18 6.54 19 9.06 19 12zm-8.71-6.29l-.17.17L12 7.76V6.41c0-.89-1.08-1.33-1.71-.7zM16.5 12A4.5 4.5 0 0014 7.97v1.79l2.48 2.48c.01-.08.02-.16.02-.24z" />
-                                                ) : state.volume < 0.5 ? (
-                                                    <path d="M7 9v6h4l5 5V4l-5 5H7z" />
-                                                ) : (
-                                                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-                                                )}
-                                            </svg>
-                                        </button>
-                                    </div>
-                                )}
-
-                                {/* Speed Control */}
-                                {props.controls?.showSpeed && (
-                                    <div style={{ position: "relative" }}>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                setState((prev) => ({
-                                                    ...prev,
-                                                    showSpeedMenu:
-                                                        !prev.showSpeedMenu,
-                                                }))
-                                            }}
-                                            className="video-player-button minimal-button"
-                                            style={{
-                                                background:
-                                                    "rgba(0, 0, 0, 0.6)",
-                                                backdropFilter: "blur(10px)",
-                                                border: "none",
-                                                borderRadius: 0,
-                                                padding: "12px",
-                                                cursor: "pointer",
-                                                display: "flex",
-                                                alignItems: "center",
-                                                justifyContent: "center",
-                                                transition:
-                                                    "background 0.2s ease",
-                                                fontSize: "12px",
-                                                fontWeight: "bold",
-                                                minWidth: "50px",
-                                                color:
-                                                    props.controlsStyle
-                                                        ?.controlsColor ||
-                                                    "#FFF",
-                                                height: "44px",
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.background =
-                                                    "rgba(0, 0, 0, 0.75)"
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.background =
-                                                    "rgba(0, 0, 0, 0.6)"
-                                            }}
-                                            aria-label="Playback speed"
-                                            tabIndex={0}
-                                        >
-                                            {state.speed}x
-                                        </button>
-                                        {state.showSpeedMenu && (
-                                            <div
-                                                style={{
-                                                    position: "absolute",
-                                                    bottom: "100%",
-                                                    right: 0,
-                                                    marginBottom: 8,
-                                                    background:
-                                                        "rgba(0, 0, 0, 0.9)",
-                                                    borderRadius: 8,
-                                                    padding: 8,
-                                                    zIndex: 10003,
-                                                }}
-                                            >
-                                                {[
-                                                    0.25, 0.5, 0.75, 1, 1.25,
-                                                    1.5, 1.75, 2,
-                                                ].map((speed) => (
-                                                    <button
-                                                        key={speed}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            handleSpeedChange({
-                                                                target: {
-                                                                    value: speed,
-                                                                },
-                                                            })
-                                                            setState(
-                                                                (prev) => ({
-                                                                    ...prev,
-                                                                    showSpeedMenu: false,
-                                                                })
-                                                            )
-                                                        }}
-                                                        style={{
-                                                            display: "block",
-                                                            width: "100%",
-                                                            padding: "8px 16px",
-                                                            background:
-                                                                state.speed ===
-                                                                speed
-                                                                    ? "rgba(255, 255, 255, 0.2)"
-                                                                    : "transparent",
-                                                            border: "none",
-                                                            color: "#FFF",
-                                                            cursor: "pointer",
-                                                            fontSize: "14px",
-                                                            borderRadius: 4,
-                                                        }}
-                                                    >
-                                                        {speed}x
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {/* Picture-in-Picture */}
-                                {props.controls?.showPictureInPicture &&
-                                    props.sourceType !== "youtube" &&
-                                    props.sourceType !== "vimeo" && (
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                togglePictureInPicture()
-                                            }}
-                                            className="video-player-button minimal-button"
-                                            style={{
-                                                background:
-                                                    "rgba(0, 0, 0, 0.6)",
-                                                backdropFilter: "blur(10px)",
-                                                border: "none",
-                                                borderRadius: 0,
-                                                padding: "12px",
-                                                cursor: "pointer",
-                                                display: "flex",
-                                                alignItems: "center",
-                                                justifyContent: "center",
-                                                transition:
-                                                    "background 0.2s ease",
-                                                height: "44px",
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.background =
-                                                    "rgba(0, 0, 0, 0.75)"
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.background =
-                                                    "rgba(0, 0, 0, 0.6)"
-                                            }}
-                                            aria-label="Picture in Picture"
-                                            tabIndex={0}
-                                        >
-                                            <svg
-                                                width="20"
-                                                height="20"
-                                                viewBox="0 0 24 24"
-                                                fill={
-                                                    props.controlsStyle
-                                                        ?.controlsColor ||
-                                                    "#FFF"
-                                                }
-                                                aria-hidden="true"
-                                            >
-                                                <path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z" />
-                                            </svg>
-                                        </button>
+                                        </div>
                                     )}
-
-                                {/* Fullscreen */}
-                                {props.controls?.showFullscreen && (
                                     <button
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            toggleFullscreen()
-                                        }}
-                                        className="video-player-button minimal-button"
+                                        onClick={(e) => { e.stopPropagation(); handleMute() }}
+                                        className="frameplay-btn minimal-button"
                                         style={{
-                                            background: "rgba(0, 0, 0, 0.6)",
-                                            backdropFilter: "blur(10px)",
+                                            background: "transparent",
                                             border: "none",
-                                            borderRadius: 0,
-                                            padding: "12px",
+                                            borderRadius: "6px",
+                                            padding: "6px",
                                             cursor: "pointer",
                                             display: "flex",
                                             alignItems: "center",
                                             justifyContent: "center",
-                                            transition: "background 0.2s ease",
-                                            height: "44px",
+                                            transition: "background 0.15s ease",
+                                            width: "32px",
+                                            height: "32px",
                                         }}
-                                        onMouseEnter={(e) => {
-                                            e.currentTarget.style.background =
-                                                "rgba(0, 0, 0, 0.75)"
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.currentTarget.style.background =
-                                                "rgba(0, 0, 0, 0.6)"
-                                        }}
-                                        aria-label={
-                                            state.fullscreen
-                                                ? "Exit fullscreen"
-                                                : "Fullscreen"
-                                        }
+                                        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)" }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent" }}
+                                        aria-label={state.muted ? "Unmute" : "Mute"}
+                                        aria-pressed={state.muted}
                                         tabIndex={0}
                                     >
-                                        <svg
-                                            width="20"
-                                            height="20"
-                                            viewBox="0 0 24 24"
-                                            fill={
-                                                props.controlsStyle
-                                                    ?.controlsColor || "#FFF"
-                                            }
-                                            aria-hidden="true"
-                                        >
-                                            {state.fullscreen ? (
-                                                <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill={props.controlsStyle?.controlsColor || "#FFF"} aria-hidden="true">
+                                            {state.muted || state.volume === 0 ? (
+                                                <path d="M3.63 3.63a.996.996 0 000 1.41L7.29 8.7 7 9H4c-.55 0-1 .45-1 1v4c0 .55.45 1 1 1h3l3.29 3.29c.63.63 1.71.18 1.71-.71v-4.17l4.18 4.18c-.49.37-1.02.68-1.6.91-.36.15-.58.53-.58.92 0 .72.73 1.18 1.39.91.8-.33 1.55-.77 2.22-1.31l1.34 1.34a.996.996 0 101.41-1.41L5.05 3.63c-.39-.39-1.02-.39-1.42 0zM19 12c0 .82-.15 1.61-.41 2.34l1.53 1.53c.56-1.17.88-2.48.88-3.87 0-3.83-2.4-7.11-5.78-8.4-.59-.23-1.22.23-1.22.86v.19c0 .38.25.71.61.85C17.18 6.54 19 9.06 19 12zm-8.71-6.29l-.17.17L12 7.76V6.41c0-.89-1.08-1.33-1.71-.7zM16.5 12A4.5 4.5 0 0014 7.97v1.79l2.48 2.48c.01-.08.02-.16.02-.24z" />
+                                            ) : state.volume < 0.5 ? (
+                                                <path d="M7 9v6h4l5 5V4l-5 5H7z" />
                                             ) : (
-                                                <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+                                                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
                                             )}
                                         </svg>
                                     </button>
-                                )}
-                            </div>
+                                </div>
+                            )}
+
+                            {/* Speed */}
+                            {props.controls?.showSpeed && showSpeedControl && (
+                                <div style={{ position: "relative" }}>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            setState((prev) => ({ ...prev, showSpeedMenu: !prev.showSpeedMenu }))
+                                        }}
+                                        className="frameplay-btn minimal-button"
+                                        style={{
+                                            background: "transparent",
+                                            border: "none",
+                                            borderRadius: "6px",
+                                            padding: "4px 8px",
+                                            cursor: "pointer",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            transition: "background 0.15s ease",
+                                            fontSize: "11px",
+                                            fontWeight: 600,
+                                            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                                            letterSpacing: "-0.01em",
+                                            color: props.controlsStyle?.controlsColor || "#FFF",
+                                            height: "32px",
+                                            opacity: 0.85,
+                                        }}
+                                        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)"; e.currentTarget.style.opacity = "1" }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.opacity = "0.85" }}
+                                        aria-label="Playback speed"
+                                        tabIndex={0}
+                                    >
+                                        {state.speed}x
+                                    </button>
+                                    {state.showSpeedMenu && (
+                                        <div
+                                            style={{
+                                                position: "absolute",
+                                                bottom: "100%",
+                                                left: "50%",
+                                                transform: "translateX(-50%)",
+                                                marginBottom: 8,
+                                                background: "rgba(0, 0, 0, 0.55)",
+                                                backdropFilter: "blur(20px) saturate(1.4)",
+                                                WebkitBackdropFilter: "blur(20px) saturate(1.4)",
+                                                borderRadius: 8,
+                                                border: "1px solid rgba(255, 255, 255, 0.08)",
+                                                padding: 4,
+                                                zIndex: 10003,
+                                                boxShadow: "0 4px 16px rgba(0, 0, 0, 0.25)",
+                                            }}
+                                        >
+                                            {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                                                <button
+                                                    key={speed}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        handleSpeedChange({ target: { value: speed } })
+                                                        setState((prev) => ({ ...prev, showSpeedMenu: false }))
+                                                    }}
+                                                    style={{
+                                                        display: "block",
+                                                        width: "100%",
+                                                        padding: "6px 16px",
+                                                        background: state.speed === speed ? "rgba(255, 255, 255, 0.12)" : "transparent",
+                                                        border: "none",
+                                                        color: "#FFF",
+                                                        cursor: "pointer",
+                                                        fontSize: "12px",
+                                                        fontWeight: state.speed === speed ? 600 : 400,
+                                                        borderRadius: 4,
+                                                        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                                                        transition: "background 0.1s ease",
+                                                    }}
+                                                    onMouseEnter={(e) => { if (state.speed !== speed) e.currentTarget.style.background = "rgba(255, 255, 255, 0.06)" }}
+                                                    onMouseLeave={(e) => { if (state.speed !== speed) e.currentTarget.style.background = "transparent" }}
+                                                >
+                                                    {speed}x
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Thin divider before right-side actions */}
+                            {(props.controls?.showFullscreen || (props.controls?.showPictureInPicture && props.sourceType !== "youtube" && props.sourceType !== "vimeo")) && (
+                                <div style={{ width: "1px", height: "14px", background: "rgba(255, 255, 255, 0.12)", margin: "0 2px" }} />
+                            )}
+
+                            {/* PiP */}
+                            {props.controls?.showPictureInPicture && props.sourceType !== "youtube" && props.sourceType !== "vimeo" && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); togglePictureInPicture() }}
+                                    className="frameplay-btn minimal-button"
+                                    style={{
+                                        background: "transparent",
+                                        border: "none",
+                                        borderRadius: "6px",
+                                        padding: "6px",
+                                        cursor: "pointer",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        transition: "background 0.15s ease",
+                                        width: "32px",
+                                        height: "32px",
+                                    }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)" }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent" }}
+                                    aria-label="Picture in Picture"
+                                    tabIndex={0}
+                                >
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill={props.controlsStyle?.controlsColor || "#FFF"} aria-hidden="true">
+                                        <path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z" />
+                                    </svg>
+                                </button>
+                            )}
+
+                            {/* Fullscreen */}
+                            {props.controls?.showFullscreen && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); toggleFullscreen() }}
+                                    className="frameplay-btn minimal-button"
+                                    style={{
+                                        background: "transparent",
+                                        border: "none",
+                                        borderRadius: "6px",
+                                        padding: "6px",
+                                        cursor: "pointer",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        transition: "background 0.15s ease",
+                                        width: "32px",
+                                        height: "32px",
+                                    }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)" }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent" }}
+                                    aria-label={state.fullscreen ? "Exit fullscreen" : "Fullscreen"}
+                                    tabIndex={0}
+                                >
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill={props.controlsStyle?.controlsColor || "#FFF"} aria-hidden="true">
+                                        {state.fullscreen ? (
+                                            <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
+                                        ) : (
+                                            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+                                        )}
+                                    </svg>
+                                </button>
+                            )}
                         </>
                     ) : (
                         <>
@@ -5080,7 +3933,7 @@ export default function CustomVideoPlayer(props: Props) {
                                         e.stopPropagation()
                                         safeToggle()
                                     }}
-                                    className="video-player-button"
+                                    className="frameplay-btn"
                                     style={styles.button}
                                     onKeyDown={(e) => {
                                         if (
@@ -5118,7 +3971,7 @@ export default function CustomVideoPlayer(props: Props) {
                                 </button>
                             )}
 
-                            {/* Progress / Chapters */}
+                            {/* Progress */}
                             {props.controls?.showProgress && (
                                 <div
                                     style={{
@@ -5129,74 +3982,20 @@ export default function CustomVideoPlayer(props: Props) {
                                         gap: 8,
                                     }}
                                 >
-                                    {showChapterTimeline ? (
-                                        <SegmentedChapterTimeline
-                                            duration={state.duration || 0}
-                                            progress={state.progress || 0}
-                                            chapters={
-                                                props.manualChapters || []
-                                            }
-                                            onSeek={(sec) => {
-                                                if (
-                                                    props.sourceType ===
-                                                        "youtube" &&
-                                                    youtubePlayer.current
-                                                        ?.seekTo
-                                                ) {
-                                                    youtubePlayer.current.seekTo(
-                                                        sec,
-                                                        true
-                                                    )
-                                                } else if (
-                                                    props.sourceType ===
-                                                        "vimeo" &&
-                                                    vimeoPlayer.current
-                                                        ?.setCurrentTime
-                                                ) {
-                                                    vimeoPlayer.current
-                                                        .setCurrentTime(sec)
-                                                        .catch(() => {})
-                                                } else if (refs.video.current) {
-                                                    refs.video.current.currentTime =
-                                                        sec
-                                                }
-                                                setState((p) => ({
-                                                    ...p,
-                                                    progress: sec,
-                                                }))
-                                            }}
-                                            color={
-                                                props.controlsStyle
-                                                    ?.accentColor ||
-                                                props.controlsStyle
-                                                    ?.progressColor ||
-                                                "#FF0000"
-                                            }
-                                            bg="rgba(255,255,255,0.2)"
-                                            height={6}
-                                            hoverHeight={10} // tweak hover growth amount
-                                            segmentGap={
-                                                props.controlsStyle
-                                                    ?.segmentGap || 1
-                                            } // gap between segments
-                                        />
-                                    ) : (
-                                        /* Fallback: your original progress slider */
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max={state.duration || 100}
-                                            value={state.progress}
-                                            onChange={handleProgressChange}
-                                            onMouseUp={handleProgressEnd}
-                                            onTouchEnd={handleProgressEnd}
-                                            style={{
-                                                ...styles.rangeInput,
-                                                width: "100%",
-                                                background: `linear-gradient(to right, ${props.controlsStyle?.accentColor || props.controlsStyle?.progressColor || "#FF0000"} ${(state.progress / (state.duration || 1)) * 100}%, rgba(255,255,255,0.2) ${(state.progress / (state.duration || 1)) * 100}%)`,
-                                            }}
-                                        />
-                                    )}
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max={state.duration || 100}
+                                        value={state.progress}
+                                        onChange={handleProgressChange}
+                                        onMouseUp={handleProgressEnd}
+                                        onTouchEnd={handleProgressEnd}
+                                        style={{
+                                            ...styles.rangeInput,
+                                            width: "100%",
+                                            background: `linear-gradient(to right, ${props.controlsStyle?.accentColor || props.controlsStyle?.progressColor || "#FF0000"} ${(state.progress / (state.duration || 1)) * 100}%, rgba(255,255,255,0.2) ${(state.progress / (state.duration || 1)) * 100}%)`,
+                                        }}
+                                    />
                                 </div>
                             )}
 
@@ -5213,7 +4012,7 @@ export default function CustomVideoPlayer(props: Props) {
                                     <span
                                         style={{
                                             color:
-                                                props.style?.controlsColor ||
+                                                props.controlsStyle?.controlsColor ||
                                                 "#FFF",
                                             fontSize: "14px",
                                             userSelect: "none",
@@ -5257,7 +4056,7 @@ export default function CustomVideoPlayer(props: Props) {
                                 >
                                     <button
                                         onClick={handleMute}
-                                        className="video-player-button"
+                                        className="frameplay-btn"
                                         style={styles.button}
                                         onKeyDown={(e) => {
                                             if (
@@ -5325,7 +4124,7 @@ export default function CustomVideoPlayer(props: Props) {
                                         background: "none",
                                         border: "none",
                                         color:
-                                            props.style?.controlsColor ||
+                                            props.controlsStyle?.controlsColor ||
                                             "#FFF",
                                         fontSize: "14px",
                                         cursor: "pointer",
@@ -5352,7 +4151,7 @@ export default function CustomVideoPlayer(props: Props) {
                                 props.sourceType !== "vimeo" && ( // Hide PiP for Vimeo
                                     <button
                                         onClick={togglePictureInPicture}
-                                        className="video-player-button"
+                                        className="frameplay-btn"
                                         style={styles.button}
                                         onKeyDown={(e) => {
                                             if (
@@ -5394,7 +4193,7 @@ export default function CustomVideoPlayer(props: Props) {
                             {props.controls?.showFullscreen && (
                                 <button
                                     onClick={toggleFullscreen}
-                                    className="video-player-button"
+                                    className="frameplay-btn"
                                     style={styles.button}
                                     onKeyDown={(e) => {
                                         if (
@@ -5434,6 +4233,35 @@ export default function CustomVideoPlayer(props: Props) {
                         </>
                     )}
                 </motion.div>
+            )}
+
+            {/* Minimal mode: thin progress bar at bottom, always visible when playing */}
+            {hasSource && props.showControls && props.controlsMode === "minimal" && props.controls?.showProgress && state.hasPlayedOnce && (
+                <div
+                    style={{
+                        position: "absolute",
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: controlsVisible ? "3px" : "2px",
+                        background: "rgba(255, 255, 255, 0.1)",
+                        zIndex: 9999,
+                        transition: "height 0.2s ease, opacity 0.2s ease",
+                        opacity: state.isPlaying ? 1 : 0.5,
+                        borderRadius: `0 0 ${cornerRadius}px ${cornerRadius}px`,
+                        overflow: "hidden",
+                    }}
+                >
+                    <div
+                        style={{
+                            height: "100%",
+                            width: `${(state.progress / (state.duration || 1)) * 100}%`,
+                            background: props.controlsStyle?.accentColor || props.controlsStyle?.progressColor || "rgba(255, 255, 255, 0.6)",
+                            borderRadius: "inherit",
+                            transition: "width 0.3s linear",
+                        }}
+                    />
+                </div>
             )}
         </div>
     )
@@ -5561,6 +4389,17 @@ addPropertyControls(CustomVideoPlayer, {
             "Choose between full controls or minimal Wistia-style controls",
     },
 
+    // Controls Preset
+    controlsPreset: {
+        type: ControlType.Enum,
+        title: "Controls Style",
+        defaultValue: "glass",
+        options: ["glass", "solid", "pill"],
+        optionTitles: ["Glass", "Solid", "Pill"],
+        hidden: (props) => !props.showControls,
+        description: "Visual style preset for the controls bar",
+    },
+
     // Loop Control (move to top level)
     loop: {
         type: ControlType.Boolean,
@@ -5587,52 +4426,7 @@ addPropertyControls(CustomVideoPlayer, {
         hidden: (props) => !props.autoPlay,
     },
 
-    // Manual Chapters
-    manualChapters: {
-        type: ControlType.Array,
-        title: "Chapters", // Shortened from "Manual Chapters"
-        propertyControl: {
-            type: ControlType.Object,
-            controls: {
-                title: {
-                    type: ControlType.String,
-                    title: "Title", // Shortened from "Chapter Title"
-                    defaultValue: "Intro",
-                },
-                minutes: {
-                    type: ControlType.Number,
-                    title: "Minutes", // Shortened from "Start Time - Minutes"
-                    defaultValue: 0,
-                    min: 0,
-                    step: 1,
-                    unit: "min",
-                },
-                seconds: {
-                    type: ControlType.Number,
-                    title: "Seconds", // Shortened from "Start Time - Seconds"
-                    defaultValue: 0,
-                    min: 0,
-                    max: 59, // Keep this as it's logical (60 seconds = 1 minute)
-                    step: 1,
-                    unit: "s",
-                },
-            },
-        },
-        hidden: (props) => !props.showControls || props.mode === "multiple", // Hide in multiple mode
-        description: "Add chapters with start times (minutes:seconds)",
-    },
 
-    // Add this after manualChapters in your property controls
-    chaptersMode: {
-        type: ControlType.Enum,
-        title: "Chapters Mode",
-        options: ["embedded", "external"],
-        optionTitles: ["Embedded", "External"],
-        defaultValue: "embedded",
-        hidden: (props) => !props.showControls || props.mode === "multiple",
-        description:
-            "Embedded shows chapters in video timeline, External syncs with separate chapter component",
-    },
 
     // Controls Settings (only shown if showControls is true)
     controls: {
@@ -5685,9 +4479,8 @@ addPropertyControls(CustomVideoPlayer, {
 
     // Poster Image
     posterImage: {
-        type: ControlType.File,
+        type: ControlType.Image,
         title: "Poster Image",
-        allowedFileTypes: ["jpg", "jpeg", "png", "webp", "gif"],
         description: "Thumbnail image shown before video plays",
     },
 
@@ -5740,7 +4533,7 @@ addPropertyControls(CustomVideoPlayer, {
                 title: "Radius", // Shortened from "Corner Radius"
                 defaultValue: 8,
                 min: 0,
-                // Remove max: 32 limitation
+                max: 100,
                 step: 1,
                 unit: "px",
             },
@@ -5786,14 +4579,24 @@ addPropertyControls(CustomVideoPlayer, {
                 max: 1,
                 step: 0.1,
             },
-            segmentGap: {
+            thumbSize: {
                 type: ControlType.Number,
-                title: "Chapter Gap",
-                defaultValue: 1,
-                min: 0,
-                // Remove max: 5 limitation
-                step: 0.5,
+                title: "Thumb Size",
+                defaultValue: 12,
+                min: 6,
+                max: 24,
+                step: 1,
                 unit: "px",
+            },
+            thumbColor: {
+                type: ControlType.Color,
+                title: "Thumb Color",
+                defaultValue: "#FFFFFF",
+            },
+            thumbBorder: {
+                type: ControlType.String,
+                title: "Thumb Border",
+                defaultValue: "none",
             },
         },
     },
@@ -5823,6 +4626,7 @@ addPropertyControls(CustomVideoPlayer, {
                 min: 0.25,
                 max: 2,
                 step: 0.25,
+                unit: "x",
             },
         },
     },
@@ -5885,8 +4689,8 @@ addPropertyControls(CustomVideoPlayer, {
                 type: ControlType.Number,
                 title: "Size", // Shortened from "Button Size"
                 defaultValue: 50,
-                min: 44, // Keep accessibility minimum
-                // Remove max: 100 limitation
+                min: 44,
+                max: 200,
                 step: 5,
                 unit: "px",
             },
@@ -5895,7 +4699,7 @@ addPropertyControls(CustomVideoPlayer, {
                 title: "Icon Size",
                 defaultValue: 24,
                 min: 10,
-                // Remove max: 50 limitation
+                max: 100,
                 step: 2,
                 unit: "px",
             },
@@ -5914,16 +4718,16 @@ addPropertyControls(CustomVideoPlayer, {
                 title: "Blur", // Shortened from "Button Blur"
                 defaultValue: 10,
                 min: 0,
-                // Remove max: 20 limitation
+                max: 50,
                 step: 1,
                 unit: "px",
             },
             playButtonBorderRadius: {
                 type: ControlType.Number,
-                title: "Radius", // Shortened from "Button Border Radius"
+                title: "Radius",
                 defaultValue: 8,
                 min: 0,
-                // Remove max: 50 limitation
+                max: 100,
                 step: 1,
                 unit: "px",
             },
@@ -5934,47 +4738,6 @@ addPropertyControls(CustomVideoPlayer, {
             },
         },
         description: "Style the main play button overlay",
-    },
-
-    // Glow
-    glow: {
-        type: ControlType.Object,
-        title: "Glow",
-        controls: {
-            enabled: {
-                type: ControlType.Boolean,
-                title: "Enabled",
-                defaultValue: false,
-            },
-            intensity: {
-                type: ControlType.Number,
-                title: "Intensity",
-                defaultValue: 0.6,
-                min: 0,
-                max: 1,
-                step: 0.05,
-            },
-            blur: {
-                type: ControlType.Number,
-                title: "Blur",
-                defaultValue: 50,
-                min: 0,
-                max: 150,
-                step: 2,
-                unit: "px",
-            },
-            spread: {
-                type: ControlType.Number,
-                title: "Spread",
-                defaultValue: 20,
-                min: 0,
-                max: 80,
-                step: 2,
-                unit: "px",
-            },
-        },
-        description:
-            "Ambient glow sampled from video (file only). YouTube/Vimeo use progress color fallback.",
     },
 
     // Debug Mode
@@ -6003,9 +4766,8 @@ CustomVideoPlayer.defaultProps = {
     debug: false,
     showControls: true,
     controlsMode: "default",
+    controlsPreset: "glass",
     loop: false,
-    manualChapters: [],
-    chaptersMode: "embedded",
     posterImage: null,
     useCustomPlayButton: false,
     customPlayButton: null,
@@ -6032,7 +4794,9 @@ CustomVideoPlayer.defaultProps = {
         accentColor: "#FF0000",
         progressColor: "#FF0000", // Legacy fallback
         controlsOpacity: 0.6,
-        segmentGap: 1,
+        thumbSize: 12,
+        thumbColor: "#FFFFFF",
+        thumbBorder: "none",
     },
     controls: {
         showPlayPause: true,
@@ -6056,12 +4820,6 @@ CustomVideoPlayer.defaultProps = {
         playButtonBlur: 10,
         playButtonBorderRadius: 8,
         customPlayIcon: null,
-    },
-    glow: {
-        enabled: false,
-        intensity: 0.6,
-        blur: 50,
-        spread: 20,
     },
 }
 
