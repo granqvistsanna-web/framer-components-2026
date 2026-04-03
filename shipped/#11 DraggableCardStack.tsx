@@ -43,10 +43,12 @@ type StackAnimState = {
     opacity?: number
     zIndex?: number
     pointerEvents?: "auto" | "none"
-    x?: string
-    y?: string
+    x?: string | number
+    y?: string | number
     xPercent?: number
     yPercent?: number
+    scale?: number
+    rotation?: number
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -186,7 +188,7 @@ function DraggableCardStack({
     }, [])
 
     const safeVisibleCountProp = clamp(Math.round(visibleCount), 2, 20)
-    const safeDuration = clamp(duration, 0.1, 4)
+    const safeDuration = clamp(duration, 0.2, 4)
     const safeDragThreshold = clamp(dragThreshold, 1, 95)
     const safeControlSize = clamp(controlSize, 24, 120)
     const safeAppearDuration = clamp(appearDuration, 0.1, 3)
@@ -290,7 +292,7 @@ function DraggableCardStack({
                     try {
                         CustomEasePlugin.create(
                             "stackEase",
-                            "0.625, 0.05, 0, 1"
+                            "0.22, 0.61, 0.36, 1"
                         )
                     } catch {
                         /* ease may already exist */
@@ -333,6 +335,12 @@ function DraggableCardStack({
                 const offsetSteps = Math.max(1, safeVisibleCount - 1)
                 const offsetX = responsive.stackOffsetX / offsetSteps + "px"
                 const offsetY = responsive.stackOffsetY / offsetSteps + "px"
+                const depthScaleFactor = 0.03
+                let lastDragTime = 0
+                let lastDragX = 0
+                let lastDragY = 0
+                let velocityX = 0
+                let velocityY = 0
 
                 const getUnitValue = (val: string, depth: number) => {
                     const num = parseFloat(val) || 0
@@ -340,6 +348,9 @@ function DraggableCardStack({
                         String(val).replace(/[0-9.-]/g, "") || "px"
                     return num * depth + unit
                 }
+
+                const getDepthScale = (depth: number) =>
+                    1 - depthScaleFactor * depth
 
                 function updateDragLimits() {
                     if (!dragCard) return
@@ -360,6 +371,8 @@ function DraggableCardStack({
                             y: 0,
                             xPercent: 0,
                             yPercent: 0,
+                            scale: 1,
+                            rotation: 0,
                         })
                     })
 
@@ -372,6 +385,7 @@ function DraggableCardStack({
                             zIndex: 999 - depth,
                             pointerEvents:
                                 depth === 0 ? "auto" : "none",
+                            scale: getDepthScale(depth),
                         }
                         if (offsetX.includes("%"))
                             s.xPercent = parseFloat(xVal)
@@ -383,7 +397,7 @@ function DraggableCardStack({
                     }
 
                     dragCard = cardAt(0)
-                    gsap.set(dragCard, { touchAction: "none" })
+                    gsap.set(dragCard, { touchAction: "none", cursor: "grab" })
                     updateDragLimits()
                     setLiveText(
                         `Showing card ${(activeIndex % childCount) + 1} of ${childCount}`
@@ -414,10 +428,17 @@ function DraggableCardStack({
                                 gsap.set(dragCard, {
                                     zIndex: 2000,
                                     opacity: 1,
+                                    rotation: 0,
                                 })
+                                lastDragTime = performance.now()
+                                lastDragX = 0
+                                lastDragY = 0
+                                velocityX = 0
+                                velocityY = 0
                             },
                             onDrag() {
                                 if (isAnimating) return
+                                const now = performance.now()
                                 const x = magnetize(
                                     this.x,
                                     limitX
@@ -426,9 +447,17 @@ function DraggableCardStack({
                                     this.y,
                                     limitY
                                 )
+                                const dt = Math.max(1, now - lastDragTime)
+                                velocityX = (x - lastDragX) / dt * 1000
+                                velocityY = (y - lastDragY) / dt * 1000
+                                lastDragTime = now
+                                lastDragX = x
+                                lastDragY = y
+                                const rotation = (x / limitX) * 8
                                 gsap.set(dragCard, {
                                     x,
                                     y,
+                                    rotation,
                                     opacity: 1,
                                 })
                             },
@@ -446,21 +475,23 @@ function DraggableCardStack({
                                     (Math.abs(cx) / limitX) * 100
                                 const pctY =
                                     (Math.abs(cy) / limitY) * 100
+                                const speed = Math.sqrt(velocityX * velocityX + velocityY * velocityY)
                                 if (
                                     Math.max(pctX, pctY) >=
-                                    safeDragThreshold
+                                    safeDragThreshold || speed > 800
                                 ) {
-                                    animateNext(true, cx, cy)
+                                    animateNext(true, cx, cy, velocityX, velocityY)
                                     return
                                 }
                                 gsap.to(dragCard, {
                                     x: 0,
                                     y: 0,
+                                    rotation: 0,
                                     opacity: 1,
-                                    duration: reducedMotion ? 0 : 1,
+                                    duration: reducedMotion ? 0 : 0.5,
                                     ease: reducedMotion
                                         ? "none"
-                                        : "elastic.out(1, 0.7)",
+                                        : "back.out(2.5)",
                                     onComplete: () => applyState(),
                                 })
                             },
@@ -478,15 +509,23 @@ function DraggableCardStack({
                 function animateNext(
                     fromDrag = false,
                     releaseX = 0,
-                    releaseY = 0
+                    releaseY = 0,
+                    vx = 0,
+                    vy = 0
                 ) {
                     if (isAnimating) return
                     isAnimating = true
 
                     const outgoing = cardAt(0)
                     const incomingBack = cardAt(safeVisibleCount)
+
+                    // Velocity-based duration: faster swipes = faster animation
+                    const speed = Math.sqrt(vx * vx + vy * vy)
+                    const speedFactor = fromDrag ? clamp(1 - speed / 3000, 0.4, 1) : 1
+                    const thisDuration = animDuration * speedFactor
+
                     const tl = gsap.timeline({
-                        defaults: { duration: animDuration, ease: mainEase },
+                        defaults: { duration: thisDuration, ease: mainEase },
                         onComplete: () => {
                             pruneTimeline(tl)
                             activeIndex = mod(
@@ -499,27 +538,40 @@ function DraggableCardStack({
                     })
                     state.timelines.push(tl)
 
-                    gsap.set(outgoing, {
-                        zIndex: 2000,
-                        opacity: 1,
-                    })
                     if (fromDrag)
                         gsap.set(outgoing, {
                             x: releaseX,
                             y: releaseY,
                         })
 
-                    tl.to(outgoing, { yPercent: 200 }, 0)
+                    // Fling off-screen: throw the card away in the drag direction
+                    const cx = fromDrag ? releaseX : 0
+                    const cy = fromDrag ? releaseY : 0
+                    const flingDirX = fromDrag && Math.abs(cx) > 5 ? Math.sign(cx) : 1
+                    const flingDirY = fromDrag && Math.abs(cy) > 5 ? Math.sign(cy) : -0.3
+                    const flingDist = limitX * 1.5
+                    const flingRotation = flingDirX * 15
+
+                    gsap.set(outgoing, { zIndex: 2000, opacity: 1 })
+                    tl.to(outgoing, {
+                        x: flingDirX * flingDist,
+                        y: flingDirY * flingDist * 0.5,
+                        rotation: flingRotation,
+                        scale: 0.8,
+                        duration: thisDuration * 0.7,
+                        ease: "power2.in",
+                    }, 0)
                     tl.to(
                         outgoing,
                         {
                             opacity: 0,
-                            duration: animDuration * 0.2,
-                            ease: "none",
+                            duration: thisDuration * 0.5,
+                            ease: "power2.in",
                         },
-                        animDuration * 0.4
+                        thisDuration * 0.15
                     )
 
+                    // Remaining cards shift forward with scale transition
                     for (
                         let depth = 1;
                         depth < safeVisibleCount;
@@ -535,6 +587,7 @@ function DraggableCardStack({
                         )
                         const move: StackAnimState = {
                             zIndex: 999 - (depth - 1),
+                            scale: getDepthScale(depth - 1),
                         }
                         if (offsetX.includes("%"))
                             move.xPercent = parseFloat(xVal)
@@ -545,6 +598,7 @@ function DraggableCardStack({
                         tl.to(cardAt(depth), move, 0)
                     }
 
+                    // New card enters at the back
                     const backX = getUnitValue(
                         offsetX,
                         safeVisibleCount
@@ -565,6 +619,7 @@ function DraggableCardStack({
                     const inSet: StackAnimState = {
                         opacity: 0,
                         zIndex: 999 - safeVisibleCount,
+                        scale: getDepthScale(safeVisibleCount),
                     }
                     if (offsetX.includes("%"))
                         inSet.xPercent = parseFloat(backX)
@@ -574,7 +629,10 @@ function DraggableCardStack({
                     else inSet.y = backY
                     gsap.set(incomingBack, inSet)
 
-                    const inTo: StackAnimState = { opacity: 1 }
+                    const inTo: StackAnimState = {
+                        opacity: 1,
+                        scale: getDepthScale(safeVisibleCount - 1),
+                    }
                     if (offsetX.includes("%"))
                         inTo.xPercent = parseFloat(startX)
                     else inTo.x = startX
@@ -604,25 +662,39 @@ function DraggableCardStack({
                     })
                     state.timelines.push(tl)
 
+                    // Incoming card sweeps in from the left
                     gsap.set(leavingBack, { zIndex: 1 })
-                    gsap.set(incomingTop, {
+                    const inStart: StackAnimState = {
                         opacity: 0,
-                        x: 0,
-                        xPercent: 0,
-                        yPercent: -200,
                         zIndex: 2000,
-                    })
-                    tl.to(incomingTop, { yPercent: 0 }, 0)
+                        scale: 0.85,
+                        rotation: -10,
+                    }
+                    inStart.x = -limitX * 0.8
+                    inStart.y = 0
+                    gsap.set(incomingTop, inStart)
+                    // Fade in early
                     tl.to(
                         incomingTop,
                         {
                             opacity: 1,
-                            duration: animDuration * 0.2,
-                            ease: "none",
+                            duration: animDuration * 0.35,
+                            ease: "power1.out",
                         },
-                        animDuration * 0.3
+                        0
                     )
+                    // Slide to front position with scale and rotation
+                    const inFront: StackAnimState = {
+                        scale: 1,
+                        rotation: 0,
+                    }
+                    if (offsetX.includes("%")) inFront.xPercent = 0
+                    else inFront.x = "0px"
+                    if (offsetY.includes("%")) inFront.yPercent = 0
+                    else inFront.y = "0px"
+                    tl.to(incomingTop, inFront, 0)
 
+                    // Shift remaining cards back one depth
                     for (
                         let depth = 0;
                         depth < safeVisibleCount - 1;
@@ -638,6 +710,7 @@ function DraggableCardStack({
                         )
                         const move: StackAnimState = {
                             zIndex: 999 - (depth + 1),
+                            scale: getDepthScale(depth + 1),
                         }
                         if (offsetX.includes("%"))
                             move.xPercent = parseFloat(xVal)
@@ -656,7 +729,10 @@ function DraggableCardStack({
                         offsetY,
                         safeVisibleCount
                     )
-                    const hideBack: StackAnimState = { opacity: 0 }
+                    const hideBack: StackAnimState = {
+                        opacity: 0,
+                        scale: getDepthScale(safeVisibleCount),
+                    }
                     if (offsetX.includes("%"))
                         hideBack.xPercent = parseFloat(backX)
                     else hideBack.x = backX
@@ -726,11 +802,12 @@ function DraggableCardStack({
                         safeAppearDuration * 0.18
                     )
 
-                    // Save each back card's target position
+                    // Save each back card's target position and scale
                     // before resetting them behind the front
-                    const backTargets = backCards.map((card) => ({
+                    const backTargets = backCards.map((card, i) => ({
                         x: gsap.getProperty(card, "x"),
                         y: gsap.getProperty(card, "y"),
+                        scale: getDepthScale(i + 1),
                     }))
 
                     gsap.set(frontCard, {
@@ -742,6 +819,7 @@ function DraggableCardStack({
                         opacity: 0,
                         x: 0,
                         y: 0,
+                        scale: 1,
                     })
                     if (controlsRef.current) {
                         gsap.set(controlsRef.current, {
@@ -776,6 +854,7 @@ function DraggableCardStack({
                                 opacity: 1,
                                 x: backTargets[i].x,
                                 y: backTargets[i].y,
+                                scale: backTargets[i].scale,
                                 duration: fanDuration,
                                 ease: "power3.out",
                             },
@@ -850,12 +929,15 @@ function DraggableCardStack({
                 style={{
                     width: "100%",
                     height: "100%",
+                    minHeight: 180,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: 16,
-                    color: "#999",
+                    fontSize: 14,
+                    color: "rgba(0,0,0,0.5)",
                     fontFamily: "system-ui, -apple-system, sans-serif",
+                    border: "1px dashed rgba(0,0,0,0.25)",
+                    borderRadius: 12,
                 }}
             >
                 Drop layers here
@@ -868,6 +950,7 @@ function DraggableCardStack({
         const offsetSteps = Math.max(1, staticCount - 1)
         const stepX = responsive.stackOffsetX / offsetSteps
         const stepY = responsive.stackOffsetY / offsetSteps
+        const staticDepthScale = 0.03
         return (
             <div
                 role="region"
@@ -899,23 +982,26 @@ function DraggableCardStack({
                             position: "relative",
                         }}
                     >
-                        {displayItems.slice(0, staticCount).map((child, i) => (
-                            <div
-                                key={i}
-                                aria-label={`Card ${i + 1} of ${staticCount}`}
-                                style={{
-                                    width: "100%",
-                                    display: "flex",
-                                    justifyContent: "center",
-                                    position: i === 0 ? "relative" : "absolute",
-                                    transform: `translate(${stepX * i}px, ${stepY * i}px)`,
-                                    zIndex: 999 - i,
-                                    opacity: 1,
-                                }}
-                            >
-                                {child}
-                            </div>
-                        ))}
+                        {displayItems.slice(0, staticCount).map((child, i) => {
+                            const scale = 1 - staticDepthScale * i
+                            return (
+                                <div
+                                    key={i}
+                                    aria-label={`Card ${i + 1} of ${staticCount}`}
+                                    style={{
+                                        width: "100%",
+                                        display: "flex",
+                                        justifyContent: "center",
+                                        position: i === 0 ? "relative" : "absolute",
+                                        transform: `translate(${stepX * i}px, ${stepY * i}px) scale(${scale})`,
+                                        zIndex: 999 - i,
+                                        opacity: 1,
+                                    }}
+                                >
+                                    {child}
+                                </div>
+                            )
+                        })}
                     </div>
                 </div>
             </div>
@@ -944,6 +1030,7 @@ function DraggableCardStack({
                 style={{
                     width: "100%",
                     boxSizing: "border-box",
+                    overflow: "visible",
                     opacity: ready ? 1 : 0,
                     paddingLeft: responsive.stackPaddingLeft
                         ? `${responsive.stackPaddingLeft}px`
@@ -959,6 +1046,7 @@ function DraggableCardStack({
                         alignItems: "center",
                         display: "flex",
                         position: "relative",
+                        overflow: "visible",
                     }}
                 >
                     {displayItems.map((child, i) => (
@@ -980,6 +1068,7 @@ function DraggableCardStack({
                                 userSelect: "none",
                                 WebkitUserSelect: "none",
                                 WebkitTouchCallout: "none",
+                                cursor: "grab",
                                 width: "100%",
                                 display: "flex",
                                 justifyContent: "center",

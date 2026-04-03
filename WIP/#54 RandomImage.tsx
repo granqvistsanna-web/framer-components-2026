@@ -18,8 +18,37 @@ interface ResponsiveImage {
     alt?: string
 }
 
+// Singleton history patcher — fires a custom event on pushState/replaceState
+let _patchCount = 0
+let _origPush: typeof history.pushState
+let _origReplace: typeof history.replaceState
+const NAV_EVENT = "__ri_nav"
+
+function patchHistory() {
+    if (_patchCount++ > 0) return
+    _origPush = history.pushState.bind(history)
+    _origReplace = history.replaceState.bind(history)
+    history.pushState = (...args: Parameters<typeof history.pushState>) => {
+        _origPush(...args)
+        window.dispatchEvent(new Event(NAV_EVENT))
+    }
+    history.replaceState = (
+        ...args: Parameters<typeof history.replaceState>
+    ) => {
+        _origReplace(...args)
+        window.dispatchEvent(new Event(NAV_EVENT))
+    }
+}
+
+function unpatchHistory() {
+    if (--_patchCount > 0) return
+    history.pushState = _origPush
+    history.replaceState = _origReplace
+}
+
 interface Props {
     images?: ResponsiveImage[]
+    order?: "Random" | "In Order"
     objectFit?: "cover" | "contain" | "fill"
     borderRadius?: number
     reveal?: {
@@ -44,9 +73,48 @@ interface Props {
     style?: React.CSSProperties
 }
 
+function pickImage(
+    images: ResponsiveImage[],
+    order: "Random" | "In Order"
+): ResponsiveImage | null {
+    const valid = images.filter((img) => img?.src)
+    if (valid.length === 0) return null
+    if (valid.length === 1) return valid[0]
+
+    if (order === "In Order") {
+        let index = 0
+        try {
+            const stored = sessionStorage.getItem("__ri_index")
+            index =
+                stored !== null
+                    ? (parseInt(stored, 10) + 1) % valid.length
+                    : 0
+            sessionStorage.setItem("__ri_index", String(index))
+        } catch {}
+        return valid[index]
+    }
+
+    // Random — avoid repeating the last image
+    let lastSrc: string | null = null
+    try {
+        lastSrc = sessionStorage.getItem("__ri_last")
+    } catch {}
+
+    const candidates = valid.filter((img) => img.src !== lastSrc)
+    const pool = candidates.length > 0 ? candidates : valid
+    const pick = pool[Math.floor(Math.random() * pool.length)]
+
+    try {
+        sessionStorage.setItem("__ri_last", pick.src)
+    } catch {}
+
+    return pick
+}
+
 export default function RandomImage(props: Props) {
     const {
         images = [],
+        order = "Random",
         objectFit = "cover",
         borderRadius = 0,
         reveal = {},
@@ -67,10 +135,10 @@ export default function RandomImage(props: Props) {
 
     const isStatic = useIsStaticRenderer()
 
-    // Reduced motion detection
+    // Reduced motion
     const [reducedMotion, setReducedMotion] = useState(false)
     useEffect(() => {
-        if (typeof window === "undefined") return
+        if (typeof window === "undefined") return () => {}
         const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
         setReducedMotion(mq.matches)
         const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches)
@@ -78,74 +146,49 @@ export default function RandomImage(props: Props) {
         return () => mq.removeEventListener("change", handler)
     }, [])
 
-    // Pick a random image once on mount (stable across re-renders)
-    const imagesKey = images?.map((img) => img?.src).join(",") ?? ""
-    const selected = useMemo(() => {
-        if (!images || images.length === 0) return null
-        return images[Math.floor(Math.random() * images.length)]
-    }, [imagesKey])
+    // Pick image when the image set changes
+    const imagesKey = images?.map((i) => i?.src).join("|") ?? ""
 
-    const selectedSrc = selected?.src ?? null
-    const selectedSrcSet = selected?.srcSet
-    const selectedAlt = selected?.alt ?? ""
-
-    // Reveal animation setup
-    const isHorizontal =
-        direction === "Left→Right" || direction === "Right→Left"
-
-    const hidden = isHorizontal ? { scaleX: 1 } : { scaleY: 1 }
-    const revealAnim = isHorizontal ? { scaleX: 0 } : { scaleY: 0 }
-
-    const origin =
-        direction === "Left→Right"
-            ? "right center"
-            : direction === "Right→Left"
-              ? "left center"
-              : direction === "Top→Bottom"
-                ? "bottom center"
-                : "top center"
-
-    const easeMap: Record<string, any> = {
-        Linear: "linear",
-        "Ease In": "easeIn",
-        "Ease Out": "easeOut",
-        "Ease In-Out": "easeInOut",
-        "Circ Out": "circOut",
-        "Back Out": "backOut",
-        "Expo Out": [0.16, 1, 0.3, 1],
-        Custom: customCurve
-            ? customCurve.split(",").map((n) => parseFloat(n.trim()))
-            : "easeOut",
-    }
-
-    const variants = {
-        hidden,
-        reveal: {
-            ...revealAnim,
-            transition: {
-                duration: reducedMotion ? 0 : duration,
-                delay: reducedMotion ? 0 : delay,
-                ease: easeMap[ease],
-            },
-        },
-    }
-
-    // Trigger handling
-    const containerRef = useRef<HTMLDivElement>(null)
-    const inView = useInView(containerRef, { once })
-
-    const [animState, setAnimState] = useState<"hidden" | "reveal">(
-        trigger === "Auto" ? "reveal" : "hidden"
+    const [selected, setSelected] = useState<ResponsiveImage | null>(() =>
+        images.length > 0 ? pickImage(images, order) : null
     )
 
+    // Re-pick when the image set or order changes
+    const prevKey = useRef(imagesKey)
+    const prevOrder = useRef(order)
     useEffect(() => {
-        if (trigger === "In View" && inView) {
-            setAnimState("reveal")
+        if (prevKey.current !== imagesKey || prevOrder.current !== order) {
+            prevKey.current = imagesKey
+            prevOrder.current = order
+            if (images.length > 0) {
+                setSelected(pickImage(images, order))
+            }
         }
-    }, [trigger, inView])
+        return () => {}
+    }, [imagesKey, order])
 
-    // Static renderer fallback
+    // Re-pick on SPA navigation (Framer keeps components mounted across pages)
+    const pickRef = useRef(() => pickImage(images, order))
+    pickRef.current = () => pickImage(images, order)
+
+    useEffect(() => {
+        const repick = () => setSelected(pickRef.current())
+
+        window.addEventListener("popstate", repick)
+        window.addEventListener(NAV_EVENT, repick)
+        patchHistory()
+
+        return () => {
+            window.removeEventListener("popstate", repick)
+            window.removeEventListener(NAV_EVENT, repick)
+            unpatchHistory()
+        }
+    }, [])
+
+    // Static renderer — show first image
     if (isStatic) {
+        const valid = images.filter((img) => img?.src)
+        const staticImage = valid.length > 0 ? valid[0] : null
         return (
             <div
                 style={{
@@ -157,11 +200,11 @@ export default function RandomImage(props: Props) {
                     ...style,
                 }}
             >
-                {selectedSrc ? (
+                {staticImage ? (
                     <img
-                        src={selectedSrc}
-                        srcSet={selectedSrcSet}
-                        alt={selectedAlt}
+                        src={staticImage.src}
+                        srcSet={staticImage.srcSet}
+                        alt={staticImage.alt ?? ""}
                         style={{
                             width: "100%",
                             height: "100%",
@@ -170,29 +213,14 @@ export default function RandomImage(props: Props) {
                         }}
                     />
                 ) : (
-                    <div
-                        style={{
-                            width: "100%",
-                            height: "100%",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            background: "rgba(0,0,0,0.04)",
-                            color: "rgba(0,0,0,0.4)",
-                            fontSize: 14,
-                            fontFamily:
-                                "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-                        }}
-                    >
-                        Add images
-                    </div>
+                    <Placeholder />
                 )}
             </div>
         )
     }
 
     // Empty state
-    if (!selectedSrc) {
+    if (!selected?.src) {
         return (
             <div
                 style={{
@@ -234,11 +262,36 @@ export default function RandomImage(props: Props) {
         )
     }
 
+    // Reveal animation
+    const isHorizontal =
+        direction === "Left→Right" || direction === "Right→Left"
+
+    const origin =
+        direction === "Left→Right"
+            ? "right center"
+            : direction === "Right→Left"
+              ? "left center"
+              : direction === "Top→Bottom"
+                ? "bottom center"
+                : "top center"
+
+    const easeMap: Record<string, any> = {
+        Linear: "linear",
+        "Ease In": "easeIn",
+        "Ease Out": "easeOut",
+        "Ease In-Out": "easeInOut",
+        "Circ Out": "circOut",
+        "Back Out": "backOut",
+        "Expo Out": [0.16, 1, 0.3, 1],
+        Custom: customCurve
+            ? customCurve.split(",").map((n) => parseFloat(n.trim()))
+            : "easeOut",
+    }
+
     const showMask = revealEnabled && !reducedMotion
 
     return (
         <div
-            ref={containerRef}
             style={{
                 position: "relative",
                 width: "100%",
@@ -249,9 +302,9 @@ export default function RandomImage(props: Props) {
             }}
         >
             <img
-                src={selectedSrc}
-                srcSet={selectedSrcSet}
-                alt={selectedAlt}
+                src={selected.src}
+                srcSet={selected.srcSet}
+                alt={selected.alt ?? ""}
                 style={{
                     width: "100%",
                     height: "100%",
@@ -261,26 +314,95 @@ export default function RandomImage(props: Props) {
                 }}
             />
 
-            {/* Mask overlay */}
             {showMask && (
-                <motion.div
-                    variants={variants}
-                    initial={isStatic ? "reveal" : "hidden"}
-                    animate={isStatic ? "reveal" : animState}
-                    style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        backgroundColor: maskColor,
-                        transformOrigin: origin,
-                        borderRadius,
-                        willChange: "transform",
-                        backfaceVisibility: "hidden",
-                    }}
+                <RevealMask
+                    isHorizontal={isHorizontal}
+                    origin={origin}
+                    duration={duration}
+                    delay={delay}
+                    ease={easeMap[ease]}
+                    maskColor={maskColor}
+                    borderRadius={borderRadius}
+                    trigger={trigger}
+                    once={once}
                 />
             )}
+        </div>
+    )
+}
+
+// Separated reveal mask to isolate useInView from the main component
+function RevealMask({
+    isHorizontal,
+    origin,
+    duration,
+    delay,
+    ease,
+    maskColor,
+    borderRadius,
+    trigger,
+    once,
+}: {
+    isHorizontal: boolean
+    origin: string
+    duration: number
+    delay: number
+    ease: any
+    maskColor: string
+    borderRadius: number
+    trigger: "Auto" | "In View"
+    once: boolean
+}) {
+    const ref = useRef<HTMLDivElement>(null)
+    const inView = useInView(ref, { once })
+
+    const shouldReveal = trigger === "Auto" || inView
+
+    return (
+        <motion.div
+            ref={ref}
+            initial={isHorizontal ? { scaleX: 1 } : { scaleY: 1 }}
+            animate={
+                shouldReveal
+                    ? isHorizontal
+                        ? { scaleX: 0 }
+                        : { scaleY: 0 }
+                    : undefined
+            }
+            transition={{ duration, delay, ease }}
+            style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: maskColor,
+                transformOrigin: origin,
+                borderRadius,
+                pointerEvents: "none",
+                willChange: "transform",
+            }}
+        />
+    )
+}
+
+function Placeholder() {
+    return (
+        <div
+            style={{
+                width: "100%",
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.04)",
+                color: "rgba(0,0,0,0.4)",
+                fontSize: 14,
+                fontFamily:
+                    "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            }}
+        >
+            Add images
         </div>
     )
 }
@@ -295,8 +417,14 @@ addPropertyControls(RandomImage, {
             type: ControlType.ResponsiveImage,
         },
         maxCount: 50,
-        description:
-            "A random image from this set is shown on each page load. Alt text is set per image.",
+        description: "One image from this set is shown on each page load.",
+    },
+    order: {
+        type: ControlType.Enum,
+        title: "Order",
+        options: ["Random", "In Order"],
+        defaultValue: "Random",
+        displaySegmentedControl: true,
     },
     objectFit: {
         type: ControlType.Enum,
@@ -333,7 +461,7 @@ addPropertyControls(RandomImage, {
                 max: 3,
                 step: 0.1,
                 unit: "s",
-                hidden: (props: any) => !props.reveal?.enabled,
+                hidden: (value: any) => !value.enabled,
             },
             delay: {
                 type: ControlType.Number,
@@ -343,13 +471,13 @@ addPropertyControls(RandomImage, {
                 max: 3,
                 step: 0.1,
                 unit: "s",
-                hidden: (props: any) => !props.reveal?.enabled,
+                hidden: (value: any) => !value.enabled,
             },
             maskColor: {
                 type: ControlType.Color,
                 title: "Mask Color",
                 defaultValue: "#ffffff",
-                hidden: (props: any) => !props.reveal?.enabled,
+                hidden: (value: any) => !value.enabled,
             },
             direction: {
                 type: ControlType.Enum,
@@ -363,7 +491,7 @@ addPropertyControls(RandomImage, {
                 ],
                 optionTitles: ["→", "←", "↓", "↑"],
                 displaySegmentedControl: true,
-                hidden: (props: any) => !props.reveal?.enabled,
+                hidden: (value: any) => !value.enabled,
             },
             ease: {
                 type: ControlType.Enum,
@@ -379,22 +507,22 @@ addPropertyControls(RandomImage, {
                     "Expo Out",
                     "Custom",
                 ],
-                hidden: (props: any) => !props.reveal?.enabled,
+                hidden: (value: any) => !value.enabled,
             },
             customCurve: {
                 type: ControlType.String,
                 title: "Custom Bezier",
                 defaultValue: "",
                 placeholder: "0.33, 1, 0.68, 1",
-                hidden: (props: any) =>
-                    !props.reveal?.enabled || props.reveal?.ease !== "Custom",
+                hidden: (value: any) =>
+                    !value.enabled || value.ease !== "Custom",
             },
             trigger: {
                 type: ControlType.Enum,
                 title: "Trigger",
                 defaultValue: "In View",
                 options: ["Auto", "In View"],
-                hidden: (props: any) => !props.reveal?.enabled,
+                hidden: (value: any) => !value.enabled,
             },
             once: {
                 type: ControlType.Boolean,
@@ -402,9 +530,8 @@ addPropertyControls(RandomImage, {
                 defaultValue: true,
                 enabledTitle: "Yes",
                 disabledTitle: "No",
-                hidden: (props: any) =>
-                    !props.reveal?.enabled ||
-                    props.reveal?.trigger !== "In View",
+                hidden: (value: any) =>
+                    !value.enabled || value.trigger !== "In View",
             },
         },
     },
