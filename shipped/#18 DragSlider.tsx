@@ -69,13 +69,18 @@ interface LayoutConfig {
     paddingRight?: number
     maxWidth?: number
     shadowPadding?: number
+    fitVisibleCards?: boolean
+    sizeMode?: "auto" | "fit-visible"
+    visibleCards?: number
 }
 
 interface ControlLayout {
-    position?: "bottom" | "top" | "split"
+    position?: "bottom" | "top" | "split" | "overlay"
     alignment?: "flex-start" | "center" | "flex-end"
     gap?: number
     margin?: number
+    sideInset?: number
+    hoverOnly?: boolean
 }
 
 interface Autoplay {
@@ -110,6 +115,8 @@ interface DragSliderProps {
     draggableEnabled: boolean
     tickerEnabled: boolean
     ticker: Ticker
+    edgeFade: "none" | "both" | "left" | "right"
+    edgeFadeWidth: number
 }
 
 type SliderState = {
@@ -286,10 +293,7 @@ function applyPlainListSemantics(
         slide.removeAttribute("aria-roledescription")
         slide.removeAttribute("aria-label")
         slide.setAttribute("aria-hidden", "false")
-        slide.setAttribute(
-            "aria-selected",
-            index === 0 ? "true" : "false"
-        )
+        slide.removeAttribute("aria-selected")
         slide.setAttribute("tabindex", index === 0 ? "0" : "-1")
         slide.setAttribute(
             "data-gsap-slider-item-status",
@@ -663,16 +667,28 @@ export default function DragSlider({
     draggableEnabled = true,
     tickerEnabled = false,
     ticker,
+    edgeFade = "none",
+    edgeFadeWidth = 80,
 }: DragSliderProps) {
     // Extract grouped prop values
     const paddingLeft = layout?.paddingLeft ?? 0
     const paddingRight = layout?.paddingRight ?? 0
     const maxWidth = layout?.maxWidth ?? 0
     const shadowPadding = layout?.shadowPadding ?? 0
+    const fitVisibleCardsEnabled = layout?.fitVisibleCards
+    const sizeMode =
+        fitVisibleCardsEnabled != null
+            ? fitVisibleCardsEnabled
+                ? "fit-visible"
+                : "auto"
+            : (layout?.sizeMode ?? "auto")
+    const requestedVisibleCards = layout?.visibleCards ?? 1
     const controlPosition = controlLayout?.position ?? "bottom"
     const controlAlignment = controlLayout?.alignment ?? "center"
     const controlGap = controlLayout?.gap ?? 16
     const controlMargin = controlLayout?.margin ?? 0
+    const controlSideInset = controlLayout?.sideInset ?? 16
+    const controlHoverOnly = controlLayout?.hoverOnly !== false
     const snapStrength = dragBehavior?.snapStrength ?? 0.7
     const dragResistance = dragBehavior?.dragResistance ?? 0.05
     const btnFont = buttonStyle?.font ?? {}
@@ -742,11 +758,53 @@ export default function DragSlider({
         [slideNodes]
     )
 
+    const visibleCards = useMemo(() => {
+        const safeCount = Math.max(1, requestedVisibleCards)
+        if (slideNodes.length === 0) return safeCount
+        return Math.min(safeCount, slideNodes.length)
+    }, [requestedVisibleCards, slideNodes.length])
+
+    const fitVisibleCards =
+        !tickerEnabled && sizeMode === "fit-visible" && visibleCards > 0
+
+    const slideWidth = useMemo(() => {
+        if (!fitVisibleCards) return null
+
+        const totalGap = Math.max(0, gap) * Math.max(visibleCards - 1, 0)
+        const availableWidth =
+            containerWidth - effectivePaddingLeft - effectivePaddingRight - totalGap
+
+        return Math.max(0, availableWidth / visibleCards)
+    }, [
+        containerWidth,
+        effectivePaddingLeft,
+        effectivePaddingRight,
+        fitVisibleCards,
+        gap,
+        visibleCards,
+    ])
+
     const cssVars = useMemo(() => {
         return {
             "--slider-gap": `${Math.max(0, gap)}px`,
+            "--slider-overlay-inset": `${Math.max(0, controlSideInset)}px`,
+            ...(slideWidth != null
+                ? { "--slider-item-width": `${slideWidth}px` }
+                : null),
         } as React.CSSProperties
-    }, [gap])
+    }, [gap, controlSideInset, slideWidth])
+
+    const fadeMaskStyle = useMemo((): React.CSSProperties | null => {
+        if (edgeFade === "none" || !edgeFade) return null
+        const w = edgeFadeWidth
+        const left = edgeFade === "left" || edgeFade === "both"
+        const right = edgeFade === "right" || edgeFade === "both"
+        const gradient = `linear-gradient(to right, ${left ? "transparent" : "black"}, black ${left ? `${w}px` : "0px"}, black calc(100% - ${right ? `${w}px` : "0px"}), ${right ? "transparent" : "black"})`
+        return {
+            maskImage: gradient,
+            WebkitMaskImage: gradient,
+        }
+    }, [edgeFade, edgeFadeWidth])
 
     const styleText = useMemo(() => {
         const scope = `[data-drag-slider-id="${sliderId}"]`
@@ -754,6 +812,7 @@ export default function DragSlider({
             ${scope} [data-gsap-slider-collection] {
                 width: 100%;
                 overflow: hidden;
+                position: relative;
             }
             ${scope}[data-slider-engine="native"] [data-gsap-slider-collection] {
                 overflow-x: auto;
@@ -796,6 +855,30 @@ export default function DragSlider({
             ${scope} [data-gsap-slider-control] {
                 transition: opacity 0.2s ease;
             }
+            ${scope} [data-gsap-slider-overlay-controls] {
+                position: absolute;
+                inset: 0;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 0 var(--slider-overlay-inset);
+                z-index: 2;
+            }
+            ${scope} [data-gsap-slider-overlay-control] {
+                transition: opacity 0.24s ease, transform 0.24s ease;
+                pointer-events: auto;
+            }
+            ${scope}[data-overlay-hover="true"] [data-gsap-slider-overlay-control] {
+                opacity: 0;
+                pointer-events: none;
+                transform: scale(0.96);
+            }
+            ${scope}[data-overlay-hover="true"]:hover [data-gsap-slider-overlay-control],
+            ${scope}[data-overlay-hover="true"]:focus-within [data-gsap-slider-overlay-control] {
+                opacity: 1;
+                pointer-events: auto;
+                transform: scale(1);
+            }
             ${scope}:focus-visible {
                 outline: 2px solid currentColor;
                 outline-offset: -2px;
@@ -813,6 +896,14 @@ export default function DragSlider({
                 cursor: default;
                 user-select: none;
                 touch-action: auto;
+            }
+            @keyframes sliderItemAppear {
+                from { opacity: 0; }
+                to { opacity: 1; }
+            }
+            ${scope} [data-gsap-slider-item] {
+                animation: sliderItemAppear 0.4s ease both;
+                animation-delay: calc(var(--i, 0) * 60ms);
             }
         `
     }, [sliderId])
@@ -891,13 +982,96 @@ export default function DragSlider({
         if (!root || !collection || !track) return
 
         const gsap = window.gsap
-        if (!gsap) return
-
-        // Save active index before teardown for position restoration
         const prevActiveIndex = runtimeRef.current.activeIndex
         killRuntime()
-        gsap.killTweensOf(track)
+        if (gsap) gsap.killTweensOf(track)
 
+        if (!gsap || !engineReady) {
+            const items = Array.from(
+                track.querySelectorAll("[data-gsap-slider-item]")
+            ) as HTMLDivElement[]
+            if (items.length === 0) return
+
+            const viewportWidth = Math.max(1, collection.clientWidth)
+            const maxScroll = Math.max(track.scrollWidth - viewportWidth, 0)
+            const sliderEnabled = maxScroll > 0
+
+            root.setAttribute(
+                "data-gsap-slider-status",
+                sliderEnabled ? "active" : "not-active"
+            )
+            startTransition(() => setSliderActive(sliderEnabled))
+            startTransition(() => setSnapCount(items.length))
+
+            if (!sliderEnabled) {
+                setNavState(false, false)
+                applyPlainListSemantics(root, collection, items)
+                return
+            }
+
+            applyCarouselSemantics(root, collection, items)
+
+            const itemPositions = items.map((item) => item.offsetLeft)
+            runtimeRef.current.snapPoints = itemPositions.map((pos) => -pos)
+
+            const updateFromScroll = () => {
+                const scrollLeft = collection.scrollLeft
+                const viewLeft = scrollLeft
+                const viewRight = scrollLeft + viewportWidth
+
+                let nearestItem = 0
+                let minDist = Infinity
+                items.forEach((item, index) => {
+                    const itemLeft = item.offsetLeft
+                    const dist = Math.abs(itemLeft - scrollLeft)
+                    if (dist < minDist) {
+                        minDist = dist
+                        nearestItem = index
+                    }
+
+                    const itemRight = itemLeft + item.offsetWidth
+                    const visible =
+                        itemRight > viewLeft && itemLeft < viewRight
+                    const status: SliderItemStatus =
+                        index === nearestItem
+                            ? "active"
+                            : visible
+                              ? "inview"
+                              : "not-active"
+
+                    item.setAttribute("data-gsap-slider-item-status", status)
+                    item.setAttribute(
+                        "aria-selected",
+                        status === "active" ? "true" : "false"
+                    )
+                    item.setAttribute(
+                        "aria-hidden",
+                        status === "not-active" ? "true" : "false"
+                    )
+                    item.setAttribute(
+                        "tabindex",
+                        status === "active" ? "0" : "-1"
+                    )
+                })
+
+                runtimeRef.current.activeIndex = nearestItem
+                setNavState(scrollLeft > 1, scrollLeft < maxScroll - 1)
+                if (liveRegionRef.current) {
+                    liveRegionRef.current.textContent = `Slide ${nearestItem + 1} of ${items.length}`
+                }
+            }
+
+            updateFromScroll()
+            collection.addEventListener("scroll", updateFromScroll, {
+                passive: true,
+            })
+
+            return () => {
+                collection.removeEventListener("scroll", updateFromScroll)
+            }
+        }
+
+        // Save active index before teardown for position restoration
         const items = Array.from(
             track.querySelectorAll("[data-gsap-slider-item]")
         ) as HTMLDivElement[]
@@ -940,6 +1114,9 @@ export default function DragSlider({
         killRuntime,
         reducedMotion,
         gap,
+        sizeMode,
+        visibleCards,
+        maxWidth,
         paddingLeft,
         paddingRight,
         setNavState,
@@ -954,27 +1131,64 @@ export default function DragSlider({
         (targetIndex: number) => {
             const runtime = runtimeRef.current
             const track = trackRef.current
+            const collection = collectionRef.current
             const gsap = window.gsap
-            if (!gsap || !track) return
-            if (!runtime.snapPoints.length || !runtime.updateStatus)
+            if (!track) return
+
+            if (!gsap || !engineReady) {
+                if (!collection) return
+                const items = Array.from(
+                    track.querySelectorAll("[data-gsap-slider-item]")
+                ) as HTMLDivElement[]
+                if (!items.length) return
+
+                const clampedIndex = clamp(targetIndex, 0, items.length - 1)
+                const targetItem = items[clampedIndex]
+                collection.scrollTo({
+                    left: targetItem.offsetLeft,
+                    behavior: reducedMotion ? "auto" : "smooth",
+                })
                 return
+            }
+
+            if (!runtime.snapPoints.length || !runtime.updateStatus) return
 
             const clampedIndex = clamp(
                 targetIndex,
                 0,
                 runtime.snapPoints.length - 1
             )
+            const draggable = runtime.draggable as
+                | (DraggableInstance & {
+                      update?: (
+                          applyBounds?: boolean,
+                          sticky?: boolean
+                      ) => void
+                      tween?: { kill?: () => void }
+                  })
+                | null
+
+            autoScrollPausedRef.current = true
+            draggable?.tween?.kill?.()
+            gsap.killTweensOf(track)
             gsap.to(track, {
                 duration: reducedMotion ? 0 : 0.4,
                 x: runtime.snapPoints[clampedIndex],
                 overwrite: "auto",
                 onUpdate: () => {
                     const x = gsap.getProperty(track, "x") as number
+                    draggable?.update?.(true)
                     runtime.updateStatus?.(x)
+                },
+                onComplete: () => {
+                    const x = gsap.getProperty(track, "x") as number
+                    draggable?.update?.(true)
+                    runtime.updateStatus?.(x)
+                    autoScrollPausedRef.current = false
                 },
             })
         },
-        [reducedMotion]
+        [engineReady, reducedMotion]
     )
 
     // Autoplay — continuous drift with ping-pong at edges (skip in ticker mode)
@@ -1176,47 +1390,15 @@ export default function DragSlider({
     const isArrows = buttonContent === "arrows"
     const isCustom = buttonContent === "custom"
     const isIconMode = isArrows || isCustom
-
-    if (isStaticRenderer) {
-        return (
-            <div
-                style={{
-                    width: "100%",
-                    height: "100%",
-                    display: "flex",
-                    gap,
-                    overflow: "hidden",
-                    alignItems: alignment,
-                    paddingLeft,
-                    paddingRight,
-                }}
-            >
-                {slideNodes.length > 0 ? (
-                    slideNodes.map((child, i) => (
-                        <div key={i} style={{ flex: "none" }}>
-                            {child}
-                        </div>
-                    ))
-                ) : (
-                    <div
-                        style={{
-                            width: "100%",
-                            minHeight: 180,
-                            border: "1px dashed rgba(255,255,255,0.35)",
-                            borderRadius: 12,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "rgba(255,255,255,0.8)",
-                            fontSize: 14,
-                        }}
-                    >
-                        Add children to DragSlider
-                    </div>
-                )}
-            </div>
-        )
-    }
+    const slideItemStyle: React.CSSProperties | undefined =
+        slideWidth != null
+            ? {
+                  flexBasis: "var(--slider-item-width)",
+                  width: "var(--slider-item-width)",
+                  minWidth: "var(--slider-item-width)",
+                  maxWidth: "var(--slider-item-width)",
+              }
+            : undefined
 
     const prevContent = isCustom ? prevIcon : isArrows ? <ArrowLeft /> : prevLabel
     const nextContent = isCustom ? nextIcon : isArrows ? <ArrowRight /> : nextLabel
@@ -1237,6 +1419,115 @@ export default function DragSlider({
         justifyContent: "center",
         ...(!isIconMode ? btnFont : {}),
     }
+
+    if (isStaticRenderer) {
+        return (
+            <div
+                style={{
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: controlGap,
+                    overflow: "hidden",
+                    ...cssVars,
+                }}
+            >
+                <div
+                    style={{
+                        display: "flex",
+                        gap,
+                        flex: 1,
+                        minHeight: 0,
+                        alignItems: alignment,
+                        paddingLeft,
+                        paddingRight,
+                        overflow: "hidden",
+                        ...fadeMaskStyle,
+                    }}
+                >
+                    {slideNodes.length > 0 ? (
+                        slideNodes.map((child, i) => (
+                            <div
+                                key={i}
+                                style={{
+                                    flex: "none",
+                                    ...slideItemStyle,
+                                }}
+                            >
+                                {child}
+                            </div>
+                        ))
+                    ) : (
+                        <div
+                            style={{
+                                width: "100%",
+                                minHeight: 180,
+                                border: "1px dashed rgba(255,255,255,0.35)",
+                                borderRadius: 12,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "rgba(255,255,255,0.8)",
+                                fontSize: 14,
+                            }}
+                        >
+                            Add children to DragSlider
+                        </div>
+                    )}
+                </div>
+                {showControls && !tickerEnabled && (
+                    <div
+                        style={{
+                            display: "flex",
+                            width: "100%",
+                            alignItems: "center",
+                            justifyContent: controlAlignment,
+                            gap: controlGap,
+                            margin: `${controlMargin}px 0`,
+                        }}
+                    >
+                        <button
+                            type="button"
+                            style={{
+                                ...btnBase,
+                                opacity: 1,
+                            }}
+                        >
+                            {prevContent}
+                        </button>
+                        <button
+                            type="button"
+                            style={{
+                                ...btnBase,
+                                opacity: 1,
+                            }}
+                        >
+                            {nextContent}
+                        </button>
+                    </div>
+                )}
+            </div>
+        )
+    }
+
+    const overlayControls = controlPosition === "overlay" && !tickerEnabled
+
+    const overlayBtnStyle: React.CSSProperties = overlayControls
+        ? {
+              background: isCustom ? "transparent" : "rgba(255,255,255,0.14)",
+              border: isCustom
+                  ? "none"
+                  : "1px solid rgba(255,255,255,0.2)",
+              boxShadow: "0 12px 30px rgba(0,0,0,0.18)",
+              backdropFilter: "blur(16px) saturate(140%)",
+              WebkitBackdropFilter: "blur(16px) saturate(140%)",
+              color: btnColor,
+              width: isIconMode ? 44 : undefined,
+              height: isIconMode ? 44 : undefined,
+              padding: isCustom ? 0 : isIconMode ? 0 : "10px 18px",
+          }
+        : {}
 
     const controlsBlock = showControls && (
         <div
@@ -1297,6 +1588,9 @@ export default function DragSlider({
             data-slider-engine={engineReady ? "gsap" : "native"}
             data-drag-disabled={!draggableEnabled ? "true" : undefined}
             data-ticker={tickerEnabled ? "true" : undefined}
+            data-overlay-hover={
+                overlayControls && controlHoverOnly ? "true" : undefined
+            }
             data-gsap-slider-status={
                 sliderActive ? "active" : "not-active"
             }
@@ -1307,8 +1601,9 @@ export default function DragSlider({
                 display: "flex",
                 flexDirection: "column",
                 alignItems: alignment,
-                gap: controlGap,
+                gap: overlayControls ? 0 : controlGap,
                 overflow: "hidden",
+                position: "relative",
                 ...cssVars,
             }}
         >
@@ -1377,8 +1672,56 @@ export default function DragSlider({
                         marginTop: -shadowPadding,
                         marginBottom: -shadowPadding,
                     }),
+                    ...fadeMaskStyle,
                 }}
             >
+                {overlayControls && showControls && (
+                    <div
+                        data-gsap-slider-overlay-controls=""
+                        style={{
+                            display: sliderActive ? "flex" : "none",
+                        }}
+                    >
+                        <button
+                            type="button"
+                            data-gsap-slider-control="prev"
+                            data-gsap-slider-overlay-control=""
+                            aria-label="Previous Slide"
+                            onClick={onPrev}
+                            disabled={!canPrev}
+                            data-gsap-slider-control-status={
+                                canPrev ? "active" : "not-active"
+                            }
+                            style={{
+                                ...btnBase,
+                                ...overlayBtnStyle,
+                                opacity: canPrev ? 1 : 0.35,
+                                pointerEvents: canPrev ? "auto" : "none",
+                            }}
+                        >
+                            {isCustom ? prevContent : <ArrowLeft />}
+                        </button>
+                        <button
+                            type="button"
+                            data-gsap-slider-control="next"
+                            data-gsap-slider-overlay-control=""
+                            aria-label="Next Slide"
+                            onClick={onNext}
+                            disabled={!canNext}
+                            data-gsap-slider-control-status={
+                                canNext ? "active" : "not-active"
+                            }
+                            style={{
+                                ...btnBase,
+                                ...overlayBtnStyle,
+                                opacity: canNext ? 1 : 0.35,
+                                pointerEvents: canNext ? "auto" : "none",
+                            }}
+                        >
+                            {isCustom ? nextContent : <ArrowRight />}
+                        </button>
+                    </div>
+                )}
                 <div
                     ref={trackRef}
                     data-gsap-slider-list=""
@@ -1395,6 +1738,10 @@ export default function DragSlider({
                                             : `slide-${index}`
                                     }
                                     data-gsap-slider-item=""
+                                    style={{
+                                        ...slideItemStyle,
+                                        "--i": index,
+                                    } as React.CSSProperties}
                                 >
                                     {child}
                                 </div>
@@ -1406,6 +1753,7 @@ export default function DragSlider({
                                         data-gsap-slider-item=""
                                         data-ticker-clone=""
                                         aria-hidden="true"
+                                        style={slideItemStyle}
                                     >
                                         {child}
                                     </div>
@@ -1533,6 +1881,25 @@ export default function DragSlider({
 }
 
 DragSlider.displayName = "Drag Slider"
+DragSlider.defaultProps = {
+    layout: {
+        paddingLeft: 0,
+        paddingRight: 0,
+        maxWidth: 0,
+        shadowPadding: 0,
+        fitVisibleCards: false,
+        sizeMode: "auto",
+        visibleCards: 1,
+    },
+    controlLayout: {
+        position: "bottom",
+        alignment: "center",
+        gap: 16,
+        margin: 0,
+        sideInset: 16,
+        hoverOnly: true,
+    },
+}
 
 addPropertyControls(DragSlider, {
     // --- Content ---
@@ -1562,6 +1929,15 @@ addPropertyControls(DragSlider, {
     layout: {
         type: ControlType.Object,
         title: "Layout",
+        defaultValue: {
+            paddingLeft: 0,
+            paddingRight: 0,
+            maxWidth: 0,
+            shadowPadding: 0,
+            fitVisibleCards: false,
+            sizeMode: "auto",
+            visibleCards: 1,
+        },
         controls: {
             paddingLeft: {
                 type: ControlType.Number,
@@ -1604,6 +1980,32 @@ addPropertyControls(DragSlider, {
                 displayStepper: true,
                 defaultValue: 0,
                 description: "Extra vertical space so card shadows aren't clipped.",
+            },
+            fitVisibleCards: {
+                type: ControlType.Boolean,
+                title: "Fit Count",
+                defaultValue: false,
+                description: "Scale cards so a set number fit fully inside the slider.",
+            },
+            sizeMode: {
+                type: ControlType.Enum,
+                title: "Card Width",
+                options: ["auto", "fit-visible"],
+                optionTitles: ["Auto", "Fit Count"],
+                defaultValue: "auto",
+                hidden: () => true,
+            },
+            visibleCards: {
+                type: ControlType.Number,
+                title: "Visible",
+                min: 1,
+                max: 12,
+                step: 1,
+                displayStepper: true,
+                defaultValue: 1,
+                hidden: (props: DragSliderProps) =>
+                    props.layout?.fitVisibleCards !== true,
+                description: "How many cards should fit fully inside the slider width.",
             },
         },
     },
@@ -1649,12 +2051,20 @@ addPropertyControls(DragSlider, {
         type: ControlType.Object,
         title: "Control Layout",
         hidden: (props: DragSliderProps) => !props.showControls || props.tickerEnabled,
+        defaultValue: {
+            position: "bottom",
+            alignment: "center",
+            gap: 16,
+            margin: 0,
+            sideInset: 16,
+            hoverOnly: true,
+        },
         controls: {
             position: {
                 type: ControlType.Enum,
                 title: "Position",
-                options: ["bottom", "top", "split"],
-                optionTitles: ["Bottom", "Top", "Split"],
+                options: ["bottom", "top", "split", "overlay"],
+                optionTitles: ["Bottom", "Top", "Split", "Overlay"],
                 defaultValue: "bottom",
             },
             alignment: {
@@ -1663,6 +2073,8 @@ addPropertyControls(DragSlider, {
                 options: ["flex-start", "center", "flex-end"],
                 optionTitles: ["Start", "Center", "End"],
                 defaultValue: "center",
+                hidden: (props: DragSliderProps) =>
+                    props.controlLayout?.position === "overlay",
             },
             gap: {
                 type: ControlType.Number,
@@ -1673,6 +2085,8 @@ addPropertyControls(DragSlider, {
                 unit: "px",
                 displayStepper: true,
                 defaultValue: 16,
+                hidden: (props: DragSliderProps) =>
+                    props.controlLayout?.position === "overlay",
             },
             margin: {
                 type: ControlType.Number,
@@ -1683,6 +2097,27 @@ addPropertyControls(DragSlider, {
                 unit: "px",
                 displayStepper: true,
                 defaultValue: 0,
+                hidden: (props: DragSliderProps) =>
+                    props.controlLayout?.position === "overlay",
+            },
+            sideInset: {
+                type: ControlType.Number,
+                title: "Side Inset",
+                min: 0,
+                max: 80,
+                step: 1,
+                unit: "px",
+                displayStepper: true,
+                defaultValue: 16,
+                hidden: (props: DragSliderProps) =>
+                    props.controlLayout?.position !== "overlay",
+            },
+            hoverOnly: {
+                type: ControlType.Boolean,
+                title: "Hover Only",
+                defaultValue: true,
+                hidden: (props: DragSliderProps) =>
+                    props.controlLayout?.position !== "overlay",
             },
         },
     },
@@ -1811,6 +2246,26 @@ addPropertyControls(DragSlider, {
                 unit: "px",
             },
         },
+    },
+
+    // --- Edge Fade ---
+    edgeFade: {
+        type: ControlType.Enum,
+        title: "Edge Fade",
+        options: ["none", "both", "left", "right"],
+        optionTitles: ["None", "Both", "Left", "Right"],
+        defaultValue: "none",
+    },
+    edgeFadeWidth: {
+        type: ControlType.Number,
+        title: "Fade Width",
+        min: 10,
+        max: 300,
+        step: 5,
+        unit: "px",
+        displayStepper: true,
+        defaultValue: 80,
+        hidden: (props: DragSliderProps) => props.edgeFade === "none" || !props.edgeFade,
     },
 
     // --- Autoplay ---
