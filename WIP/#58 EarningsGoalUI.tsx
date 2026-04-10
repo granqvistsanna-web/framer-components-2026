@@ -1939,7 +1939,7 @@ export default function EarningsGoalUI(props: Props) {
                                                 normalizedCategories.length -
                                                     1 && {
                                                 borderBottom: `1px solid ${withAlpha(textColor, 0.07)}`,
-                                            ),
+                                            }),
                                         ...getCategoryRowStyle(i),
                                     }}
                                 >
@@ -2755,7 +2755,7 @@ export default function EarningsGoalUI(props: Props) {
                                                 normalizedCategories.length -
                                                     1 && {
                                                 borderBottom: `1px solid ${withAlpha(textColor, 0.07)}`,
-                                            ),
+                                            }),
                                         ...getCategoryRowStyle(i),
                                     }}
                                 >
