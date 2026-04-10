@@ -86,6 +86,7 @@ uniform vec2 uTrailVelocities[${TRAIL_LENGTH}];
 uniform float uTrailStrengths[${TRAIL_LENGTH}];
 uniform float uBurst;
 uniform vec2 uBurstPos;
+uniform float uObjectFit;
 
 // ── texture-based gradient noise ──
 
@@ -186,15 +187,29 @@ void main() {
     // remap from padded canvas to image-area UVs
     vec2 imageUv = (uv - uPadding) / (1.0 - 2.0 * uPadding);
 
-    // object-fit: cover UV mapping (within image area)
+    // object-fit UV mapping (within image area)
+    // uObjectFit: 0 = cover, 1 = contain, 2 = fill
     vec2 texUv = imageUv;
-    if (imageAreaAspect > imageAspect) {
-        float scale = imageAreaAspect / imageAspect;
-        texUv.y = (imageUv.y - 0.5) / scale + 0.5;
-    } else {
-        float scale = imageAspect / imageAreaAspect;
-        texUv.x = (imageUv.x - 0.5) / scale + 0.5;
+    if (uObjectFit < 0.5) {
+        // cover: scale to fill, crop excess
+        if (imageAreaAspect > imageAspect) {
+            float scale = imageAreaAspect / imageAspect;
+            texUv.y = (imageUv.y - 0.5) / scale + 0.5;
+        } else {
+            float scale = imageAspect / imageAreaAspect;
+            texUv.x = (imageUv.x - 0.5) / scale + 0.5;
+        }
+    } else if (uObjectFit < 1.5) {
+        // contain: scale to fit entirely, letterbox
+        if (imageAreaAspect > imageAspect) {
+            float scale = imageAspect / imageAreaAspect;
+            texUv.x = (imageUv.x - 0.5) / scale + 0.5;
+        } else {
+            float scale = imageAreaAspect / imageAspect;
+            texUv.y = (imageUv.y - 0.5) / scale + 0.5;
+        }
     }
+    // fill (uObjectFit >= 1.5): texUv = imageUv as-is (stretch)
     texUv.y = 1.0 - texUv.y;
 
     float time = uTime * uSpeed;
@@ -448,6 +463,49 @@ function parseColorToRgb01(input: string): [number, number, number] {
     return [0, 0, 0]
 }
 
+// ── color presets ──
+
+const COLOR_PRESETS: Record<string, string[]> = {
+    tropical: ["#0D9488", "#A78BFA", "#F472B6", "#FBBF24"],
+    ocean: ["#0EA5E9", "#6366F1", "#14B8A6", "#818CF8"],
+    sunset: ["#F97316", "#EF4444", "#A855F7", "#FBBF24"],
+    neon: ["#22D3EE", "#A3E635", "#F472B6", "#FACC15"],
+    forest: ["#16A34A", "#065F46", "#A3E635", "#D9F99D"],
+    monochrome: ["#E5E5E5", "#A3A3A3", "#525252", "#171717"],
+}
+
+const DEFAULT_PRESET = "tropical"
+const PRESET_OPTIONS = [...Object.keys(COLOR_PRESETS), "custom"]
+const PRESET_TITLES = ["Tropical", "Ocean", "Sunset", "Neon", "Forest", "Mono", "Custom"]
+
+/** Maps N user colors to exactly 4 shader colors by evenly sampling */
+function resolveColors(
+    preset: string,
+    customColors: string[]
+): [string, string, string, string] {
+    const palette =
+        preset === "custom"
+            ? customColors.length > 0
+                ? customColors
+                : COLOR_PRESETS[DEFAULT_PRESET]
+            : COLOR_PRESETS[preset] || COLOR_PRESETS[DEFAULT_PRESET]
+
+    if (palette.length === 0) return ["#000000", "#000000", "#000000", "#000000"]
+    if (palette.length === 1) return [palette[0], palette[0], palette[0], palette[0]]
+    if (palette.length === 2) return [palette[0], palette[1], palette[1], palette[0]]
+    if (palette.length === 3) return [palette[0], palette[1], palette[2], palette[1]]
+    if (palette.length === 4) return [palette[0], palette[1], palette[2], palette[3]]
+
+    // 5+ colors: sample 4 evenly spaced
+    const last = palette.length - 1
+    return [
+        palette[0],
+        palette[Math.round(last / 3)],
+        palette[Math.round((last * 2) / 3)],
+        palette[last],
+    ]
+}
+
 function compileShader(
     gl: WebGLRenderingContext,
     type: number,
@@ -496,10 +554,11 @@ function createProgram(
 
 type FluidImageProps = {
     image?: string
-    effectColor1: string
-    effectColor2: string
-    effectColor3: string
-    effectColor4: string
+    objectFit?: "cover" | "contain" | "fill"
+    colors?: {
+        preset?: string
+        customColors?: string[]
+    }
     effect?: {
         showGradient?: boolean
         radius?: number
@@ -540,6 +599,7 @@ interface ShaderState {
     fadeIn: boolean
     fadeInDuration: number
     overflowPadding: number
+    objectFit: number
 }
 
 // ── uniform location map ──
@@ -569,6 +629,7 @@ interface UniformLocations {
     uPadding: WebGLUniformLocation | null
     uBurst: WebGLUniformLocation | null
     uBurstPos: WebGLUniformLocation | null
+    uObjectFit: WebGLUniformLocation | null
 }
 
 // ── component ──
@@ -576,14 +637,20 @@ interface UniformLocations {
 export default function FluidImage(props: FluidImageProps) {
     const {
         image,
-        effectColor1 = "#0D9488",
-        effectColor2 = "#A78BFA",
-        effectColor3 = "#F472B6",
-        effectColor4 = "#FBBF24",
+        objectFit = "cover",
+        colors = {},
         effect = {},
         animation = {},
         advanced = {},
     } = props
+
+    const {
+        preset = DEFAULT_PRESET,
+        customColors = [],
+    } = colors
+
+    const [effectColor1, effectColor2, effectColor3, effectColor4] =
+        resolveColors(preset, customColors)
 
     const {
         showGradient = true,
@@ -630,6 +697,8 @@ export default function FluidImage(props: FluidImageProps) {
 
     const imageSrc = image || DEFAULT_IMAGE
 
+    const objectFitValue = objectFit === "contain" ? 1 : objectFit === "fill" ? 2 : 0
+
     const stateRef = React.useRef<ShaderState>({
         effectColor1Rgb: parseColorToRgb01(effectColor1),
         effectColor2Rgb: parseColorToRgb01(effectColor2),
@@ -648,6 +717,7 @@ export default function FluidImage(props: FluidImageProps) {
         fadeIn,
         fadeInDuration,
         overflowPadding,
+        objectFit: objectFitValue,
     })
     stateRef.current = {
         effectColor1Rgb: parseColorToRgb01(effectColor1),
@@ -667,6 +737,7 @@ export default function FluidImage(props: FluidImageProps) {
         fadeIn,
         fadeInDuration,
         overflowPadding,
+        objectFit: objectFitValue,
     }
 
     // ref for image URL so the main effect can pick up changes
@@ -811,6 +882,7 @@ export default function FluidImage(props: FluidImageProps) {
                 uPadding: gl.getUniformLocation(program, "uPadding"),
                 uBurst: gl.getUniformLocation(program, "uBurst"),
                 uBurstPos: gl.getUniformLocation(program, "uBurstPos"),
+                uObjectFit: gl.getUniformLocation(program, "uObjectFit"),
             }
 
             // ── image texture (unit 0) ──
@@ -1256,6 +1328,7 @@ export default function FluidImage(props: FluidImageProps) {
             gl.uniform1f(loc.uHueShift, s.hueShift)
             gl.uniform1f(loc.uColorCycle, s.colorCycle)
             gl.uniform1f(loc.uShowGradient, s.showGradient ? 1.0 : 0.0)
+            gl.uniform1f(loc.uObjectFit, s.objectFit)
             gl.uniform2fv(loc.uTrail, trailFlat)
             gl.uniform2fv(loc.uTrailVelocities, trailVelFlat)
             gl.uniform1fv(loc.uTrailStrengths, trailStrengths)
@@ -1342,7 +1415,8 @@ export default function FluidImage(props: FluidImageProps) {
                     alt=""
                     style={{
                         width: "100%",
-                        height: "auto",
+                        height: "100%",
+                        objectFit: objectFit,
                         display: "block",
                     }}
                 />
@@ -1361,18 +1435,16 @@ export default function FluidImage(props: FluidImageProps) {
             }}
         >
             {/* Flow-participating sizer for fit-content layouts */}
-            {imageNaturalSize && (
-                <img
-                    src={imageSrc}
-                    alt=""
-                    style={{
-                        display: "block",
-                        width: "100%",
-                        height: "auto",
-                        visibility: "hidden",
-                    }}
-                />
-            )}
+            <img
+                src={imageSrc}
+                alt=""
+                style={{
+                    display: "block",
+                    maxWidth: "100%",
+                    height: "auto",
+                    visibility: "hidden",
+                }}
+            />
             {loadError ? (
                 <div
                     style={{
@@ -1404,29 +1476,35 @@ addPropertyControls(FluidImage, {
         title: "Image",
         allowedFileTypes: ["png", "jpg", "jpeg", "gif", "webp"],
     },
-    effectColor1: {
-        type: ControlType.Color,
-        title: "Color 1",
-        defaultValue: "#0D9488",
-        hidden: (p: any) => !(p.effect?.showGradient ?? true),
+    objectFit: {
+        type: ControlType.Enum,
+        title: "Fit",
+        defaultValue: "cover",
+        options: ["cover", "contain", "fill"],
+        optionTitles: ["Cover", "Contain", "Fill"],
     },
-    effectColor2: {
-        type: ControlType.Color,
-        title: "Color 2",
-        defaultValue: "#A78BFA",
+    colors: {
+        type: ControlType.Object,
+        title: "Colors",
         hidden: (p: any) => !(p.effect?.showGradient ?? true),
-    },
-    effectColor3: {
-        type: ControlType.Color,
-        title: "Color 3",
-        defaultValue: "#F472B6",
-        hidden: (p: any) => !(p.effect?.showGradient ?? true),
-    },
-    effectColor4: {
-        type: ControlType.Color,
-        title: "Color 4",
-        defaultValue: "#FBBF24",
-        hidden: (p: any) => !(p.effect?.showGradient ?? true),
+        controls: {
+            preset: {
+                type: ControlType.Enum,
+                title: "Palette",
+                defaultValue: DEFAULT_PRESET,
+                options: PRESET_OPTIONS,
+                optionTitles: PRESET_TITLES,
+            },
+            customColors: {
+                type: ControlType.Array,
+                title: "Colors",
+                maxCount: 6,
+                hidden: (p: any) => (p.colors?.preset ?? DEFAULT_PRESET) !== "custom",
+                control: {
+                    type: ControlType.Color,
+                },
+            },
+        },
     },
     effect: {
         type: ControlType.Object,
@@ -1492,6 +1570,7 @@ addPropertyControls(FluidImage, {
                 min: 0,
                 max: 2,
                 step: 0.01,
+                unit: "×",
             },
             persistence: {
                 type: ControlType.Number,
@@ -1546,6 +1625,7 @@ addPropertyControls(FluidImage, {
                 min: 0.5,
                 max: 3,
                 step: 0.05,
+                unit: "×",
             },
             overflowPadding: {
                 type: ControlType.Number,

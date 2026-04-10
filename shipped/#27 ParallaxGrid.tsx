@@ -30,8 +30,10 @@ const imageControlType = ctAny.Image ?? "image"
 interface CardConfig {
     image1: string
     video1: string
+    vimeoId1: string
     image2: string
     video2: string
+    vimeoId2: string
     altText: string
     link: string
     x: number
@@ -148,6 +150,18 @@ const STATIC_MEDIA_STYLE: React.CSSProperties = {
     display: "block",
 }
 
+const VIMEO_IFRAME_STYLE: React.CSSProperties = {
+    width: "100%",
+    height: "100%",
+    border: "none",
+    display: "block",
+    objectFit: "cover",
+}
+
+function vimeoEmbedUrl(id: string): string {
+    return `https://player.vimeo.com/video/${id}?background=1&autoplay=1&loop=1&muted=1&dnt=1`
+}
+
 // ─── Floating Card ──────────────────────────────────────────
 function FloatingCardBase({
     card,
@@ -193,13 +207,16 @@ function FloatingCardBase({
     const y = useSpring(useTransform(mouseYMV, (v) => v * strength), SPRING_CFG)
     const rotateY = useSpring(useTransform(mouseXMV, (v) => v * tilt), SPRING_CFG)
     const rotateX = useSpring(useTransform(mouseYMV, (v) => -(v * tilt)), SPRING_CFG)
-    const srcA = card.video1 || card.image1
-    const isVideoA = !!card.video1
-    const srcB = card.video2 || card.image2
-    const isVideoB = !!card.video2
-    const hasSecond = srcB && srcB.length > 0
+    const isVimeoA = !!(card.vimeoId1 && card.vimeoId1.length > 0)
+    const isVimeoB = !!(card.vimeoId2 && card.vimeoId2.length > 0)
+    const srcA = isVimeoA ? vimeoEmbedUrl(card.vimeoId1) : card.video1 || card.image1
+    const isVideoA = isVimeoA ? false : !!card.video1
+    const srcB = isVimeoB ? vimeoEmbedUrl(card.vimeoId2) : card.video2 || card.image2
+    const isVideoB = isVimeoB ? false : !!card.video2
+    const hasSecond = (isVimeoB || (srcB && srcB.length > 0))
     const currentSrc = hasSecond && showSecond ? srcB : srcA
     const currentIsVideo = hasSecond && showSecond ? isVideoB : isVideoA
+    const currentIsVimeo = hasSecond && showSecond ? isVimeoB : isVimeoA
     const imageKey = hasSecond && showSecond ? "b" : "a"
     const variants = getImageVariants(cycleEffect)
     const hasLink = card.link && card.link.length > 0
@@ -207,7 +224,7 @@ function FloatingCardBase({
     const [imageReady, setImageReady] = useState(false)
 
     useEffect(() => {
-        if (isVideoA || !srcA) {
+        if (isVimeoA || isVideoA || !srcA) {
             setImageReady(true)
             return
         }
@@ -227,14 +244,14 @@ function FloatingCardBase({
             clearTimeout(timeout)
             img.src = ""
         }
-    }, [srcA, isVideoA])
+    }, [srcA, isVideoA, isVimeoA])
 
     useEffect(() => {
-        if (!hasSecond || isVideoB || !srcB) return
+        if (!hasSecond || isVimeoB || isVideoB || !srcB) return
         const img = new Image()
         img.src = srcB
         return () => { img.src = "" }
-    }, [srcB, hasSecond, isVideoB])
+    }, [srcB, hasSecond, isVideoB, isVimeoB])
 
     const zIndex = Math.round((2.1 - card.depth) * 100)
 
@@ -255,7 +272,26 @@ function FloatingCardBase({
             perspective: cycleEffect === "flip" ? 600 : undefined,
         }}>
             <AnimatePresence initial={false} mode="popLayout">
-                {currentIsVideo ? (
+                {currentIsVimeo ? (
+                    <motion.div
+                        key={imageKey}
+                        style={MEDIA_CELL_STYLE}
+                        initial={variants.initial}
+                        animate={variants.animate}
+                        exit={variants.exit}
+                        transition={{
+                            duration: transitionDuration,
+                            ease: "easeInOut",
+                        }}
+                    >
+                        <iframe
+                            src={currentSrc}
+                            allow="autoplay"
+                            style={VIMEO_IFRAME_STYLE}
+                            title={card.altText || "Vimeo video"}
+                        />
+                    </motion.div>
+                ) : currentIsVideo ? (
                     <motion.video
                         key={imageKey}
                         src={currentSrc}
@@ -352,7 +388,7 @@ const FloatingCard = memo(FloatingCardBase)
 // ─── Layout Presets ──────────────────────────────────────────
 type LayoutPreset = "custom" | "editorial" | "scattered" | "cinematic" | "mosaic" | "diagonal" | "spotlight" | "cascade" | "columns" | "stack"
 
-const CARD_DEFAULTS = { image1: "", video1: "", image2: "", video2: "", altText: "", link: "" }
+const CARD_DEFAULTS = { image1: "", video1: "", vimeoId1: "", image2: "", video2: "", vimeoId2: "", altText: "", link: "" }
 
 const LAYOUT_PRESETS: Record<Exclude<LayoutPreset, "custom">, CardConfig[]> = {
     editorial: [
@@ -492,8 +528,10 @@ export default function ParallaxGrid({
                     return {
                         image1: c?.image1 ?? "",
                         video1: c?.video1 ?? "",
+                        vimeoId1: c?.vimeoId1 ?? "",
                         image2: c?.image2 ?? "",
                         video2: c?.video2 ?? "",
+                        vimeoId2: c?.vimeoId2 ?? "",
                         altText: c?.altText ?? "",
                         link: c?.link ?? "",
                         x: base.x,
@@ -513,7 +551,7 @@ export default function ParallaxGrid({
         () =>
             resolvedCards
                 .map((c, i) => ({ card: c, index: i }))
-                .filter(({ card }) => card && ((card.image1 && card.image1.length > 0) || (card.video1 && card.video1.length > 0))),
+                .filter(({ card }) => card && ((card.image1 && card.image1.length > 0) || (card.video1 && card.video1.length > 0) || (card.vimeoId1 && card.vimeoId1.length > 0))),
         [resolvedCards]
     )
 
@@ -717,8 +755,9 @@ export default function ParallaxGrid({
                 }}
             >
                 {validEntries.map((entry) => {
-                    const src = entry.card.video1 || entry.card.image1
-                    const isVideo = !!entry.card.video1
+                    const isVimeo = !!(entry.card.vimeoId1 && entry.card.vimeoId1.length > 0)
+                    const src = isVimeo ? vimeoEmbedUrl(entry.card.vimeoId1) : entry.card.video1 || entry.card.image1
+                    const isVideo = !isVimeo && !!entry.card.video1
                     const zIndex = Math.round((2.1 - entry.card.depth) * 100)
                     return (
                         <div
@@ -735,7 +774,14 @@ export default function ParallaxGrid({
                                 zIndex,
                             }}
                         >
-                            {isVideo ? (
+                            {isVimeo ? (
+                                <iframe
+                                    src={src}
+                                    allow="autoplay"
+                                    style={VIMEO_IFRAME_STYLE}
+                                    title={entry.card.altText || "Vimeo video"}
+                                />
+                            ) : isVideo ? (
                                 <video
                                     src={src}
                                     autoPlay
@@ -954,6 +1000,12 @@ addPropertyControls(ParallaxGrid, {
                     title: "Video A URL",
                     defaultValue: "",
                 },
+                vimeoId1: {
+                    type: ControlType.String,
+                    title: "Vimeo A ID",
+                    defaultValue: "",
+                    description: "Vimeo video ID (e.g. 123456789). Overrides Video A URL.",
+                },
                 image2: {
                     type: imageControlType as any,
                     title: "Image B",
@@ -962,6 +1014,12 @@ addPropertyControls(ParallaxGrid, {
                     type: ControlType.String,
                     title: "Video B URL",
                     defaultValue: "",
+                },
+                vimeoId2: {
+                    type: ControlType.String,
+                    title: "Vimeo B ID",
+                    defaultValue: "",
+                    description: "Vimeo video ID (e.g. 123456789). Overrides Video B URL.",
                 },
                 altText: {
                     type: ControlType.String,

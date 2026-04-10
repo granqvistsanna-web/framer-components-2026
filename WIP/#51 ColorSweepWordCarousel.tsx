@@ -1,129 +1,182 @@
 /**
- * ColorSweepWordCarousel
- * Animated word carousel with gradient color sweep effect and optional prefix/suffix text
+ * Color Sweep Word Carousel
+ * Staggered color-sweep reveal for all words, with selected words cycling through alternatives.
+ * Use {word1|word2|word3} syntax to mark cycling slots.
  *
  * @framerSupportedLayoutWidth any-prefer-fixed
- * @framerSupportedLayoutHeight any
+ * @framerSupportedLayoutHeight any-prefer-fixed
  * @framerIntrinsicWidth 600
  * @framerIntrinsicHeight 100
  */
 import * as React from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
-import { AnimatePresence, motion } from "framer-motion"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { motion } from "framer-motion"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
-type ColorPreset = keyof typeof COLOR_PRESETS | "custom"
+type ColorPreset =
+    | "spectrum"
+    | "fire"
+    | "ocean"
+    | "neon"
+    | "aurora"
+    | "lavender"
+    | "mono"
+    | "custom"
+
+type Segment =
+    | { type: "static"; word: string }
+    | { type: "cycle"; words: string[] }
+
+type TimingProps = {
+    sweepMs: number
+    staggerMs: number
+    holdMs: number
+    fadeMs: number
+}
+
+type CycleWidthProps = {
+    fixedCycleWidth: boolean
+    smoothWidth: boolean
+    widthDurationMs: number
+}
 
 type Props = {
-    words: string[]
-    prefix: string
-    suffix: string
-    sweepMs: number
-    holdMs: number
-    font?: any
-    fontSize?: number
-    colorPreset: ColorPreset
+    text: string
+    timing?: TimingProps
     textColor: string
+    colorPreset: ColorPreset
     customColors: string[]
+    cycleWidth?: CycleWidthProps
+    direction: "ltr" | "rtl"
     textAlign: "left" | "center" | "right"
+    className?: string
+    font?: Record<string, any>
+    fontSize?: number
+    lineHeight?: number
 }
 
-const COLOR_PRESETS = {
-    spectrum: {
-        text: "#000000",
-        stops: ["#000000", "#FF0099", "#FF0000", "#FF4F04", "#FFA600", "#F8F8F8", "#0056FF", "#FFFFFF"],
-    },
-    sunset: {
-        text: "#1A0A2E",
-        stops: ["#1A0A2E", "#FF006E", "#FF4D00", "#FFBE0B", "#FFF1D0"],
-    },
-    ocean: {
-        text: "#0A1628",
-        stops: ["#0A1628", "#00B4D8", "#0077B6", "#90E0EF", "#CAF0F8"],
-    },
-    neon: {
-        text: "#0D0D0D",
-        stops: ["#0D0D0D", "#FF00FF", "#00FFFF", "#39FF14", "#FFFFFF"],
-    },
-    fire: {
-        text: "#1A0000",
-        stops: ["#1A0000", "#FF0000", "#FF4500", "#FF8C00", "#FFD700", "#FFFACD"],
-    },
-    arctic: {
-        text: "#0B132B",
-        stops: ["#0B132B", "#1C2541", "#3A506B", "#5BC0BE", "#6FFFE9"],
-    },
-    candy: {
-        text: "#2D1B4E",
-        stops: ["#2D1B4E", "#FF6B9D", "#C084FC", "#FB923C", "#FDE68A"],
-    },
-    lavender: {
-        text: "#1E1033",
-        stops: ["#1E1033", "#7B5EA7", "#B07CC6", "#D4A5E5", "#E8D5F5", "#F5EDFF"],
-    },
-    mono: {
-        text: "#000000",
-        stops: ["#000000", "#333333", "#666666", "#999999", "#CCCCCC", "#FFFFFF"],
-    },
-}
-
-const SWEEP_EASE: [number, number, number, number] = [0.22, 0, 0.12, 1]
-const FADE_MS = 250
+const SWEEP_EASE: [number, number, number, number] = [0.2, 0, 0.3, 0.3]
 const GAP_MS = 70
-const ENTER_EXIT_MS = 280
 
-const srOnly: React.CSSProperties = {
-    position: "absolute",
-    width: 1,
-    height: 1,
-    overflow: "hidden",
-    clip: "rect(0,0,0,0)",
-    whiteSpace: "nowrap",
-    border: 0,
+const PRESET_STOPS: Record<Exclude<ColorPreset, "custom">, string> = {
+    spectrum:
+        "#FF0099 35%, #FF0000 45%, #FF4F04 50%, #FFA600 55%, #F8F8F8 60%, #0056FF 65%",
+    fire: "#FF4500 35%, #FF6A00 42%, #FF9500 50%, #FFD000 58%, #FFF5C0 65%",
+    ocean: "#00D4FF 35%, #0087FF 43%, #0040FF 50%, #7B2FFF 57%, #E0CFFF 65%",
+    neon: "#FF00FF 35%, #00FF88 43%, #00FFFF 50%, #FFFF00 57%, #FFFFFF 65%",
+    aurora: "#00FF87 35%, #00CFFF 42%, #8B5CF6 50%, #EC4899 57%, #FFF0F5 65%",
+    lavender: "#E0B0FF 35%, #B57EDC 42%, #9B59B6 50%, #7C3AED 57%, #DDD6FE 65%",
+    mono: "#BBBBBB 35%, #DDDDDD 48%, #F5F5F5 57%, #FFFFFF 65%",
 }
 
-const JUSTIFY_MAP = {
-    left: "flex-start",
-    center: "center",
-    right: "flex-end",
-} as const
+// ── Parsing ─────────────────────────────────────────────────────────────────
 
-function buildGradient(stops: string[]): string {
-    const first = stops[0]
-    const last = stops[stops.length - 1]
-    const midStops = stops.slice(1, -1)
-    const gradientStops = [
-        `${first} 0%`,
-        `${first} 30%`,
-        ...midStops.map(
-            (c, i) => `${c} ${35 + (i * 35) / Math.max(midStops.length - 1, 1)}%`
-        ),
-        `${last} 70%`,
-        `${last} 100%`,
-    ]
-    return `linear-gradient(in oklch 90deg, ${gradientStops.join(", ")})`
+/** Parse "We build {fast|smooth|crisp} things" into segments */
+function parseText(text: string): Segment[] {
+    const segments: Segment[] = []
+    const regex = /\{([^}]+)\}|(\S+)/g
+    let match
+    while ((match = regex.exec(text)) !== null) {
+        if (match[1]) {
+            const words = match[1]
+                .split("|")
+                .map((w) => w.trim())
+                .filter(Boolean)
+            if (words.length > 0) segments.push({ type: "cycle", words })
+        } else if (match[2]) {
+            segments.push({ type: "static", word: match[2] })
+        }
+    }
+    return segments
 }
+
+// ── Gradient builder ────────────────────────────────────────────────────────
+
+function buildCustomStops(colors: string[]): string {
+    if (!colors.length) return "#CCCCCC 50%"
+    const count = colors.length
+    return colors
+        .map((c, i) => {
+            const pos = 35 + (i / Math.max(count - 1, 1)) * 30
+            return `${c} ${pos.toFixed(0)}%`
+        })
+        .join(", ")
+}
+
+function buildGradient(
+    textColor: string,
+    preset: ColorPreset,
+    customColors: string[],
+    direction: "ltr" | "rtl"
+): string {
+    const deg = direction === "ltr" ? "90deg" : "270deg"
+    const stops =
+        preset === "custom"
+            ? buildCustomStops(customColors)
+            : PRESET_STOPS[preset]
+    return `linear-gradient(in oklch ${deg}, ${textColor} 0%, ${textColor} 30%, ${stops}, #FFFFFF 70%, #FFFFFF 100%)`
+}
+
+// ── Font helper ─────────────────────────────────────────────────────────────
+
+function toFontStyle(font?: any): React.CSSProperties {
+    if (!font) return {}
+    const fontFamily = font.fontFamily ?? font.family
+    const fontWeight = font.fontWeight ?? font.weight
+    const fontStyleVal = font.fontStyle ?? font.style
+    const fontSize = font.fontSize ?? font.size
+    const lineHeightRaw = font.lineHeight
+    const letterSpacing = font.letterSpacing
+
+    const computedLineHeight =
+        typeof lineHeightRaw === "number" && typeof fontSize === "number"
+            ? `${(lineHeightRaw / 100) * fontSize}px`
+            : lineHeightRaw
+
+    return {
+        fontFamily,
+        fontStyle: fontStyleVal,
+        fontWeight,
+        fontSize,
+        lineHeight: computedLineHeight,
+        letterSpacing,
+    }
+}
+
+// ── Component ───────────────────────────────────────────────────────────────
 
 export default function WordCarousel(props: Props) {
     const {
-        words = ["fast", "smooth", "colorful", "crisp"],
-        prefix = "",
-        suffix = "",
-        sweepMs = 750,
-        holdMs = 2000,
+        text = "We build {fast|smooth|colorful|crisp} interfaces",
+        timing,
+        textColor = "#000000",
+        colorPreset = "spectrum",
+        customColors = ["#FF0099", "#FF4F04", "#0056FF"],
+        cycleWidth,
+        direction = "ltr",
+        textAlign = "left",
+        className = "",
         font,
         fontSize = 64,
-        colorPreset = "spectrum",
-        textColor = "#000000",
-        customColors = ["#000000", "#FF0099", "#FF0000", "#FFA600", "#FFFFFF"],
-        textAlign = "left",
+        lineHeight = 1.2,
     } = props
 
+    const sweepMs = timing?.sweepMs ?? 750
+    const staggerMs = timing?.staggerMs ?? 120
+    const holdMs = timing?.holdMs ?? 2000
+    const fadeMs = timing?.fadeMs ?? 250
+    const fixedCycleWidth = cycleWidth?.fixedCycleWidth ?? true
+    const smoothWidth = cycleWidth?.smoothWidth ?? true
+    const widthDurationMs = cycleWidth?.widthDurationMs ?? 300
+
     const isStatic = useIsStaticRenderer()
+    const segments = useMemo(() => parseText(text), [text])
 
-    const wordsKey = words.join("\0")
-    const stableWords = useMemo(() => words, [wordsKey])
+    const [appearDone, setAppearDone] = useState(false)
+    const [cycleIdx, setCycleIdx] = useState(0)
+    const [fadeOut, setFadeOut] = useState(false)
 
+    // Reduced motion
     const [reducedMotion, setReducedMotion] = useState(false)
     useEffect(() => {
         if (typeof window === "undefined") return
@@ -134,72 +187,63 @@ export default function WordCarousel(props: Props) {
         return () => mq.removeEventListener("change", handler)
     }, [])
 
-    const [idx, setIdx] = useState(0)
-    const [fadeOut, setFadeOut] = useState(false)
-    const timer = useRef<number | null>(null)
-    const fadeTimer = useRef<number | null>(null)
-
-    // Reset index when word list changes
+    // Reset on text change
     useEffect(() => {
-        setIdx(0)
+        setAppearDone(false)
+        setCycleIdx(0)
         setFadeOut(false)
-    }, [stableWords])
+        return () => {}
+    }, [text])
 
+    // Appear timer — after all words have swept in + hold, mark done
+    const totalAppearMs = Math.max(
+        0,
+        (segments.length - 1) * staggerMs + sweepMs
+    )
     useEffect(() => {
-        if (!stableWords?.length || stableWords.length < 2 || isStatic || reducedMotion) {
-            setFadeOut(false)
-            return
+        if (reducedMotion) {
+            setAppearDone(true)
+            return () => {}
         }
-        if (timer.current) window.clearTimeout(timer.current)
-        if (fadeTimer.current) window.clearTimeout(fadeTimer.current)
+        const t = window.setTimeout(
+            () => setAppearDone(true),
+            totalAppearMs + holdMs
+        )
+        return () => window.clearTimeout(t)
+    }, [totalAppearMs, holdMs, text, reducedMotion])
 
-        fadeTimer.current = window.setTimeout(
+    // Cycle timer — only after appear, only if there are cycling slots
+    const hasCycles = useMemo(
+        () => segments.some((s) => s.type === "cycle" && s.words.length > 1),
+        [segments]
+    )
+    useEffect(() => {
+        if (!appearDone || !hasCycles) return () => {}
+
+        const fadeTimer = window.setTimeout(
             () => setFadeOut(true),
-            Math.max(0, sweepMs + holdMs - FADE_MS - GAP_MS)
+            Math.max(0, sweepMs + holdMs - fadeMs - GAP_MS)
+        )
+        const cycleTimer = window.setTimeout(
+            () => {
+                setFadeOut(false)
+                setCycleIdx((i) => i + 1)
+            },
+            sweepMs + holdMs + GAP_MS
         )
 
-        timer.current = window.setTimeout(() => {
-            setFadeOut(false)
-            setIdx((i) => (i + 1) % stableWords.length)
-        }, sweepMs + holdMs + GAP_MS)
-
         return () => {
-            if (timer.current) window.clearTimeout(timer.current)
-            if (fadeTimer.current) window.clearTimeout(fadeTimer.current)
+            window.clearTimeout(fadeTimer)
+            window.clearTimeout(cycleTimer)
         }
-    }, [idx, stableWords, sweepMs, holdMs, isStatic, reducedMotion])
+    }, [appearDone, cycleIdx, sweepMs, holdMs, fadeMs, hasCycles])
 
-    const word = stableWords?.[idx] ?? ""
-    const fullText = `${prefix}${prefix ? " " : ""}${word}${suffix ? " " : ""}${suffix}`
-
-    // Measure word width for smooth slot animation
-    const wordMeasureRef = useRef<HTMLSpanElement>(null)
-    const [wordWidth, setWordWidth] = useState<number | null>(null)
-    useEffect(() => {
-        const el = wordMeasureRef.current
-        if (el) {
-            // scrollWidth returns natural text width regardless of parent constraints
-            setWordWidth(el.scrollWidth)
-        }
-    }, [word, font, fontSize])
-
-    // Resolve colors from preset or custom
-    const preset = colorPreset !== "custom" ? COLOR_PRESETS[colorPreset] : null
-    const stops = preset
-        ? preset.stops
-        : customColors.length >= 2
-          ? customColors
-          : COLOR_PRESETS.spectrum.stops
-    const resolvedTextColor = textColor
-    const gradient = buildGradient(stops)
-
-    // Build typography — dedicated fontSize prop always takes priority
+    // Typography
     const fontStyle: React.CSSProperties = toFontStyle(font)
     if (typeof fontSize === "number" && fontSize > 0) {
         fontStyle.fontSize = fontSize
     }
-    if (!fontStyle.lineHeight) fontStyle.lineHeight = "1.2em"
-
+    fontStyle.lineHeight = `${lineHeight}em`
     const typography: React.CSSProperties = {
         fontFamily: fontStyle.fontFamily,
         fontWeight: fontStyle.fontWeight as any,
@@ -209,322 +253,486 @@ export default function WordCarousel(props: Props) {
         letterSpacing: fontStyle.letterSpacing as any,
     }
 
-    // Sizer for fit-content: uses the longest word so the frame gets a proper intrinsic width
-    const longestWord = stableWords.reduce(
-        (a, b) => (a.length > b.length ? a : b),
-        ""
+    // Measure cycling word widths for smooth-width transitions
+    const needsSmooth = smoothWidth && !fixedCycleWidth
+    const sizerRefs = useRef<Map<string, HTMLSpanElement>>(new Map())
+    const [measuredWidths, setMeasuredWidths] = useState<Map<string, number>>(
+        new Map()
     )
-    const sizerText = `${prefix}${prefix ? " " : ""}${longestWord}${suffix ? " " : ""}${suffix}`
+    useLayoutEffect(() => {
+        if (!needsSmooth) return
+        const widths = new Map<string, number>()
+        sizerRefs.current.forEach((el, key) => {
+            widths.set(key, el.offsetWidth)
+        })
+        if (widths.size > 0) setMeasuredWidths(widths)
+        return () => {}
+    }, [needsSmooth, text, font, fontSize])
 
-    // Sizer for just the word slot — keeps natural height so descenders aren't clipped
-    const wordSizerStyle: React.CSSProperties = {
-        display: "block",
-        visibility: "hidden",
-        whiteSpace: "nowrap",
-        pointerEvents: "none",
-        ...typography,
-    }
+    const gradient = buildGradient(
+        textColor,
+        colorPreset,
+        customColors,
+        direction
+    )
+    const sweepInitialX = direction === "rtl" ? "0%" : "100%"
+    const sweepAnimateX = direction === "rtl" ? "100%" : "0%"
 
-    const sizerStyle: React.CSSProperties = {
-        display: "block",
-        visibility: "hidden",
-        height: 0,
-        overflow: "hidden",
-        whiteSpace: "nowrap",
-        pointerEvents: "none",
-        ...typography,
-    }
+    const justifyContent =
+        textAlign === "center"
+            ? "center"
+            : textAlign === "right"
+              ? "flex-end"
+              : "flex-start"
 
-    const containerStyle: React.CSSProperties = {
-        display: "flex",
-        alignItems: "center",
-        justifyContent: JUSTIFY_MAP[textAlign],
-        width: "100%",
-        height: "100%",
-        overflow: "visible",
-    }
-
-    const innerStyle: React.CSSProperties = {
-        position: "relative",
-        display: "inline-block",
-    }
+    // Build readable text for static/sr renderers
+    const plainText = segments
+        .map((s) => (s.type === "static" ? s.word : s.words[0]))
+        .join(" ")
 
     // Static renderer fallback
-    if (isStatic) {
+    if (isStatic || reducedMotion) {
         return (
-            <div style={containerStyle}>
-                <div style={innerStyle}>
-                    <span aria-hidden="true" style={sizerStyle}>{sizerText}</span>
-                    <span style={{ color: resolvedTextColor, whiteSpace: "nowrap", ...typography }}>
-                        {prefix}{prefix ? " " : ""}{word}{suffix ? " " : ""}{suffix}
-                    </span>
-                </div>
+            <div
+                style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    justifyContent,
+                    textAlign,
+                    width: "100%",
+                    height: "100%",
+                    color: textColor,
+                    ...typography,
+                }}
+            >
+                {plainText}
             </div>
         )
     }
 
-    // Reduced motion fallback
-    if (reducedMotion) {
-        return (
-            <div style={containerStyle}>
-                <div style={innerStyle}>
-                    <span aria-hidden="true" style={sizerStyle}>{sizerText}</span>
-                    <span aria-live="polite" style={{ color: resolvedTextColor, whiteSpace: "nowrap", ...typography }}>
-                        {prefix}{prefix ? " " : ""}{word}{suffix ? " " : ""}{suffix}
-                    </span>
-                </div>
-            </div>
-        )
-    }
+    // Screen reader text
+    const srText = segments
+        .map((s) => {
+            if (s.type === "static") return s.word
+            return s.words[(appearDone ? cycleIdx : 0) % s.words.length]
+        })
+        .join(" ")
 
-    const enterExitDuration = ENTER_EXIT_MS / 1000
+    // Vertical bleed from gradient overlay (0.30em) + blur (4px)
+    const bleedPad = "calc(0.30em + 4px)"
 
     return (
-        <div style={containerStyle}>
-            {/* Screen-reader accessible text */}
-            <span aria-live="polite" style={srOnly}>
-                {fullText}
+        <div
+            style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent,
+                width: "100%",
+                height: "100%",
+                overflow: "visible",
+                paddingTop: bleedPad,
+                paddingBottom: bleedPad,
+                boxSizing: "border-box",
+            }}
+        >
+            {/* Screen reader */}
+            <span
+                aria-live="polite"
+                style={{
+                    position: "absolute",
+                    width: 1,
+                    height: 1,
+                    overflow: "hidden",
+                    clip: "rect(0,0,0,0)",
+                    whiteSpace: "nowrap",
+                    border: 0,
+                }}
+            >
+                {srText}
             </span>
 
-            <div style={innerStyle}>
-                {/* Invisible sizer for fit-content width */}
-                <span aria-hidden="true" style={sizerStyle}>{sizerText}</span>
+            {/* Visual layer */}
+            <span
+                aria-hidden="true"
+                className={className}
+                style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "baseline",
+                    justifyContent,
+                    width: "100%",
+                    columnGap: "0.20em",
+                    rowGap: `${(lineHeight - 1).toFixed(2)}em`,
+                    overflow: "visible",
+                    ...typography,
+                }}
+            >
+                {segments.map((seg, i) => {
+                    const isCycling =
+                        seg.type === "cycle" && seg.words.length > 1
+                    const wordIdx =
+                        seg.type === "cycle"
+                            ? (appearDone ? cycleIdx : 0) % seg.words.length
+                            : 0
+                    const word =
+                        seg.type === "static" ? seg.word : seg.words[wordIdx]
 
-                <span
-                    aria-hidden="true"
-                    style={{
-                        display: "inline-flex",
-                        alignItems: "baseline",
-                        whiteSpace: "nowrap",
-                        ...typography,
-                    }}
-                >
-                    {/* Static prefix */}
-                    {prefix && (
-                        <span style={{ color: resolvedTextColor }}>{prefix}{" "}</span>
-                    )}
+                    // During appear: stagger delay per word. After: no delay.
+                    const delaySec = appearDone ? 0 : (i * staggerMs) / 1000
 
-                    {/* Rotating word slot */}
-                    <motion.span
-                        style={{ position: "relative", display: "inline-block" }}
-                        animate={{ width: wordWidth || "auto" }}
-                        transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
-                    >
-                        {/* Invisible sizer measures current word */}
-                        <span
-                            ref={wordMeasureRef}
-                            aria-hidden="true"
-                            style={wordSizerStyle}
+                    // Key controls when framer-motion replays the sweep
+                    const animKey =
+                        isCycling && appearDone && cycleIdx > 0
+                            ? `cycle-${cycleIdx}`
+                            : `appear-${text}-${i}`
+
+                    const shouldFadeOut = isCycling && appearDone && fadeOut
+
+                    // For fixed-width cycling: inline-grid with all
+                    // words in the same cell sizes to the widest word
+                    const useGrid =
+                        fixedCycleWidth && isCycling && seg.type === "cycle"
+
+                    const useSmooth =
+                        needsSmooth && isCycling && seg.type === "cycle"
+
+                    // Explicit measured width for smooth animation
+                    const smoothTarget = useSmooth
+                        ? measuredWidths.get(`${i}-${wordIdx}`)
+                        : undefined
+
+                    return (
+                        <motion.span
+                            key={i}
+                            animate={
+                                useSmooth && smoothTarget != null
+                                    ? { width: smoothTarget }
+                                    : undefined
+                            }
+                            transition={
+                                useSmooth
+                                    ? {
+                                          width: {
+                                              duration: widthDurationMs / 1000,
+                                              ease: [0.25, 0.1, 0.25, 1],
+                                          },
+                                      }
+                                    : undefined
+                            }
+                            style={{
+                                position: "relative",
+                                display: useGrid
+                                    ? "inline-grid"
+                                    : "inline-block",
+                                whiteSpace: "nowrap",
+                                overflow: useSmooth ? undefined : "visible",
+                                ...(useSmooth && {
+                                    overflowX: "clip" as any,
+                                    overflowY: "visible" as any,
+                                }),
+                            }}
                         >
-                            {word}
-                        </span>
+                            {/* Hidden sizers for grid (max width)
+                                or smooth (measured widths) */}
+                            {(useGrid || useSmooth) &&
+                                seg.words.map((w, j) => (
+                                    <span
+                                        key={`sizer-${j}`}
+                                        ref={
+                                            useSmooth
+                                                ? (el) => {
+                                                      const key = `${i}-${j}`
+                                                      if (el)
+                                                          sizerRefs.current.set(
+                                                              key,
+                                                              el
+                                                          )
+                                                      else
+                                                          sizerRefs.current.delete(
+                                                              key
+                                                          )
+                                                  }
+                                                : undefined
+                                        }
+                                        aria-hidden="true"
+                                        style={{
+                                            ...(useGrid
+                                                ? { gridArea: "1 / 1" }
+                                                : {
+                                                      position:
+                                                          "absolute" as const,
+                                                      top: 0,
+                                                      left: 0,
+                                                  }),
+                                            visibility: "hidden",
+                                            pointerEvents: "none",
+                                            ...typography,
+                                        }}
+                                    >
+                                        {w}
+                                    </span>
+                                ))}
 
-                        <AnimatePresence initial={false}>
+                            {/* Underlay: solid-color text */}
                             <motion.span
-                                key={idx}
+                                key={`u-${animKey}`}
                                 style={{
-                                    position: "absolute",
-                                    left: 0,
-                                    top: 0,
-                                    display: "inline-block",
-                                    whiteSpace: "nowrap",
+                                    ...(useGrid && { gridArea: "1 / 1" }),
+                                    color: textColor,
+                                    ...typography,
+                                }}
+                                initial={{ opacity: 0 }}
+                                animate={{
+                                    opacity: shouldFadeOut ? 0 : 1,
+                                }}
+                                transition={
+                                    shouldFadeOut
+                                        ? {
+                                              duration: fadeMs / 1000,
+                                              ease: "easeOut",
+                                          }
+                                        : {
+                                              delay:
+                                                  delaySec +
+                                                  (sweepMs * 0.8) / 1000,
+                                              duration: 0.12,
+                                              ease: "easeOut",
+                                          }
+                                }
+                            >
+                                {word}
+                            </motion.span>
+
+                            {/* Overlay: gradient sweep */}
+                            <motion.span
+                                key={`o-${animKey}`}
+                                style={{
+                                    ...(useGrid
+                                        ? {
+                                              gridArea: "1 / 1",
+                                              marginTop: "-0.30em",
+                                              marginBottom: "-0.30em",
+                                              paddingTop: "0.30em",
+                                              paddingBottom: "0.30em",
+                                              zIndex: 1,
+                                          }
+                                        : {
+                                              position: "absolute" as const,
+                                              left: 0,
+                                              right: 0,
+                                              top: "-0.30em",
+                                              bottom: "-0.30em",
+                                              paddingTop: "0.30em",
+                                              paddingBottom: "0.30em",
+                                          }),
+                                    lineHeight: "inherit",
+                                    pointerEvents: "none",
+                                    backgroundOrigin: "padding-box",
+                                    backgroundImage: gradient,
+                                    backgroundClip: "text",
+                                    WebkitBackgroundClip: "text",
+                                    WebkitTextFillColor: "transparent",
+                                    color: "transparent",
+                                    backgroundRepeat: "no-repeat",
+                                    backgroundSize: "400% 100%",
+                                    willChange:
+                                        "background-position, opacity, filter",
+                                    filter: "blur(var(--blur))",
+                                    ...typography,
                                 }}
                                 initial={{
-                                    opacity: 0,
-                                    filter: "blur(6px)",
+                                    backgroundPositionX: sweepInitialX,
+                                    opacity: 1,
+                                    ["--blur" as any]: "4px",
                                 }}
                                 animate={{
-                                    opacity: 1,
-                                    filter: "blur(0px)",
-                                }}
-                                exit={{
-                                    opacity: 0,
-                                    filter: "blur(6px)",
+                                    backgroundPositionX: sweepAnimateX,
+                                    opacity: [1, 1, 0],
+                                    ["--blur" as any]: ["4px", "0.5px", "0px"],
                                 }}
                                 transition={{
-                                    duration: enterExitDuration,
-                                    ease: [0.4, 0, 0.2, 1],
+                                    backgroundPositionX: {
+                                        delay: delaySec,
+                                        duration: sweepMs / 1000,
+                                        ease: SWEEP_EASE,
+                                    },
+                                    opacity: {
+                                        delay: delaySec,
+                                        duration: sweepMs / 1000,
+                                        times: [0, 0.985, 1],
+                                        ease: "linear",
+                                    },
+                                    ["--blur" as any]: {
+                                        delay: delaySec,
+                                        duration: sweepMs / 1000,
+                                        times: [0, 0.8, 1],
+                                        ease: "easeOut",
+                                    },
                                 }}
                             >
-                                {/* Underlay: solid color text, reveals after sweep */}
-                                <motion.span
-                                    style={{ color: resolvedTextColor }}
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: fadeOut ? 0 : 1 }}
-                                    transition={
-                                        fadeOut
-                                            ? { duration: FADE_MS / 1000, ease: "easeOut" }
-                                            : {
-                                                  delay: (sweepMs * 0.75) / 1000,
-                                                  duration: 0.15,
-                                                  ease: "easeOut",
-                                              }
-                                    }
-                                >
-                                    {word}
-                                </motion.span>
-
-                                {/* Overlay: gradient sweep across the word */}
-                                <motion.span
-                                    style={{
-                                        position: "absolute",
-                                        left: 0,
-                                        right: 0,
-                                        top: "-0.30em",
-                                        bottom: "-0.30em",
-                                        paddingTop: "0.30em",
-                                        paddingBottom: "0.30em",
-                                        lineHeight: "inherit",
-                                        pointerEvents: "none",
-                                        backgroundOrigin: "padding-box",
-                                        backgroundImage: gradient,
-                                        backgroundClip: "text",
-                                        WebkitBackgroundClip: "text",
-                                        WebkitTextFillColor: "transparent",
-                                        color: "transparent",
-                                        backgroundRepeat: "no-repeat",
-                                        backgroundSize: "400% 100%",
-                                        willChange: "background-position, opacity, filter",
-                                        filter: "blur(var(--blur))",
-                                    }}
-                                    initial={{
-                                        backgroundPositionX: "100%",
-                                        opacity: 0,
-                                        ["--blur" as any]: "5px",
-                                    }}
-                                    animate={{
-                                        backgroundPositionX: "0%",
-                                        opacity: [0, 1, 1, 0],
-                                        ["--blur" as any]: ["5px", "0px", "0px"],
-                                    }}
-                                    transition={{
-                                        backgroundPositionX: {
-                                            duration: sweepMs / 1000,
-                                            ease: SWEEP_EASE,
-                                        },
-                                        opacity: {
-                                            duration: sweepMs / 1000,
-                                            times: [0, 0.06, 0.92, 1],
-                                            ease: "linear",
-                                        },
-                                        ["--blur" as any]: {
-                                            duration: sweepMs / 1000,
-                                            times: [0, 0.65, 1],
-                                            ease: "easeOut",
-                                        },
-                                    }}
-                                >
-                                    {word}
-                                </motion.span>
+                                {word}
                             </motion.span>
-                        </AnimatePresence>
-                    </motion.span>
-
-                    {/* Static suffix */}
-                    {suffix && (
-                        <span style={{ color: resolvedTextColor }}>{" "}{suffix}</span>
-                    )}
-                </span>
-            </div>
+                        </motion.span>
+                    )
+                })}
+            </span>
         </div>
     )
 }
 
-function toFontStyle(font?: any): React.CSSProperties {
-    if (!font) return {}
-    const fontFamily = font.fontFamily ?? font.family
-    const fontWeight = font.fontWeight ?? font.weight
-    const fontStyle = font.fontStyle ?? font.style
-    const fontSize = font.fontSize ?? font.size
-    const lineHeightRaw = font.lineHeight
-    const letterSpacing = font.letterSpacing
-
-    const computedLineHeight =
-        typeof lineHeightRaw === "number" && typeof fontSize === "number"
-            ? lineHeightRaw > 10
-                ? `${(lineHeightRaw / 100) * fontSize}px`
-                : `${lineHeightRaw}em`
-            : lineHeightRaw
-
-    return {
-        fontFamily,
-        fontStyle,
-        fontWeight,
-        fontSize,
-        lineHeight: computedLineHeight,
-        letterSpacing,
-    }
-}
-
-/** ---------- Framer Controls ---------- */
+// ── Property Controls ───────────────────────────────────────────────────────
 
 addPropertyControls(WordCarousel, {
-    prefix: {
+    text: {
         type: ControlType.String,
-        title: "Prefix",
-        placeholder: "Text before…",
-        defaultValue: "",
+        title: "Text",
+        placeholder: "We build {fast|smooth} things",
+        defaultValue: "We build {fast|smooth|colorful|crisp} interfaces",
     },
-    words: {
-        type: ControlType.Array,
-        title: "Words",
-        propertyControl: { type: ControlType.String, placeholder: "Word" },
-        defaultValue: ["fast", "smooth", "colorful", "crisp"],
+    // ── Timing ──────────────────────────────────────────────────────────────
+    timing: {
+        type: ControlType.Object,
+        title: "Timing",
+        controls: {
+            sweepMs: {
+                type: ControlType.Number,
+                title: "Sweep",
+                min: 100,
+                max: 5000,
+                step: 10,
+                unit: "ms",
+                defaultValue: 750,
+            },
+            staggerMs: {
+                type: ControlType.Number,
+                title: "Stagger",
+                min: 30,
+                max: 500,
+                step: 10,
+                unit: "ms",
+                defaultValue: 120,
+            },
+            holdMs: {
+                type: ControlType.Number,
+                title: "Hold",
+                min: 0,
+                max: 10000,
+                step: 10,
+                unit: "ms",
+                defaultValue: 2000,
+            },
+            fadeMs: {
+                type: ControlType.Number,
+                title: "Fade",
+                min: 50,
+                max: 1000,
+                step: 10,
+                unit: "ms",
+                defaultValue: 250,
+            },
+        },
     },
-    suffix: {
-        type: ControlType.String,
-        title: "Suffix",
-        placeholder: "…text after",
-        defaultValue: "",
-    },
-    colorPreset: {
-        type: ControlType.Enum,
-        title: "Colors",
-        options: ["spectrum", "sunset", "ocean", "neon", "fire", "arctic", "candy", "lavender", "mono", "custom"],
-        optionTitles: ["Spectrum", "Sunset", "Ocean", "Neon", "Fire", "Arctic", "Candy", "Lavender", "Mono", "Custom"],
-        defaultValue: "spectrum",
-    },
+    // ── Color ────────────────────────────────────────────────────────────────
     textColor: {
         type: ControlType.Color,
         title: "Text Color",
         defaultValue: "#000000",
+        section: "Color",
+    },
+    colorPreset: {
+        type: ControlType.Enum,
+        title: "Sweep Colors",
+        options: [
+            "spectrum",
+            "fire",
+            "ocean",
+            "neon",
+            "aurora",
+            "lavender",
+            "mono",
+            "custom",
+        ],
+        optionTitles: [
+            "Spectrum",
+            "Fire",
+            "Ocean",
+            "Neon",
+            "Aurora",
+            "Lavender",
+            "Mono",
+            "Custom",
+        ],
+        defaultValue: "spectrum",
+        section: "Color",
     },
     customColors: {
         type: ControlType.Array,
-        title: "Gradient Colors",
-        propertyControl: { type: ControlType.Color },
-        defaultValue: ["#000000", "#FF0099", "#FF0000", "#FFA600", "#FFFFFF"],
+        title: "Custom Colors",
+        propertyControl: {
+            type: ControlType.Color,
+        },
+        defaultValue: ["#FF0099", "#FF4F04", "#0056FF"],
         hidden: (props: any) => props.colorPreset !== "custom",
+        section: "Color",
     },
-    sweepMs: {
-        type: ControlType.Number,
-        title: "Sweep (ms)",
-        min: 100,
-        max: 5000,
-        step: 10,
-        unit: "ms",
-        defaultValue: 750,
+    // ── Layout ───────────────────────────────────────────────────────────────
+    cycleWidth: {
+        type: ControlType.Object,
+        title: "Cycle Width",
+        controls: {
+            fixedCycleWidth: {
+                type: ControlType.Boolean,
+                title: "Fixed Width",
+                enabledTitle: "On",
+                disabledTitle: "Off",
+                defaultValue: true,
+            },
+            smoothWidth: {
+                type: ControlType.Boolean,
+                title: "Smooth Width",
+                enabledTitle: "On",
+                disabledTitle: "Off",
+                defaultValue: true,
+                hidden: (props: any) => props.fixedCycleWidth !== false,
+            },
+            widthDurationMs: {
+                type: ControlType.Number,
+                title: "Width Duration",
+                min: 50,
+                max: 1000,
+                step: 10,
+                unit: "ms",
+                defaultValue: 300,
+                hidden: (props: any) =>
+                    props.fixedCycleWidth !== false ||
+                    props.smoothWidth !== true,
+            },
+        },
+        section: "Layout",
     },
-    holdMs: {
-        type: ControlType.Number,
-        title: "Hold (ms)",
-        min: 0,
-        max: 10000,
-        step: 10,
-        unit: "ms",
-        defaultValue: 2000,
-    },
-    font: {
-        type: ControlType.Font,
-        title: "Font",
-        controls: "extended",
+    direction: {
+        type: ControlType.SegmentedEnum,
+        title: "Direction",
+        options: ["ltr", "rtl"],
+        optionTitles: ["→", "←"],
+        defaultValue: "ltr",
+        section: "Layout",
     },
     textAlign: {
-        type: ControlType.Enum,
+        type: ControlType.SegmentedEnum,
         title: "Align",
         options: ["left", "center", "right"],
         optionTitles: ["Left", "Center", "Right"],
         defaultValue: "left",
+        section: "Layout",
+    },
+    // ── Typography ───────────────────────────────────────────────────────────
+    font: {
+        type: ControlType.Font,
+        title: "Font",
+        controls: "extended",
+        section: "Typography",
     },
     fontSize: {
         type: ControlType.Number,
@@ -535,7 +743,19 @@ addPropertyControls(WordCarousel, {
         unit: "px",
         displayStepper: true,
         defaultValue: 64,
+        section: "Typography",
+    },
+    lineHeight: {
+        type: ControlType.Number,
+        title: "Line Height",
+        min: 0.5,
+        max: 3,
+        step: 0.05,
+        unit: "em",
+        displayStepper: true,
+        defaultValue: 1.2,
+        section: "Typography",
     },
 })
 
-WordCarousel.displayName = "ColorSweepWordCarousel"
+WordCarousel.displayName = "Color Sweep Word Carousel"

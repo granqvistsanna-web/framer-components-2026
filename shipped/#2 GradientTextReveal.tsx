@@ -24,10 +24,13 @@ interface EachCharProps {
     endOpacity: number
     globalProgress: MotionValue<number>
     initialColor: string
+    gradientEffect: "off" | "flash" | "persistent"
     transitionColor: string
     transitionColor2: string
     transitionColor3: string
     revealColor: string
+    flashStart: number
+    settlePoint: number
 }
 
 interface ContentGroup {
@@ -45,11 +48,14 @@ interface LayoutGroup {
 interface StyleGroup {
     font: CSSProperties
     initialColor: string
+    gradientEffect: "off" | "flash" | "persistent"
     transitionColor: string
     transitionColor2: string
     transitionColor3: string
     revealColor: string
     endColorMode: "solid" | "full-gradient"
+    flashStart: number
+    settlePoint: number
 }
 
 interface StatesGroup {
@@ -79,11 +85,14 @@ interface GradientTextRevealProps {
     text?: string
     font?: CSSProperties
     initialColor?: string
+    gradientEffect?: "off" | "flash" | "persistent"
     transitionColor?: string
     transitionColor2?: string
     transitionColor3?: string
     revealColor?: string
     endColorMode?: "solid" | "full-gradient"
+    flashStart?: number
+    settlePoint?: number
     enableSpring?: boolean
     enableReplayOnScroll?: boolean
     replayOnUpDown?: boolean
@@ -156,20 +165,46 @@ const EachChar = ({
     endOpacity,
     globalProgress,
     initialColor,
+    gradientEffect,
     transitionColor,
     transitionColor2,
     transitionColor3,
     revealColor,
+    flashStart,
+    settlePoint,
 }: EachCharProps) => {
     const localProgress = useTransform(globalProgress, [unitStart, unitEnd], [0, 1])
     const opacityValue = useTransform(localProgress, [0, 1], [startOpacity, endOpacity])
-    const colorValue = useTransform(localProgress, [0, 0.25, 0.5, 0.75, 1], [
-        initialColor,
-        transitionColor,
-        transitionColor2,
-        transitionColor3,
-        revealColor,
-    ])
+    const colorValue = useTransform(localProgress, (value) => {
+        const t = Math.max(0, Math.min(value, 1))
+        const safeFlashStart = Math.max(0, Math.min(flashStart, 0.95))
+        const safeSettlePoint = Math.max(safeFlashStart + 0.01, Math.min(settlePoint, 1))
+
+        if (gradientEffect === "off") {
+            return mixHexColor(initialColor, revealColor, t)
+        }
+
+        if (gradientEffect === "flash") {
+            if (t <= safeFlashStart) {
+                return mixHexColor(initialColor, transitionColor, t / safeFlashStart)
+            }
+
+            if (t >= safeSettlePoint) {
+                return revealColor
+            }
+
+            const flashProgress = (t - safeFlashStart) / (safeSettlePoint - safeFlashStart)
+            return interpolateStops(
+                [transitionColor, transitionColor2, transitionColor3, revealColor],
+                flashProgress
+            )
+        }
+
+        return interpolateStops(
+            [initialColor, transitionColor, transitionColor2, transitionColor3, revealColor],
+            t
+        )
+    })
 
     return (
         <motion.span
@@ -207,6 +242,8 @@ function GradientTextReveal(props: Partial<GradientTextRevealProps>) {
 
     const font = styleGroup.font ?? props.font ?? {}
     const initialColor = styleGroup.initialColor ?? props.initialColor ?? "#666666"
+    const gradientEffect =
+        styleGroup.gradientEffect ?? props.gradientEffect ?? "flash"
     const transitionColor =
         styleGroup.transitionColor ?? props.transitionColor ?? "#abff02"
     const transitionColor2 =
@@ -215,6 +252,8 @@ function GradientTextReveal(props: Partial<GradientTextRevealProps>) {
         styleGroup.transitionColor3 ?? props.transitionColor3 ?? "#ff00ff"
     const revealColor = styleGroup.revealColor ?? props.revealColor ?? "#000000"
     const endColorMode = styleGroup.endColorMode ?? props.endColorMode ?? "full-gradient"
+    const flashStart = styleGroup.flashStart ?? props.flashStart ?? 0.18
+    const settlePoint = styleGroup.settlePoint ?? props.settlePoint ?? 0.62
 
     const enableSpring =
         states.enableSpring ?? props.enableSpring ?? props.useSpring ?? true
@@ -245,6 +284,11 @@ function GradientTextReveal(props: Partial<GradientTextRevealProps>) {
     const safeStartOpacity = Math.max(0, Math.min(startOpacity, 1))
     const safeEndOpacity = Math.max(0, Math.min(endOpacity, 1))
     const safeMaxAnimatedUnits = Math.max(1, Math.round(maxAnimatedUnits))
+    const safeFlashStart = Math.max(0.01, Math.min(flashStart, 0.95))
+    const safeSettlePoint = Math.max(
+        safeFlashStart + 0.01,
+        Math.min(settlePoint, 1)
+    )
 
     const resolvedWindowSize = activePreset?.windowSize ?? windowSize
     const safeWindowSize = Math.max(0.05, Math.min(resolvedWindowSize, 1))
@@ -266,9 +310,13 @@ function GradientTextReveal(props: Partial<GradientTextRevealProps>) {
     useEffect(() => {
         if (typeof window === "undefined") return
         const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
-        setReducedMotion(mediaQuery.matches)
+        React.startTransition(() => {
+            setReducedMotion(mediaQuery.matches)
+        })
         const handleChange = (event: MediaQueryListEvent) => {
-            setReducedMotion(event.matches)
+            React.startTransition(() => {
+                setReducedMotion(event.matches)
+            })
         }
         if (typeof mediaQuery.addEventListener === "function") {
             mediaQuery.addEventListener("change", handleChange)
@@ -281,9 +329,13 @@ function GradientTextReveal(props: Partial<GradientTextRevealProps>) {
     useEffect(() => {
         if (typeof window === "undefined") return
         const mediaQuery = window.matchMedia("(max-width: 767px)")
-        setIsNarrowViewport(mediaQuery.matches)
+        React.startTransition(() => {
+            setIsNarrowViewport(mediaQuery.matches)
+        })
         const handleChange = (event: MediaQueryListEvent) => {
-            setIsNarrowViewport(event.matches)
+            React.startTransition(() => {
+                setIsNarrowViewport(event.matches)
+            })
         }
         if (typeof mediaQuery.addEventListener === "function") {
             mediaQuery.addEventListener("change", handleChange)
@@ -399,10 +451,13 @@ function GradientTextReveal(props: Partial<GradientTextRevealProps>) {
                         endOpacity={safeEndOpacity}
                         globalProgress={smoothProgress}
                         initialColor={initialColor}
+                        gradientEffect={gradientEffect}
                         transitionColor={transitionColor}
                         transitionColor2={transitionColor2}
                         transitionColor3={transitionColor3}
                         revealColor={finalColor}
+                        flashStart={safeFlashStart}
+                        settlePoint={safeSettlePoint}
                     />
                 )
             })}
@@ -486,20 +541,32 @@ addPropertyControls(GradientTextReveal, {
                 type: ControlType.Color,
                 defaultValue: "#666666",
             },
+            gradientEffect: {
+                title: "Gradient Effect",
+                type: ControlType.Enum,
+                options: ["off", "flash", "persistent"],
+                optionTitles: ["Off", "Flash", "Persistent"],
+                defaultValue: "flash",
+                description:
+                    "Off uses only initial and end color. Flash gives a short burst, then settles. Persistent keeps the full gradient sweep.",
+            },
             transitionColor: {
                 title: "Transition Color",
                 type: ControlType.Color,
                 defaultValue: "#abff02",
+                hidden: (value) => value.gradientEffect === "off",
             },
             transitionColor2: {
                 title: "Transition Color 2",
                 type: ControlType.Color,
                 defaultValue: "#ff6b00",
+                hidden: (value) => value.gradientEffect === "off",
             },
             transitionColor3: {
                 title: "Transition Color 3",
                 type: ControlType.Color,
                 defaultValue: "#ff00ff",
+                hidden: (value) => value.gradientEffect === "off",
             },
             revealColor: {
                 title: "Reveal Color",
@@ -512,6 +579,29 @@ addPropertyControls(GradientTextReveal, {
                 options: ["full-gradient", "solid"],
                 optionTitles: ["Full Gradient", "Solid"],
                 defaultValue: "full-gradient",
+                hidden: (value) => value.gradientEffect === "off",
+            },
+            flashStart: {
+                title: "Flash Start",
+                type: ControlType.Number,
+                defaultValue: 0.18,
+                min: 0.01,
+                max: 0.8,
+                step: 0.01,
+                description:
+                    "How long text stays near the initial color before the gradient flash begins.",
+                hidden: (value) => value.gradientEffect !== "flash",
+            },
+            settlePoint: {
+                title: "Settle Point",
+                type: ControlType.Number,
+                defaultValue: 0.62,
+                min: 0.1,
+                max: 1,
+                step: 0.01,
+                description:
+                    "When the flash mode locks to the end color within each unit's reveal window.",
+                hidden: (value) => value.gradientEffect !== "flash",
             },
         },
     },

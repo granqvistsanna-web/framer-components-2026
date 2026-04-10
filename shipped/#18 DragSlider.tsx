@@ -86,6 +86,7 @@ interface ControlLayout {
 interface Autoplay {
     speed?: number
     pauseOnHover?: boolean
+    infinite?: boolean
 }
 
 interface Ticker {
@@ -133,6 +134,33 @@ type SliderState = {
 
 function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value))
+}
+
+const INTERACTIVE_SELECTOR = [
+    "button",
+    "a[href]",
+    "input",
+    "select",
+    "textarea",
+    "label",
+    "summary",
+    '[role="button"]',
+    '[role="link"]',
+    '[contenteditable="true"]',
+    '[data-drag-slider-interactive="true"]',
+].join(", ")
+
+function isInteractiveElement(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return false
+
+    const interactive = target.closest(INTERACTIVE_SELECTOR)
+    if (!interactive) return false
+
+    if (typeof window === "undefined" || !(interactive instanceof HTMLElement)) {
+        return true
+    }
+
+    return window.getComputedStyle(interactive).pointerEvents !== "none"
 }
 
 function loadScript(src: string, timeoutMs = 10000): Promise<void> {
@@ -543,6 +571,9 @@ function initializeSlider(
     if (draggableEnabled) {
         const draggable = Draggable.create(track, {
             type: "x",
+            dragClickables: false,
+            clickableTest: (element: EventTarget | null) =>
+                isInteractiveElement(element),
             inertia: !reducedMotion,
             bounds: { minX, maxX },
             throwResistance,
@@ -788,11 +819,12 @@ export default function DragSlider({
         return {
             "--slider-gap": `${Math.max(0, gap)}px`,
             "--slider-overlay-inset": `${Math.max(0, controlSideInset)}px`,
+            "--slider-cross-align": alignment,
             ...(slideWidth != null
                 ? { "--slider-item-width": `${slideWidth}px` }
                 : null),
         } as React.CSSProperties
-    }, [gap, controlSideInset, slideWidth])
+    }, [gap, controlSideInset, slideWidth, alignment])
 
     const fadeMaskStyle = useMemo((): React.CSSProperties | null => {
         if (edgeFade === "none" || !edgeFade) return null
@@ -830,6 +862,7 @@ export default function DragSlider({
                 touch-action: pan-y;
                 backface-visibility: hidden;
                 display: flex;
+                align-items: var(--slider-cross-align);
                 gap: var(--slider-gap);
                 cursor: grab;
             }
@@ -838,6 +871,12 @@ export default function DragSlider({
                 will-change: auto;
                 cursor: auto;
                 touch-action: auto;
+            }
+            ${scope}[data-slider-engine="native"][data-drag-disabled!="true"] [data-gsap-slider-collection] {
+                cursor: grab;
+            }
+            ${scope}[data-slider-engine="native"][data-native-dragging="true"] [data-gsap-slider-collection] {
+                cursor: grabbing;
             }
             ${scope} [data-gsap-slider-list][data-gsap-slider-list-status="grabbing"] {
                 cursor: grabbing;
@@ -1191,7 +1230,8 @@ export default function DragSlider({
         [engineReady, reducedMotion]
     )
 
-    // Autoplay — continuous drift with ping-pong at edges (skip in ticker mode)
+    // Autoplay — continuous drift (skip in ticker mode)
+    // infinite: seamless wrap like ticker; otherwise: ping-pong at edges
     useEffect(() => {
         if (!autoplayEnabled || tickerEnabled || !engineReady || !sliderActive) return
 
@@ -1207,6 +1247,22 @@ export default function DragSlider({
 
         const pxPerSecond = (autoplay?.speed ?? 3) * 20
         const pauseOnHover = autoplay?.pauseOnHover !== false
+        const infinite = autoplay?.infinite === true
+
+        // For infinite mode, measure original slide set width (same as ticker)
+        let setWidth = 0
+        if (infinite) {
+            const origItems = Array.from(
+                track.querySelectorAll(
+                    "[data-gsap-slider-item]:not([data-autoplay-clone])"
+                )
+            ) as HTMLDivElement[]
+            if (origItems.length > 0) {
+                const firstRect = origItems[0].getBoundingClientRect()
+                const lastRect = origItems[origItems.length - 1].getBoundingClientRect()
+                setWidth = lastRect.right - firstRect.left + gap
+            }
+        }
 
         let dir = 1 // 1 = forward (negative X), -1 = backward
         let hoverPaused = false
@@ -1224,10 +1280,18 @@ export default function DragSlider({
 
             let currentX = gsap.getProperty(track, "x") as number
             currentX -= dir * pxPerSecond * dt
-            currentX = clamp(currentX, runtime.minX, runtime.maxX)
 
-            if (currentX <= runtime.minX) dir = -1
-            if (currentX >= runtime.maxX) dir = 1
+            if (infinite && setWidth > 0) {
+                // Seamless wrap
+                if (currentX <= -setWidth) {
+                    currentX += setWidth
+                }
+            } else {
+                // Ping-pong at edges
+                currentX = clamp(currentX, runtime.minX, runtime.maxX)
+                if (currentX <= runtime.minX) dir = -1
+                if (currentX >= runtime.maxX) dir = 1
+            }
 
             gsap.set(track, { x: currentX })
             runtime.updateStatus?.(currentX)
@@ -1261,8 +1325,10 @@ export default function DragSlider({
         tickerEnabled,
         autoplay?.speed,
         autoplay?.pauseOnHover,
+        autoplay?.infinite,
         engineReady,
         sliderActive,
+        gap,
     ])
 
     // Ticker — continuous marquee-style loop
@@ -1352,6 +1418,100 @@ export default function DragSlider({
         slidesSignature,
     ])
 
+    useEffect(() => {
+        if (tickerEnabled || draggableEnabled === false || engineReady) {
+            rootRef.current?.removeAttribute("data-native-dragging")
+            return
+        }
+
+        const root = rootRef.current
+        const collection = collectionRef.current
+        if (!root || !collection) return
+
+        let activePointerId: number | null = null
+        let startX = 0
+        let startScrollLeft = 0
+
+        const stopDragging = () => {
+            activePointerId = null
+            root.removeAttribute("data-native-dragging")
+        }
+
+        const onPointerDown = (event: PointerEvent) => {
+            if (event.button !== 0) return
+            if (event.pointerType === "touch") return
+            if (isInteractiveElement(event.target)) return
+            if (collection.scrollWidth <= collection.clientWidth) return
+
+            activePointerId = event.pointerId
+            startX = event.clientX
+            startScrollLeft = collection.scrollLeft
+            root.setAttribute("data-native-dragging", "true")
+            collection.setPointerCapture?.(event.pointerId)
+        }
+
+        const onPointerMove = (event: PointerEvent) => {
+            if (
+                activePointerId == null ||
+                event.pointerId !== activePointerId
+            ) {
+                return
+            }
+
+            const maxScroll = Math.max(
+                collection.scrollWidth - collection.clientWidth,
+                0
+            )
+
+            collection.scrollLeft = clamp(
+                startScrollLeft - (event.clientX - startX),
+                0,
+                maxScroll
+            )
+        }
+
+        const onPointerUp = (event: PointerEvent) => {
+            if (
+                activePointerId == null ||
+                event.pointerId !== activePointerId
+            ) {
+                return
+            }
+
+            collection.releasePointerCapture?.(event.pointerId)
+            stopDragging()
+        }
+
+        const onPointerCancel = (event: PointerEvent) => {
+            if (
+                activePointerId == null ||
+                event.pointerId !== activePointerId
+            ) {
+                return
+            }
+
+            stopDragging()
+        }
+
+        collection.addEventListener("pointerdown", onPointerDown)
+        collection.addEventListener("pointermove", onPointerMove)
+        collection.addEventListener("pointerup", onPointerUp)
+        collection.addEventListener("pointercancel", onPointerCancel)
+        collection.addEventListener("lostpointercapture", stopDragging)
+
+        return () => {
+            collection.removeEventListener("pointerdown", onPointerDown)
+            collection.removeEventListener("pointermove", onPointerMove)
+            collection.removeEventListener("pointerup", onPointerUp)
+            collection.removeEventListener("pointercancel", onPointerCancel)
+            collection.removeEventListener(
+                "lostpointercapture",
+                stopDragging
+            )
+            stopDragging()
+        }
+    }, [draggableEnabled, engineReady, tickerEnabled])
+
     const onPrev = useCallback(() => {
         const runtime = runtimeRef.current
         if (!canPrev) return
@@ -1363,6 +1523,42 @@ export default function DragSlider({
         if (!canNext) return
         animateTo(runtime.activeIndex + 1)
     }, [animateTo, canNext])
+
+    const blockButtonGesture = useCallback(
+        (
+            event:
+                | React.PointerEvent<HTMLButtonElement>
+                | React.MouseEvent<HTMLButtonElement>
+                | React.TouchEvent<HTMLButtonElement>
+        ) => {
+            event.stopPropagation()
+        },
+        []
+    )
+
+    const activatePrev = useCallback(
+        (
+            event:
+                | React.PointerEvent<HTMLButtonElement>
+                | React.MouseEvent<HTMLButtonElement>
+        ) => {
+            blockButtonGesture(event)
+            onPrev()
+        },
+        [blockButtonGesture, onPrev]
+    )
+
+    const activateNext = useCallback(
+        (
+            event:
+                | React.PointerEvent<HTMLButtonElement>
+                | React.MouseEvent<HTMLButtonElement>
+        ) => {
+            blockButtonGesture(event)
+            onNext()
+        },
+        [blockButtonGesture, onNext]
+    )
 
     const onKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1417,6 +1613,9 @@ export default function DragSlider({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
+        position: "relative",
+        zIndex: 3,
+        touchAction: "manipulation",
         ...(!isIconMode ? btnFont : {}),
     }
 
@@ -1545,7 +1744,10 @@ export default function DragSlider({
                 type="button"
                 data-gsap-slider-control="prev"
                 aria-label="Previous Slide"
-                onClick={onPrev}
+                onPointerDown={blockButtonGesture}
+                onMouseDown={blockButtonGesture}
+                onTouchStart={blockButtonGesture}
+                onClick={activatePrev}
                 disabled={!canPrev}
                 data-gsap-slider-control-status={
                     canPrev ? "active" : "not-active"
@@ -1562,7 +1764,10 @@ export default function DragSlider({
                 type="button"
                 data-gsap-slider-control="next"
                 aria-label="Next Slide"
-                onClick={onNext}
+                onPointerDown={blockButtonGesture}
+                onMouseDown={blockButtonGesture}
+                onTouchStart={blockButtonGesture}
+                onClick={activateNext}
                 disabled={!canNext}
                 data-gsap-slider-control-status={
                     canNext ? "active" : "not-active"
@@ -1600,7 +1805,7 @@ export default function DragSlider({
                 boxSizing: "border-box",
                 display: "flex",
                 flexDirection: "column",
-                alignItems: alignment,
+                alignItems: "stretch",
                 gap: overlayControls ? 0 : controlGap,
                 overflow: "hidden",
                 position: "relative",
@@ -1644,7 +1849,10 @@ export default function DragSlider({
                         type="button"
                         data-gsap-slider-control="prev"
                         aria-label="Previous Slide"
-                        onClick={onPrev}
+                        onPointerDown={blockButtonGesture}
+                        onMouseDown={blockButtonGesture}
+                        onTouchStart={blockButtonGesture}
+                        onClick={activatePrev}
                         disabled={!canPrev}
                         data-gsap-slider-control-status={
                             canPrev ? "active" : "not-active"
@@ -1665,6 +1873,9 @@ export default function DragSlider({
                 data-gsap-slider-collection=""
                 style={{
                     flex: 1,
+                    width: "100%",
+                    minWidth: 0,
+                    alignSelf: "stretch",
                     minHeight: 0,
                     ...(shadowPadding > 0 && {
                         paddingTop: shadowPadding,
@@ -1687,7 +1898,10 @@ export default function DragSlider({
                             data-gsap-slider-control="prev"
                             data-gsap-slider-overlay-control=""
                             aria-label="Previous Slide"
-                            onClick={onPrev}
+                            onPointerDown={blockButtonGesture}
+                            onMouseDown={blockButtonGesture}
+                            onTouchStart={blockButtonGesture}
+                            onClick={activatePrev}
                             disabled={!canPrev}
                             data-gsap-slider-control-status={
                                 canPrev ? "active" : "not-active"
@@ -1706,7 +1920,10 @@ export default function DragSlider({
                             data-gsap-slider-control="next"
                             data-gsap-slider-overlay-control=""
                             aria-label="Next Slide"
-                            onClick={onNext}
+                            onPointerDown={blockButtonGesture}
+                            onMouseDown={blockButtonGesture}
+                            onTouchStart={blockButtonGesture}
+                            onClick={activateNext}
                             disabled={!canNext}
                             data-gsap-slider-control-status={
                                 canNext ? "active" : "not-active"
@@ -1752,6 +1969,18 @@ export default function DragSlider({
                                         key={`clone-${index}`}
                                         data-gsap-slider-item=""
                                         data-ticker-clone=""
+                                        aria-hidden="true"
+                                        style={slideItemStyle}
+                                    >
+                                        {child}
+                                    </div>
+                                ))}
+                            {!tickerEnabled && autoplayEnabled && autoplay?.infinite &&
+                                slideNodes.map((child, index) => (
+                                    <div
+                                        key={`autoplay-clone-${index}`}
+                                        data-gsap-slider-item=""
+                                        data-autoplay-clone=""
                                         aria-hidden="true"
                                         style={slideItemStyle}
                                     >
@@ -1806,7 +2035,10 @@ export default function DragSlider({
                         type="button"
                         data-gsap-slider-control="next"
                         aria-label="Next Slide"
-                        onClick={onNext}
+                        onPointerDown={blockButtonGesture}
+                        onMouseDown={blockButtonGesture}
+                        onTouchStart={blockButtonGesture}
+                        onClick={activateNext}
                         disabled={!canNext}
                         data-gsap-slider-control-status={
                             canNext ? "active" : "not-active"
@@ -2293,6 +2525,12 @@ addPropertyControls(DragSlider, {
                 type: ControlType.Boolean,
                 title: "Pause on Hover",
                 defaultValue: true,
+            },
+            infinite: {
+                type: ControlType.Boolean,
+                title: "Infinite Loop",
+                defaultValue: false,
+                description: "Seamless infinite scroll instead of bouncing at edges",
             },
         },
     },

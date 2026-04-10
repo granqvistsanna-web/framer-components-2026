@@ -1,7 +1,7 @@
 /**
  *  46
  * #46 Dot Grid
- * Decorative dotted grid background with gradient coloring,
+ * Decorative dotted grid background with
  * center vignette fade, appear animation, and mouse proximity effect.
  *
  * @framerSupportedLayoutWidth any
@@ -13,25 +13,43 @@
 import * as React from "react"
 import {
     useEffect,
-    useId,
+
     useRef,
     useState,
     useCallback,
     useMemo,
     startTransition,
 } from "react"
-import {
-    addPropertyControls,
-    ControlType,
-    useIsStaticRenderer,
-} from "framer"
+import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
 
 // ─── Types ──────────────────────────────────────────────────
 
-type DotShape = "circle" | "square" | "diamond" | "triangle" | "star" | "plus" | "ring"
+type DotShape =
+    | "circle"
+    | "square"
+    | "diamond"
+    | "triangle"
+    | "star"
+    | "plus"
+    | "ring"
+type FadePreset =
+    | "none"
+    | "center"
+    | "top"
+    | "bottom"
+    | "left"
+    | "right"
+    | "custom"
 type ColorCount = "1" | "2" | "4"
 type ColorDirection = "horizontal" | "vertical" | "diagonal"
-type FadeShape = "circle" | "ellipse" | "ellipse-vertical" | "square" | "diamond" | "horizontal-band" | "vertical-band"
+type LegacyFadeShape =
+    | "circle"
+    | "ellipse"
+    | "ellipse-vertical"
+    | "square"
+    | "diamond"
+    | "horizontal-band"
+    | "vertical-band"
 type AppearTrigger = "mount" | "inView"
 type AppearEasing = "ease-out" | "ease-in-out" | "linear" | "spring" | "bounce"
 type AppearDirection =
@@ -42,6 +60,7 @@ type AppearDirection =
     | "center-out"
     | "edges-in"
     | "random"
+type PulsePreset = "custom" | "gentle" | "heartbeat" | "ocean" | "fireflies" | "dramatic" | "nervous"
 type InteractionStyle = "none" | "ripple" | "repel"
 
 interface Props {
@@ -52,23 +71,21 @@ interface Props {
         gap: number
     }
     // Colors
-    colorCount: ColorCount
-    colorDirection: ColorDirection
-    color1: string
-    color2: string
-    color3: string
-    color4: string
+    color?: string | null
     backgroundColor: string
     // Fade
     fade: {
-        shape: FadeShape
+        preset: FadePreset
+        size: number
+        softness: number
         invert: boolean
+        // Custom only
         x: number
         y: number
-        radiusX: number
-        radiusY: number
-        softness: number
-        strength: number
+        radiusX?: number
+        radiusY?: number
+        strength?: number
+        shape?: LegacyFadeShape
     }
     // Mouse
     mouse: {
@@ -83,6 +100,13 @@ interface Props {
         stagger: number
         direction: AppearDirection
     }
+    // Pulse
+    pulse: {
+        enabled: boolean
+        preset: PulsePreset
+        speed: number
+        intensity: number
+    }
     // Interaction
     interaction: {
         style: InteractionStyle
@@ -91,9 +115,24 @@ interface Props {
     }
     // Layout
     style?: React.CSSProperties
+    colorCount?: ColorCount
+    colorDirection?: ColorDirection
+    color1?: string | null
+    color2?: string | null
+    color3?: string | null
+    color4?: string | null
 }
 
 // ─── Helpers ────────────────────────────────────────────────
+
+/**
+ * Resolve any CSS color to a canvas-compatible hex/rgb string.
+ * Canvas 2D's fillStyle silently rejects modern formats (oklch, lab, color-mix,
+ * CSS variables, etc.). We use a temporary DOM element + getComputedStyle to let
+ * the browser resolve the color, then feed the result to canvas.
+ */
+let _colorProbe: HTMLDivElement | null = null
+const _colorCache = new Map<string, string>()
 
 function hexToRgb(hex: string): [number, number, number] {
     const c = hex.replace("#", "")
@@ -109,6 +148,7 @@ function hexToRgb(hex: string): [number, number, number] {
 }
 
 function cssColorToRgb(color: string): [number, number, number] {
+    if (!color) return [0, 0, 0]
     if (color.startsWith("#")) return hexToRgb(color)
     const match = color.match(/\d+/g)
     if (match && match.length >= 3) {
@@ -129,7 +169,6 @@ function lerpColor(
     ]
 }
 
-/** Resolve 4 corner colors based on colorCount + direction */
 function resolveCornerColors(
     colorCount: ColorCount,
     colorDirection: ColorDirection,
@@ -137,25 +176,56 @@ function resolveCornerColors(
     c2: [number, number, number],
     c3: [number, number, number],
     c4: [number, number, number]
-): [[number, number, number], [number, number, number], [number, number, number], [number, number, number]] {
+): [
+    [number, number, number],
+    [number, number, number],
+    [number, number, number],
+    [number, number, number],
+] {
     if (colorCount === "1") {
         return [c1, c1, c1, c1]
     }
     if (colorCount === "2") {
-        // c1 = start, c2 = end
         if (colorDirection === "horizontal") {
-            // left = c1, right = c2
-            return [c1, c1, c2, c2] // TL, BL, BR, TR
+            return [c1, c1, c2, c2]
         }
         if (colorDirection === "vertical") {
-            // top = c1, bottom = c2
-            return [c1, c2, c2, c1] // TL, BL, BR, TR
+            return [c1, c2, c2, c1]
         }
-        // diagonal: TL = c1, BR = c2
         return [c1, lerpColor(c1, c2, 0.5), c2, lerpColor(c1, c2, 0.5)]
     }
-    // 4 colors
     return [c1, c2, c3, c4]
+}
+
+function resolveColorForCanvas(cssColor: string, fallback: string): string {
+    if (!cssColor) return fallback
+    const cached = _colorCache.get(cssColor)
+    if (cached) return cached
+
+    // Fast path — canvas context can validate simple formats instantly
+    if (/^#[0-9a-f]{3,8}$/i.test(cssColor) || /^rgba?\(/i.test(cssColor)) {
+        _colorCache.set(cssColor, cssColor)
+        return cssColor
+    }
+
+    // Slow path — use a DOM element to resolve any CSS color to rgb()
+    if (typeof document !== "undefined") {
+        if (!_colorProbe) {
+            _colorProbe = document.createElement("div")
+            _colorProbe.style.display = "none"
+            document.body.appendChild(_colorProbe)
+        }
+        _colorProbe.style.color = ""
+        _colorProbe.style.color = cssColor
+        const resolved = getComputedStyle(_colorProbe).color
+        if (resolved && resolved !== "") {
+            _colorCache.set(cssColor, resolved)
+            return resolved
+        }
+    }
+
+    _colorCache.set(cssColor, fallback)
+    return fallback
 }
 
 /** Compute normalized stagger value (0–1) for a dot based on appear direction */
@@ -234,7 +304,8 @@ function drawDot(
             for (let i = 0; i < spikes * 2; i++) {
                 const rad = (i * Math.PI) / spikes - Math.PI / 2
                 const sr = i % 2 === 0 ? outerR : innerR
-                if (i === 0) ctx.moveTo(x + sr * Math.cos(rad), y + sr * Math.sin(rad))
+                if (i === 0)
+                    ctx.moveTo(x + sr * Math.cos(rad), y + sr * Math.sin(rad))
                 else ctx.lineTo(x + sr * Math.cos(rad), y + sr * Math.sin(rad))
             }
             ctx.closePath()
@@ -269,7 +340,12 @@ function drawDot(
 }
 
 /** SVG path data for a dot shape centered at (cx, cy) with radius r */
-function dotShapeSVGPath(shape: DotShape, cx: number, cy: number, r: number): string {
+function dotShapeSVGPath(
+    shape: DotShape,
+    cx: number,
+    cy: number,
+    r: number
+): string {
     switch (shape) {
         case "square":
             return `M ${cx - r},${cy - r} h ${r * 2} v ${r * 2} h ${-r * 2} Z`
@@ -308,12 +384,129 @@ function applyEasing(t: number, easing: AppearEasing): number {
             return 1 - Math.pow(Math.E, -6 * t) * Math.cos(6 * t)
         case "bounce": {
             if (t < 1 / 2.75) return 7.5625 * t * t
-            if (t < 2 / 2.75) { const t2 = t - 1.5 / 2.75; return 7.5625 * t2 * t2 + 0.75 }
-            if (t < 2.5 / 2.75) { const t2 = t - 2.25 / 2.75; return 7.5625 * t2 * t2 + 0.9375 }
-            const t2 = t - 2.625 / 2.75; return 7.5625 * t2 * t2 + 0.984375
+            if (t < 2 / 2.75) {
+                const t2 = t - 1.5 / 2.75
+                return 7.5625 * t2 * t2 + 0.75
+            }
+            if (t < 2.5 / 2.75) {
+                const t2 = t - 2.25 / 2.75
+                return 7.5625 * t2 * t2 + 0.9375
+            }
+            const t2 = t - 2.625 / 2.75
+            return 7.5625 * t2 * t2 + 0.984375
         }
         default: // ease-out (cubic)
             return 1 - Math.pow(1 - t, 3)
+    }
+}
+
+/** Resolve fade preset to center position (normalized 0-1) and axis mode */
+function resolveFadePreset(
+    preset: FadePreset,
+    customX: number,
+    customY: number
+): { cx: number; cy: number; axis: "radial" | "horizontal" | "vertical" } {
+    switch (preset) {
+        case "center":
+            return { cx: 0.5, cy: 0.5, axis: "radial" }
+        case "top":
+            return { cx: 0.5, cy: 0, axis: "horizontal" }
+        case "bottom":
+            return { cx: 0.5, cy: 1, axis: "horizontal" }
+        case "left":
+            return { cx: 0, cy: 0.5, axis: "vertical" }
+        case "right":
+            return { cx: 1, cy: 0.5, axis: "vertical" }
+        case "custom":
+            return { cx: customX / 100, cy: customY / 100, axis: "radial" }
+        default:
+            return { cx: 0.5, cy: 0.5, axis: "radial" }
+    }
+}
+
+/** Compute fade distance for a dot at normalized position (nx, ny) */
+function computeFadeDistance(
+    nx: number,
+    ny: number,
+    cx: number,
+    cy: number,
+    axis: "radial" | "horizontal" | "vertical",
+    r: number
+): number {
+    if (axis === "horizontal") {
+        return Math.abs(ny - cy) / r
+    }
+    if (axis === "vertical") {
+        return Math.abs(nx - cx) / r
+    }
+    const dx = nx - cx
+    const dy = ny - cy
+    return Math.sqrt(dx * dx + dy * dy) / r
+}
+
+function computeLegacyFadeAlpha(
+    nx: number,
+    ny: number,
+    shape: LegacyFadeShape,
+    x: number,
+    y: number,
+    radiusX: number,
+    radiusY: number,
+    softness: number,
+    strength: number,
+    invert: boolean
+): number {
+    const fdx = nx - x / 100
+    const fdy = ny - y / 100
+    const rx = radiusX + 0.001
+    const ry = radiusY + 0.001
+    let d: number
+
+    switch (shape) {
+        case "ellipse":
+            d = Math.sqrt((fdx * fdx) / (rx * rx) + (fdy * fdy) / (ry * ry))
+            break
+        case "ellipse-vertical": {
+            const vrx = rx * 0.8
+            const vry = rx * 2.5
+            d = Math.sqrt((fdx * fdx) / (vrx * vrx) + (fdy * fdy) / (vry * vry))
+            break
+        }
+        case "square":
+            d = Math.max(Math.abs(fdx) / rx, Math.abs(fdy) / ry)
+            break
+        case "diamond":
+            d = Math.abs(fdx) / rx + Math.abs(fdy) / ry
+            break
+        case "horizontal-band":
+            d = Math.abs(fdy) / rx
+            break
+        case "vertical-band":
+            d = Math.abs(fdx) / rx
+            break
+        default:
+            d = Math.sqrt(fdx * fdx + fdy * fdy) / rx
+            break
+    }
+
+    const spread = 0.1 + softness * 1.4
+    const edge = 1 - spread
+    const t = Math.max(0, Math.min(1, (d - edge) / (spread + 0.001)))
+    const vignette = t * t * (3 - 2 * t)
+    const rawAlpha = vignette * strength
+    return invert ? strength - rawAlpha : rawAlpha
+}
+
+/** Resolve pulse preset to speed + intensity values */
+function resolvePulsePreset(preset: PulsePreset): { speed: number; intensity: number } | null {
+    switch (preset) {
+        case "gentle":     return { speed: 0.4, intensity: 0.5 }
+        case "heartbeat":  return { speed: 1.2, intensity: 1.5 }
+        case "ocean":      return { speed: 0.6, intensity: 2.0 }
+        case "fireflies":  return { speed: 3.0, intensity: 0.8 }
+        case "dramatic":   return { speed: 0.3, intensity: 2.5 }
+        case "nervous":    return { speed: 4.5, intensity: 0.4 }
+        default:           return null // "custom" — use manual values
     }
 }
 
@@ -324,32 +517,71 @@ function applyEasing(t: number, easing: AppearEasing): number {
  */
 export default function DotGrid(props: Props) {
     const {
-        grid = {},
-        colorCount = "4",
-        colorDirection = "diagonal",
-        color1 = "#F97316",
-        color2 = "#EC4899",
-        color3 = "#8B5CF6",
-        color4 = "#3B82F6",
-        backgroundColor = "#FAF5F0",
-        fade = {},
-        mouse = {},
-        animation = {},
-        interaction = {},
+        grid = {} as Props["grid"],
+        color: rawColor,
+        backgroundColor: rawBg,
+        fade = {} as Props["fade"],
+        mouse = {} as Props["mouse"],
+        animation = {} as Props["animation"],
+        pulse = {} as Props["pulse"],
+        interaction = {} as Props["interaction"],
         style,
     } = props
+    const legacyProps = props as Props & {
+        colorCount?: ColorCount
+        colorDirection?: ColorDirection
+        color1?: string | null
+        color2?: string | null
+        color3?: string | null
+        color4?: string | null
+    }
+
+    // Null-guard colors — JS default values only cover undefined, not null.
+    // Framer can pass null during color picker transitions or undo.
+    const legacyColorCount = legacyProps.colorCount ?? "4"
+    const legacyColorDirection = legacyProps.colorDirection ?? "diagonal"
+    const legacyColor1 = legacyProps.color1 ?? "#F97316"
+    const legacyColor2 = legacyProps.color2 ?? "#EC4899"
+    const legacyColor3 = legacyProps.color3 ?? "#8B5CF6"
+    const legacyColor4 = legacyProps.color4 ?? "#3B82F6"
+    const useLegacyGradient =
+        rawColor == null &&
+        (
+            legacyProps.color1 != null ||
+            legacyProps.color2 != null ||
+            legacyProps.color3 != null ||
+            legacyProps.color4 != null
+        )
+    const color = rawColor ?? legacyColor1 ?? "#F97316"
+    const backgroundColor = rawBg ?? "#FAF5F0"
 
     const { dotShape = "circle" as DotShape, dotSize = 10, gap = 28 } = grid
+    const hasExplicitFadePreset = fade.preset != null
     const {
-        shape: fadeShape = "circle",
-        invert: fadeInvert = false,
-        x: fadeX = 50,
-        y: fadeY = 50,
-        radiusX: fadeRadiusX = 0.35,
-        radiusY: fadeRadiusY = 0.35,
+        preset: fadePreset = "center" as FadePreset,
+        size: fadeSize = 0.35,
         softness: fadeSoftness = 0.4,
-        strength: fadeStrength = 1,
+        invert: fadeInvert = false,
+        x: fadeCustomX = 50,
+        y: fadeCustomY = 50,
+        radiusX: legacyFadeRadiusX = 0.35,
+        radiusY: legacyFadeRadiusY = 0.35,
+        strength: legacyFadeStrength = 1,
+        shape: legacyFadeShape = "circle",
     } = fade
+    const useLegacyFade =
+        !hasExplicitFadePreset &&
+        (
+            fade.shape != null ||
+            fade.radiusX != null ||
+            fade.radiusY != null ||
+            fade.strength != null
+        )
+    const fadeEnabled = useLegacyFade ? legacyFadeStrength > 0 : fadePreset !== "none"
+    const fadeResolved = useMemo(
+        () => resolveFadePreset(fadePreset, fadeCustomX, fadeCustomY),
+        [fadePreset, fadeCustomX, fadeCustomY]
+    )
     const { radius: mouseRadius = 120, growth: mouseGrowth = 1.8 } = mouse
     const {
         trigger: appearTrigger = "mount" as AppearTrigger,
@@ -359,6 +591,15 @@ export default function DotGrid(props: Props) {
         direction: appearDirection = "top-left",
     } = animation
     const {
+        enabled: pulseEnabled = true,
+        preset: pulsePreset = "custom" as PulsePreset,
+        speed: pulseSpeedRaw = 1,
+        intensity: pulseIntensityRaw = 1,
+    } = pulse
+    const pulseResolved = resolvePulsePreset(pulsePreset)
+    const pulseSpeed = pulseResolved?.speed ?? pulseSpeedRaw
+    const pulseIntensity = pulseResolved?.intensity ?? pulseIntensityRaw
+    const {
         style: interactionStyle = "none" as InteractionStyle,
         radius: interactionRadius = 200,
         duration: interactionDuration = 0.6,
@@ -367,15 +608,21 @@ export default function DotGrid(props: Props) {
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
     const mouseRef = useRef({ x: -9999, y: -9999 })
+    const mouseActiveRef = useRef(false)
+    const settleFramesRef = useRef(0)
     const animProgress = useRef(0)
     const rafRef = useRef<number>(0)
     const startTimeRef = useRef<number>(0)
     const mouseScalesRef = useRef<Float32Array>(new Float32Array(0))
+    const pulseStartRef = useRef<number>(0)
     const [isClient, setIsClient] = useState(false)
     const isStatic = useIsStaticRenderer()
-    const patternId = useId()
+
     const isInViewRef = useRef(appearTrigger === "mount")
     const interactionRef = useRef<{ x: number; y: number; time: number }[]>([])
+    const pulseSeedRef = useRef<Float32Array>(new Float32Array(0))
+    const drawRef = useRef<() => void>(() => {})
+    const startAppearRef = useRef<() => void>(() => {})
 
     useEffect(() => {
         startTransition(() => setIsClient(true))
@@ -392,6 +639,8 @@ export default function DotGrid(props: Props) {
                 if (entry.isIntersecting) {
                     isInViewRef.current = true
                     startTimeRef.current = performance.now()
+                    pulseStartRef.current = startTimeRef.current
+                    startAppearRef.current()
                     observer.disconnect()
                 }
             },
@@ -416,34 +665,25 @@ export default function DotGrid(props: Props) {
 
     // Stable random seed for "random" appear direction
     const randomSeedRef = useRef<Float32Array>(new Float32Array(0))
-
-    // Parse colors once
-    const colorsRef = useRef<[number, number, number][]>([])
-    const parsedC1 = cssColorToRgb(color1)
-    const parsedC2 = cssColorToRgb(color2)
-    const parsedC3 = cssColorToRgb(color3)
-    const parsedC4 = cssColorToRgb(color4)
-
-    const cornerColors = useMemo(
+    const legacyCornerColors = useMemo(
         () =>
             resolveCornerColors(
-                colorCount,
-                colorDirection,
-                parsedC1,
-                parsedC2,
-                parsedC3,
-                parsedC4
+                legacyColorCount,
+                legacyColorDirection,
+                cssColorToRgb(legacyColor1),
+                cssColorToRgb(legacyColor2),
+                cssColorToRgb(legacyColor3),
+                cssColorToRgb(legacyColor4)
             ),
         [
-            colorCount,
-            colorDirection,
-            ...parsedC1,
-            ...parsedC2,
-            ...parsedC3,
-            ...parsedC4,
+            legacyColorCount,
+            legacyColorDirection,
+            legacyColor1,
+            legacyColor2,
+            legacyColor3,
+            legacyColor4,
         ]
     )
-    colorsRef.current = cornerColors
 
     const draw = useCallback(() => {
         const canvas = canvasRef.current
@@ -452,9 +692,11 @@ export default function DotGrid(props: Props) {
         if (!ctx) return
 
         const dpr = window.devicePixelRatio || 1
-        const rect = canvas.getBoundingClientRect()
-        const w = rect.width
-        const h = rect.height
+        // Use offsetWidth/Height — getBoundingClientRect() is affected by
+        // ancestor CSS transforms (Framer's canvas zoom), causing dots to
+        // render smaller than the actual layout size.
+        const w = canvas.offsetWidth
+        const h = canvas.offsetHeight
 
         if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
             canvas.width = w * dpr
@@ -463,23 +705,30 @@ export default function DotGrid(props: Props) {
 
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-        // Clear with background
-        const bgRgb = cssColorToRgb(backgroundColor)
-        ctx.fillStyle = `rgb(${bgRgb[0]},${bgRgb[1]},${bgRgb[2]})`
-        ctx.fillRect(0, 0, w, h)
+        // Clear canvas — background is handled by the container div's CSS
+        // backgroundColor, which supports all color formats (oklch, hsl, etc.).
+        // Canvas 2D's fillStyle silently rejects modern CSS colors and retains
+        // the previous value, causing the wrong color to appear.
+        ctx.clearRect(0, 0, w, h)
 
         const spacing = dotSize + gap
-        const cols = Math.ceil(w / spacing) + 1
-        const rows = Math.ceil(h / spacing) + 1
-        const offsetX = (w - (cols - 1) * spacing) / 2
-        const offsetY = (h - (rows - 1) * spacing) / 2
+        const r = dotSize / 2
+        const availW = w - 2 * r
+        const availH = h - 2 * r
+        const cols = Math.max(1, Math.floor(availW / spacing) + 1)
+        const rows = Math.max(1, Math.floor(availH / spacing) + 1)
+        const offsetX = r + (availW - (cols - 1) * spacing) / 2
+        const offsetY = r + (availH - (rows - 1) * spacing) / 2
 
         const mx = mouseRef.current.x
         const my = mouseRef.current.y
-        const colors = colorsRef.current
         const totalDots = cols * rows
         const progress = animProgress.current
         const motionReduced = reducedMotionRef.current
+        const pulseActive = pulseEnabled && !motionReduced
+        const pulseElapsed = pulseActive
+            ? (performance.now() - pulseStartRef.current) / 1000
+            : 0
 
         // Ensure random seed is large enough
         if (
@@ -501,7 +750,8 @@ export default function DotGrid(props: Props) {
             mouseScalesRef.current = arr
         }
         const mouseScales = mouseScalesRef.current
-        const lerpFactor = 0.13
+
+        const canvasColor = resolveColorForCanvas(color, "#000000")
 
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < cols; col++) {
@@ -513,71 +763,88 @@ export default function DotGrid(props: Props) {
                 const nx = cols > 1 ? col / (cols - 1) : 0.5
                 const ny = rows > 1 ? row / (rows - 1) : 0.5
 
-                // Grid color: 4-corner gradient (TL=0, BL=1, BR=2, TR=3)
-                const topColor = lerpColor(colors[0], colors[3], nx)
-                const bottomColor = lerpColor(colors[1], colors[2], nx)
-                const dotColor = lerpColor(topColor, bottomColor, ny)
-
-                // Vignette: normalized distance from fade center
-                // d = 0 at center, d = 1 at radius boundary
-                const fdx = nx - fadeX / 100
-                const fdy = ny - fadeY / 100
-                const rx = fadeRadiusX + 0.001
-                const ry = fadeRadiusY + 0.001
-                let d: number
-                switch (fadeShape) {
-                    case "ellipse":
-                        d = Math.sqrt((fdx * fdx) / (rx * rx) + (fdy * fdy) / (ry * ry))
-                        break
-                    case "ellipse-vertical": {
-                        const vrx = rx * 0.8
-                        const vry = rx * 2.5
-                        d = Math.sqrt((fdx * fdx) / (vrx * vrx) + (fdy * fdy) / (vry * vry))
-                        break
-                    }
-                    case "square":
-                        d = Math.max(Math.abs(fdx) / rx, Math.abs(fdy) / ry)
-                        break
-                    case "diamond":
-                        d = Math.abs(fdx) / rx + Math.abs(fdy) / ry
-                        break
-                    case "horizontal-band":
-                        d = Math.abs(fdy) / rx
-                        break
-                    case "vertical-band":
-                        d = Math.abs(fdx) / rx
-                        break
-                    default: // circle
-                        d = Math.sqrt(fdx * fdx + fdy * fdy) / rx
-                        break
+                // Vignette fade
+                let alpha = fadeEnabled ? 0 : 1
+                if (fadeEnabled) {
+                    alpha = useLegacyFade
+                        ? computeLegacyFadeAlpha(
+                              nx,
+                              ny,
+                              legacyFadeShape,
+                              fadeCustomX,
+                              fadeCustomY,
+                              legacyFadeRadiusX,
+                              legacyFadeRadiusY,
+                              fadeSoftness,
+                              legacyFadeStrength,
+                              fadeInvert
+                          )
+                        : (() => {
+                              const d = computeFadeDistance(
+                                  nx,
+                                  ny,
+                                  fadeResolved.cx,
+                                  fadeResolved.cy,
+                                  fadeResolved.axis,
+                                  fadeSize + 0.001
+                              )
+                              const spread = 0.1 + fadeSoftness * 1.4
+                              const edge = 1 - spread
+                              const t = Math.max(
+                                  0,
+                                  Math.min(1, (d - edge) / (spread + 0.001))
+                              )
+                              const vignette = t * t * (3 - 2 * t)
+                              return fadeInvert ? 1 - vignette : vignette
+                          })()
                 }
-                // Smoothstep transition: invisible inside, fades in outside
-                // softness 0 = hard edge, 1 = very gradual fade
-                const spread = 0.1 + fadeSoftness * 1.4
-                const edge = 1 - spread
-                const t = Math.max(0, Math.min(1, (d - edge) / (spread + 0.001)))
-                const vignette = t * t * (3 - 2 * t)
-                const rawAlpha = vignette * fadeStrength
-                const alpha = fadeInvert
-                    ? fadeStrength - rawAlpha
-                    : rawAlpha
 
-                // Appear animation with directional wave
+                if (useLegacyGradient) {
+                    const topColor = lerpColor(
+                        legacyCornerColors[0],
+                        legacyCornerColors[3],
+                        nx
+                    )
+                    const bottomColor = lerpColor(
+                        legacyCornerColors[1],
+                        legacyCornerColors[2],
+                        nx
+                    )
+                    const dotColor = lerpColor(topColor, bottomColor, ny)
+                    ctx.fillStyle = `rgb(${dotColor[0] | 0},${dotColor[1] | 0},${dotColor[2] | 0})`
+                } else {
+                    ctx.fillStyle = canvasColor
+                }
+
+                // Appear animation with directional wave + opacity
                 const appearActive = isInViewRef.current
                 let scale = 1
+                let appearAlpha = 1
                 if (appearActive) {
                     const normalizedIndex = computeAppearIndex(
-                        row, col, rows, cols,
-                        appearDirection, randomSeedRef.current
+                        row,
+                        col,
+                        rows,
+                        cols,
+                        appearDirection,
+                        randomSeedRef.current
                     )
                     const staggerDelay = normalizedIndex * appearStagger
                     const dotProgress = Math.max(
                         0,
-                        Math.min(1, (progress - staggerDelay) / (1 - appearStagger + 0.001))
+                        Math.min(
+                            1,
+                            (progress - staggerDelay) /
+                                (1 - appearStagger + 0.001)
+                        )
                     )
                     scale = applyEasing(dotProgress, appearEasing)
+                    // Opacity leads scale for a softer entrance
+                    const opacityT = Math.min(1, dotProgress * 1.5)
+                    appearAlpha = opacityT * opacityT * (3 - 2 * opacityT)
                 } else {
                     scale = 0
+                    appearAlpha = 0
                 }
 
                 // Mouse proximity growth (disabled for reduced motion)
@@ -587,17 +854,17 @@ export default function DotGrid(props: Props) {
                     const mdy = y - my
                     const mDist = Math.sqrt(mdx * mdx + mdy * mdy)
                     if (mDist < mouseRadius) {
-                        const proximity = 1 - mDist / mouseRadius
-                        targetMouseScale =
-                            1 + proximity * proximity * (mouseGrowth - 1)
+                        const t = 1 - mDist / mouseRadius
+                        const proximity = t * t * (3 - 2 * t) // smoothstep
+                        targetMouseScale = 1 + proximity * (mouseGrowth - 1)
                     }
                 }
 
-                // Lerp toward target for smooth transition
+                // Adaptive lerp — snappier approach, gentler return
                 const current = mouseScales[dotIdx]
-                const mouseScale =
-                    current + (targetMouseScale - current) * lerpFactor
-                mouseScales[dotIdx] = mouseScale
+                const diff = targetMouseScale - current
+                const lerpSpeed = Math.abs(diff) < 0.01 ? 1 : diff > 0 ? 0.16 : 0.09
+                mouseScales[dotIdx] = current + diff * lerpSpeed
 
                 // Click/tap interaction effects
                 let interactionScale = 0
@@ -608,97 +875,300 @@ export default function DotGrid(props: Props) {
                     const elapsed = (now - ev.time) / 1000
                     if (elapsed > interactionDuration) continue
                     const wave = elapsed / interactionDuration
-                    const waveRadius = interactionRadius * wave
+                    // Ease-out wave expansion for more natural spread
+                    const easedWave = 1 - (1 - wave) * (1 - wave)
+                    const waveRadius = interactionRadius * easedWave
                     const dx = x - ev.x
                     const dy = y - ev.y
                     const dist = Math.sqrt(dx * dx + dy * dy)
-                    const thickness = interactionRadius * 0.4
-                    const proximity = 1 - Math.min(1, Math.abs(dist - waveRadius) / thickness)
+                    const thickness = interactionRadius * 0.35
+                    const rawProximity =
+                        1 - Math.min(1, Math.abs(dist - waveRadius) / thickness)
+                    // Smoothstep the proximity for softer edges
+                    const proximity = rawProximity * rawProximity * (3 - 2 * rawProximity)
                     if (proximity > 0) {
-                        const fade = 1 - wave
+                        // Cubic fade-out for graceful dissipation
+                        const fade = (1 - wave) * (1 - wave)
                         if (interactionStyle === "ripple") {
-                            interactionScale += proximity * fade * 1.5
+                            interactionScale += proximity * fade * 2
                         } else if (interactionStyle === "repel") {
-                            interactionScale -= proximity * fade * 0.8
+                            interactionScale -= proximity * fade * 1
                         }
                     }
                 }
 
-                const finalScale = Math.max(0, scale * mouseScale + interactionScale)
-                const radius = (dotSize / 2) * finalScale
-                if (radius < 0.5) continue
+                // Pulse — preset-specific wave shapes
+                let pulseScale = 1
+                let pulseAlpha = 1
+                if (pulseActive) {
+                    const t = pulseElapsed
+                    const idx = dotIdx
 
+                    switch (pulsePreset) {
+                        case "gentle": {
+                            // Smooth radial breathing wave from center
+                            const dist = Math.sqrt(
+                                (nx - 0.5) * (nx - 0.5) + (ny - 0.5) * (ny - 0.5)
+                            )
+                            const wave = Math.sin(t * pulseSpeed * 1.5 - dist * 6)
+                            pulseScale = 1 + wave * 0.12 * pulseIntensity
+                            pulseAlpha = 0.7 + wave * 0.3 * pulseIntensity
+                            break
+                        }
+                        case "heartbeat": {
+                            // Double-beat (lub-dub) pattern
+                            const cycle = (t * pulseSpeed * 0.8) % 1
+                            let beat = 0
+                            if (cycle < 0.12)
+                                beat = Math.sin((cycle / 0.12) * Math.PI)
+                            else if (cycle > 0.18 && cycle < 0.30)
+                                beat = Math.sin(((cycle - 0.18) / 0.12) * Math.PI) * 0.6
+                            // Radial delay from center
+                            const dist = Math.sqrt(
+                                (nx - 0.5) * (nx - 0.5) + (ny - 0.5) * (ny - 0.5)
+                            )
+                            const delayed = Math.max(0, beat - dist * 0.8)
+                            pulseScale = 1 + delayed * 0.35 * pulseIntensity
+                            pulseAlpha = 0.6 + delayed * 0.4 * pulseIntensity
+                            break
+                        }
+                        case "ocean": {
+                            // Directional rolling waves (left to right + depth)
+                            const wave1 = Math.sin(t * pulseSpeed * 1.2 - nx * 8)
+                            const wave2 = Math.sin(t * pulseSpeed * 0.7 - ny * 5 + 1.3)
+                            const combined = wave1 * 0.7 + wave2 * 0.3
+                            pulseScale = 1 + combined * 0.15 * pulseIntensity
+                            pulseAlpha = 0.5 + (combined * 0.5 + 0.5) * 0.5 * pulseIntensity
+                            break
+                        }
+                        case "fireflies": {
+                            // Random independent twinkle per dot
+                            if (pulseSeedRef.current.length < totalDots) {
+                                const seed = new Float32Array(totalDots)
+                                for (let i = 0; i < totalDots; i++) seed[i] = Math.random()
+                                pulseSeedRef.current = seed
+                            }
+                            const offset = pulseSeedRef.current[idx] * 6.28
+                            const freq = 0.8 + pulseSeedRef.current[idx] * 2.2
+                            const raw = Math.sin(t * pulseSpeed * freq + offset)
+                            // Sharpen into brief flashes
+                            const flash = Math.max(0, raw) ** 3
+                            pulseScale = 1 + flash * 0.5 * pulseIntensity
+                            pulseAlpha = 0.3 + flash * 0.7 * pulseIntensity
+                            break
+                        }
+                        case "dramatic": {
+                            // Slow powerful radial expansion from center
+                            const dist = Math.sqrt(
+                                (nx - 0.5) * (nx - 0.5) + (ny - 0.5) * (ny - 0.5)
+                            )
+                            const wave = Math.sin(t * pulseSpeed * 0.8 - dist * 10)
+                            const envelope = Math.max(0, wave)
+                            pulseScale = 1 + envelope * 0.4 * pulseIntensity
+                            pulseAlpha = 0.3 + envelope * 0.7 * pulseIntensity
+                            break
+                        }
+                        case "nervous": {
+                            // Fast jittery per-dot noise
+                            if (pulseSeedRef.current.length < totalDots) {
+                                const seed = new Float32Array(totalDots)
+                                for (let i = 0; i < totalDots; i++) seed[i] = Math.random()
+                                pulseSeedRef.current = seed
+                            }
+                            const s = pulseSeedRef.current[idx]
+                            const jitter1 = Math.sin(t * pulseSpeed * 7 + s * 50)
+                            const jitter2 = Math.sin(t * pulseSpeed * 11 + s * 30)
+                            const jitter = jitter1 * 0.6 + jitter2 * 0.4
+                            pulseScale = 1 + jitter * 0.15 * pulseIntensity
+                            pulseAlpha = 0.6 + jitter * 0.25 * pulseIntensity
+                            break
+                        }
+                        default: {
+                            // Custom — layered sine waves for organic feel
+                            const phase1 = nx * 4 + ny * 3
+                            const phase2 = nx * 2.3 - ny * 5.1
+                            const wave1 = Math.sin(t * pulseSpeed * 2 + phase1)
+                            const wave2 = Math.sin(t * pulseSpeed * 1.3 + phase2) * 0.5
+                            const combined = (wave1 + wave2) / 1.5
+                            pulseScale = 1 + combined * 0.18 * pulseIntensity
+                            pulseAlpha = 0.5 + (combined * 0.5 + 0.5) * 0.5 * pulseIntensity
+                            break
+                        }
+                    }
+                    // Clamp final values
+                    pulseScale = Math.max(0.4, Math.min(2.5, pulseScale))
+                    pulseAlpha = Math.max(0.15, Math.min(1, pulseAlpha))
+                }
+
+                const finalScale = Math.max(
+                    0,
+                    scale * mouseScales[dotIdx] * pulseScale + interactionScale
+                )
+                const radius = (dotSize / 2) * finalScale
+                if (radius < 0.3) continue
+
+                // Combine vignette fade with appear opacity and pulse
+                const finalAlpha = alpha * appearAlpha * pulseAlpha
+
+                ctx.globalAlpha = finalAlpha
                 ctx.beginPath()
                 drawDot(ctx, dotShape, x, y, radius)
-                ctx.fillStyle = `rgba(${dotColor[0] | 0},${dotColor[1] | 0},${dotColor[2] | 0},${alpha.toFixed(3)})`
                 ctx.fill()
             }
         }
+        ctx.globalAlpha = 1
     }, [
         dotShape,
         dotSize,
         gap,
-        backgroundColor,
-        fadeShape,
-        fadeX,
-        fadeY,
-        fadeRadiusX,
-        fadeRadiusY,
+        color,
+        useLegacyGradient,
+        legacyCornerColors,
+        fadeEnabled,
+        useLegacyFade,
+        fadeResolved,
+        fadeSize,
         fadeSoftness,
-        fadeStrength,
         fadeInvert,
+        fadeCustomX,
+        fadeCustomY,
+        legacyFadeShape,
+        legacyFadeRadiusX,
+        legacyFadeRadiusY,
+        legacyFadeStrength,
         mouseRadius,
         mouseGrowth,
         appearEasing,
         appearStagger,
         appearDirection,
+        pulseEnabled,
+        pulsePreset,
+        pulseSpeed,
+        pulseIntensity,
         interactionStyle,
         interactionRadius,
         interactionDuration,
     ])
 
-    // Animation loop
-    useEffect(() => {
-        if (!isClient) return () => {}
+    // Keep ref in sync so loops always call the latest draw without re-triggering effects
+    drawRef.current = draw
 
-        if (appearTrigger === "mount") {
-            startTimeRef.current = performance.now()
-            isInViewRef.current = true
-        }
-        const duration = appearDuration * 1000
-
-        const idleLoop = () => {
+    // Start/restart RAF loop — called on mount and on mouse enter
+    const startLoop = useCallback(() => {
+        if (rafRef.current) return
+        settleFramesRef.current = 0
+        const loop = () => {
             // Clean up expired interactions
             const now = performance.now()
             const ints = interactionRef.current
-            while (ints.length > 0 && (now - ints[0].time) / 1000 > interactionDuration + 0.1) {
+            while (
+                ints.length > 0 &&
+                (now - ints[0].time) / 1000 > interactionDuration + 0.1
+            ) {
                 ints.shift()
             }
-            draw()
-            rafRef.current = requestAnimationFrame(idleLoop)
+            drawRef.current()
+            const hasActiveInteractions = ints.length > 0
+            if (pulseEnabled || animProgress.current < 1 || mouseActiveRef.current || hasActiveInteractions) {
+                settleFramesRef.current = 0
+                rafRef.current = requestAnimationFrame(loop)
+            } else {
+                // After mouse leaves, run ~25 frames for scales to settle smoothly
+                settleFramesRef.current++
+                if (settleFramesRef.current < 25) {
+                    rafRef.current = requestAnimationFrame(loop)
+                } else {
+                    rafRef.current = 0
+                }
+            }
         }
+        rafRef.current = requestAnimationFrame(loop)
+    }, [interactionDuration, pulseEnabled])
+
+    // Animation loop — only runs the appear animation once
+    useEffect(() => {
+        if (!isClient) return () => {}
+
+        const duration = appearDuration * 1000
 
         const appearLoop = () => {
             if (!isInViewRef.current) {
-                rafRef.current = requestAnimationFrame(appearLoop)
+                rafRef.current = 0
                 return
             }
             const elapsed = performance.now() - startTimeRef.current
             animProgress.current = Math.min(1, elapsed / duration)
-            draw()
+            drawRef.current()
             if (animProgress.current < 1) {
                 rafRef.current = requestAnimationFrame(appearLoop)
             } else {
-                rafRef.current = requestAnimationFrame(idleLoop)
+                // Appear done — switch to idle-aware loop
+                rafRef.current = 0
+                startLoop()
+            }
+        }
+        startAppearRef.current = () => {
+            if (rafRef.current) return
+            if (!pulseStartRef.current) {
+                pulseStartRef.current = performance.now()
+            }
+            rafRef.current = requestAnimationFrame(appearLoop)
+        }
+
+        // Animation already completed — just redraw, don't replay
+        if (animProgress.current >= 1) {
+            if (!pulseStartRef.current) pulseStartRef.current = performance.now()
+            drawRef.current()
+            startLoop()
+            return () => {
+                cancelAnimationFrame(rafRef.current)
+                rafRef.current = 0
             }
         }
 
-        rafRef.current = requestAnimationFrame(appearLoop)
+        if (appearTrigger === "mount") {
+            startTimeRef.current = performance.now()
+            pulseStartRef.current = startTimeRef.current
+            isInViewRef.current = true
+            startAppearRef.current()
+        } else if (isInViewRef.current) {
+            if (!startTimeRef.current) {
+                startTimeRef.current = performance.now()
+            }
+            pulseStartRef.current = startTimeRef.current
+            startAppearRef.current()
+        }
 
         return () => {
             cancelAnimationFrame(rafRef.current)
+            rafRef.current = 0
+            startAppearRef.current = () => {}
         }
-    }, [isClient, draw, appearDuration, appearTrigger, interactionDuration])
+    }, [isClient, appearDuration, appearTrigger, startLoop])
+
+    // Redraw when props change while animation loop is idle
+    useEffect(() => {
+        if (!isClient) return () => {}
+        if (animProgress.current >= 1 && rafRef.current === 0) {
+            drawRef.current()
+        }
+        return () => {}
+    }, [isClient, draw])
+
+    useEffect(() => {
+        if (!isClient) return () => {}
+        const container = containerRef.current
+        if (!container || typeof ResizeObserver === "undefined") return () => {}
+
+        const observer = new ResizeObserver(() => {
+            if (rafRef.current === 0) {
+                drawRef.current()
+            }
+        })
+
+        observer.observe(container)
+        return () => observer.disconnect()
+    }, [isClient])
 
     // Mouse tracking
     useEffect(() => {
@@ -708,23 +1178,35 @@ export default function DotGrid(props: Props) {
 
         const onMove = (e: MouseEvent) => {
             const rect = container.getBoundingClientRect()
-            mouseRef.current.x = e.clientX - rect.left
-            mouseRef.current.y = e.clientY - rect.top
+            // Scale from visual (transformed) coords to layout coords
+            const scaleX = container.offsetWidth / rect.width
+            const scaleY = container.offsetHeight / rect.height
+            mouseRef.current.x = (e.clientX - rect.left) * scaleX
+            mouseRef.current.y = (e.clientY - rect.top) * scaleY
+            if (!mouseActiveRef.current) {
+                mouseActiveRef.current = true
+                startLoop()
+            }
         }
 
         const onLeave = () => {
             mouseRef.current.x = -9999
             mouseRef.current.y = -9999
+            mouseActiveRef.current = false
+            // Loop will self-stop after mouse scales settle
         }
 
         const onClick = (e: MouseEvent) => {
             if (interactionStyle === "none") return
             const rect = container.getBoundingClientRect()
+            const scaleX = container.offsetWidth / rect.width
+            const scaleY = container.offsetHeight / rect.height
             interactionRef.current.push({
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top,
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top) * scaleY,
                 time: performance.now(),
             })
+            startLoop()
         }
 
         container.addEventListener("mousemove", onMove)
@@ -735,32 +1217,100 @@ export default function DotGrid(props: Props) {
             container.removeEventListener("mouseleave", onLeave)
             container.removeEventListener("click", onClick)
         }
-    }, [isClient, interactionStyle])
+    }, [isClient, interactionStyle, startLoop])
 
-    // Static / SSR fallback — layered CSS: gradient + dot mask + vignette
+    // Static / SSR fallback — individual SVG dots with fade,
+    // matching the canvas draw() logic exactly.
+    // When appear animation is enabled, hide the fallback to prevent a
+    // flash of fully-visible dots before the canvas takes over.
+    const appearWillAnimate = !isStatic && appearTrigger !== "none"
     if (isStatic || !isClient) {
         const spacing = dotSize + gap
         const r = dotSize / 2
+        // Use actual component dimensions from Framer's style prop so dot
+        // sizes match the canvas renderer instead of scaling with a fixed viewBox.
+        const vw = typeof style?.width === "number" ? style.width : 1200
+        const vh = typeof style?.height === "number" ? style.height : 700
+        const availW = vw - 2 * r
+        const availH = vh - 2 * r
+        const cols = Math.max(1, Math.floor(availW / spacing) + 1)
+        const rows = Math.max(1, Math.floor(availH / spacing) + 1)
+        const offsetX = r + (availW - (cols - 1) * spacing) / 2
+        const offsetY = r + (availH - (rows - 1) * spacing) / 2
 
-        // Build gradient direction based on colorCount
-        let gradientCSS: string
-        if (colorCount === "1") {
-            gradientCSS = color1
-        } else if (colorCount === "2") {
-            const dir =
-                colorDirection === "horizontal"
-                    ? "to right"
-                    : colorDirection === "vertical"
-                    ? "to bottom"
-                    : "to bottom right"
-            gradientCSS = `linear-gradient(${dir}, ${color1}, ${color2})`
-        } else {
-            // 4-corner: TL=c1, BL=c2, BR=c3, TR=c4
-            // Approximate with two stacked gradients
-            gradientCSS = `linear-gradient(to bottom, ${color1}, ${color2}), linear-gradient(to bottom, ${color4}, ${color3})`
+        const dots: React.ReactNode[] = []
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                const x = offsetX + col * spacing
+                const y = offsetY + row * spacing
+                const nx = cols > 1 ? col / (cols - 1) : 0.5
+                const ny = rows > 1 ? row / (rows - 1) : 0.5
+
+                // Fade alpha (same math as canvas draw)
+                let alpha = fadeEnabled ? 0 : 1
+                if (fadeEnabled) {
+                    alpha = useLegacyFade
+                        ? computeLegacyFadeAlpha(
+                              nx,
+                              ny,
+                              legacyFadeShape,
+                              fadeCustomX,
+                              fadeCustomY,
+                              legacyFadeRadiusX,
+                              legacyFadeRadiusY,
+                              fadeSoftness,
+                              legacyFadeStrength,
+                              fadeInvert
+                          )
+                        : (() => {
+                              const d = computeFadeDistance(
+                                  nx,
+                                  ny,
+                                  fadeResolved.cx,
+                                  fadeResolved.cy,
+                                  fadeResolved.axis,
+                                  fadeSize + 0.001
+                              )
+                              const spread = 0.1 + fadeSoftness * 1.4
+                              const edge = 1 - spread
+                              const t = Math.max(
+                                  0,
+                                  Math.min(1, (d - edge) / (spread + 0.001))
+                              )
+                              const vignette = t * t * (3 - 2 * t)
+                              return fadeInvert ? 1 - vignette : vignette
+                          })()
+                }
+
+                const fill = useLegacyGradient
+                    ? (() => {
+                          const topColor = lerpColor(
+                              legacyCornerColors[0],
+                              legacyCornerColors[3],
+                              nx
+                          )
+                          const bottomColor = lerpColor(
+                              legacyCornerColors[1],
+                              legacyCornerColors[2],
+                              nx
+                          )
+                          const dotColor = lerpColor(topColor, bottomColor, ny)
+                          return `rgb(${dotColor[0] | 0}, ${dotColor[1] | 0}, ${dotColor[2] | 0})`
+                      })()
+                    : color
+
+                if (alpha < 0.01) continue
+
+                dots.push(
+                    <path
+                        key={`${row}-${col}`}
+                        d={dotShapeSVGPath(dotShape, x, y, r)}
+                        fill={fill}
+                        fillOpacity={alpha}
+                    />
+                )
+            }
         }
-
-        const isFourCorner = colorCount === "4"
 
         return (
             <div
@@ -774,103 +1324,21 @@ export default function DotGrid(props: Props) {
                     backgroundColor,
                     position: "relative",
                     overflow: "hidden",
+                    ...(appearWillAnimate && { opacity: 0 }),
                 }}
             >
-                {/* Color gradient layer */}
-                {isFourCorner ? (
-                    <>
-                        <div
-                            style={{
-                                position: "absolute",
-                                inset: 0,
-                                pointerEvents: "none",
-                                background: `linear-gradient(to bottom, ${color1}, ${color2})`,
-                            }}
-                        />
-                        <div
-                            style={{
-                                position: "absolute",
-                                inset: 0,
-                                pointerEvents: "none",
-                                background: `linear-gradient(to right, transparent, ${color4})`,
-                            }}
-                        />
-                        <div
-                            style={{
-                                position: "absolute",
-                                inset: 0,
-                                pointerEvents: "none",
-                                background: `linear-gradient(to bottom right, transparent 30%, ${color3})`,
-                                opacity: 0.5,
-                            }}
-                        />
-                    </>
-                ) : (
-                    <div
-                        style={{
-                            position: "absolute",
-                            inset: 0,
-                            pointerEvents: "none",
-                            background: gradientCSS,
-                        }}
-                    />
-                )}
-                {/* Dot mask: background-color with shape cutouts (evenodd) */}
                 <svg
-                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        width: "100%",
+                        height: "100%",
+                    }}
+                    viewBox={`0 0 ${vw} ${vh}`}
+                    preserveAspectRatio="xMidYMid slice"
                 >
-                    <defs>
-                        <pattern
-                            id={`dot-mask-${patternId}`}
-                            width={spacing}
-                            height={spacing}
-                            patternUnits="userSpaceOnUse"
-                        >
-                            <path
-                                fillRule="evenodd"
-                                fill={backgroundColor}
-                                d={`M 0,0 H ${spacing} V ${spacing} H 0 Z ${dotShapeSVGPath(dotShape, spacing / 2, spacing / 2, r)}`}
-                            />
-                        </pattern>
-                    </defs>
-                    <rect width="100%" height="100%" fill={`url(#dot-mask-${patternId})`} />
+                    {dots}
                 </svg>
-                {/* Vignette overlay */}
-                {fadeStrength > 0 && (
-                    <div
-                        style={{
-                            position: "absolute",
-                            inset: 0,
-                            pointerEvents: "none",
-                            opacity: fadeStrength,
-                            background: (() => {
-                                const inner = fadeRadiusX * 80
-                                const softSpread = 10 + fadeSoftness * 50
-                                const outer = Math.min(100, inner + softSpread)
-                                const bg = backgroundColor
-                                const [a, b] = fadeInvert ? ["transparent", bg] : [bg, "transparent"]
-
-                                if (fadeShape === "horizontal-band") {
-                                    return `linear-gradient(to bottom, ${b} 0%, ${a} ${inner / 2}%, ${a} ${100 - inner / 2}%, ${b} 100%)`
-                                }
-                                if (fadeShape === "vertical-band") {
-                                    return `linear-gradient(to right, ${b} 0%, ${a} ${inner / 2}%, ${a} ${100 - inner / 2}%, ${b} 100%)`
-                                }
-
-                                const isEllipse = fadeShape === "ellipse" || fadeShape === "ellipse-vertical"
-                                    || fadeShape === "square" || fadeShape === "diamond"
-                                const shape = isEllipse ? "ellipse" : "circle"
-                                // Vertical ellipse: swap the aspect ratio via explicit sizing
-                                const sizing = fadeShape === "ellipse-vertical"
-                                    ? `${inner * 0.6}% ${outer * 1.2}%`
-                                    : undefined
-                                return sizing
-                                    ? `radial-gradient(${sizing} at ${fadeX}% ${fadeY}%, ${a} 60%, ${b} 100%)`
-                                    : `radial-gradient(${shape} at ${fadeX}% ${fadeY}%, ${a} ${inner}%, ${b} ${outer}%)`
-                            })(),
-                        }}
-                    />
-                )}
             </div>
         )
     }
@@ -905,16 +1373,25 @@ DotGrid.displayName = "Dot Grid"
 
 DotGrid.defaultProps = {
     grid: { dotShape: "circle", dotSize: 10, gap: 28 },
-    colorCount: "4",
-    colorDirection: "diagonal",
-    color1: "#F97316",
-    color2: "#EC4899",
-    color3: "#8B5CF6",
-    color4: "#3B82F6",
+    color: "#F97316",
     backgroundColor: "#FAF5F0",
-    fade: { shape: "circle", invert: false, x: 50, y: 50, radiusX: 0.35, radiusY: 0.35, softness: 0.4, strength: 1 },
+    fade: {
+        preset: "center",
+        size: 0.35,
+        softness: 0.4,
+        invert: false,
+        x: 50,
+        y: 50,
+    },
     mouse: { radius: 120, growth: 1.8 },
-    animation: { trigger: "mount", easing: "ease-out", duration: 1.2, stagger: 0.6, direction: "top-left" },
+    animation: {
+        trigger: "mount",
+        easing: "ease-out",
+        duration: 1.2,
+        stagger: 0.6,
+        direction: "top-left",
+    },
+    pulse: { enabled: true, preset: "custom", speed: 1, intensity: 1 },
     interaction: { style: "none", radius: 200, duration: 0.6 },
 }
 
@@ -926,8 +1403,24 @@ addPropertyControls(DotGrid, {
             dotShape: {
                 type: ControlType.Enum,
                 title: "Shape",
-                options: ["circle", "square", "diamond", "triangle", "star", "plus", "ring"],
-                optionTitles: ["Circle", "Square", "Diamond", "Triangle", "Star", "Plus", "Ring"],
+                options: [
+                    "circle",
+                    "square",
+                    "diamond",
+                    "triangle",
+                    "star",
+                    "plus",
+                    "ring",
+                ],
+                optionTitles: [
+                    "Circle",
+                    "Square",
+                    "Diamond",
+                    "Triangle",
+                    "Star",
+                    "Plus",
+                    "Ring",
+                ],
                 defaultValue: "circle",
             },
             dotSize: {
@@ -950,43 +1443,10 @@ addPropertyControls(DotGrid, {
             },
         },
     },
-    colorCount: {
-        type: ControlType.Enum,
-        title: "Colors",
-        options: ["1", "2", "4"],
-        optionTitles: ["Solid", "Two-tone", "Four-corner"],
-        defaultValue: "4",
-    },
-    colorDirection: {
-        type: ControlType.Enum,
-        title: "Direction",
-        options: ["horizontal", "vertical", "diagonal"],
-        optionTitles: ["Horizontal", "Vertical", "Diagonal"],
-        defaultValue: "diagonal",
-        hidden: (props) => props.colorCount !== "2",
-    },
-    color1: {
+    color: {
         type: ControlType.Color,
         title: "Color",
         defaultValue: "#F97316",
-    },
-    color2: {
-        type: ControlType.Color,
-        title: "Color 2",
-        defaultValue: "#EC4899",
-        hidden: (props) => props.colorCount === "1",
-    },
-    color3: {
-        type: ControlType.Color,
-        title: "Bottom Right",
-        defaultValue: "#8B5CF6",
-        hidden: (props) => props.colorCount !== "4",
-    },
-    color4: {
-        type: ControlType.Color,
-        title: "Top Right",
-        defaultValue: "#3B82F6",
-        hidden: (props) => props.colorCount !== "4",
     },
     backgroundColor: {
         type: ControlType.Color,
@@ -995,37 +1455,57 @@ addPropertyControls(DotGrid, {
     },
     fade: {
         type: ControlType.Object,
-        title: "Center Fade",
+        title: "Fade",
         controls: {
-            shape: {
+            preset: {
                 type: ControlType.Enum,
-                title: "Shape",
+                title: "Preset",
                 options: [
-                    "circle",
-                    "ellipse",
-                    "ellipse-vertical",
-                    "square",
-                    "diamond",
-                    "horizontal-band",
-                    "vertical-band",
+                    "none",
+                    "center",
+                    "top",
+                    "bottom",
+                    "left",
+                    "right",
+                    "custom",
                 ],
                 optionTitles: [
-                    "Circle",
-                    "Ellipse",
-                    "Vertical Ellipse",
-                    "Square",
-                    "Diamond",
-                    "Horizontal Band",
-                    "Vertical Band",
+                    "None",
+                    "Center",
+                    "Top",
+                    "Bottom",
+                    "Left",
+                    "Right",
+                    "Custom",
                 ],
-                defaultValue: "circle",
+                defaultValue: "center",
+            },
+            size: {
+                type: ControlType.Number,
+                title: "Size",
+                min: 0.05,
+                max: 0.7,
+                step: 0.01,
+                defaultValue: 0.35,
+                hidden: (props) => props.fade?.preset === "none",
+                description: "Clear area size (smaller = more dots hidden)",
+            },
+            softness: {
+                type: ControlType.Number,
+                title: "Softness",
+                min: 0,
+                max: 1,
+                step: 0.05,
+                defaultValue: 0.4,
+                hidden: (props) => props.fade?.preset === "none",
             },
             invert: {
                 type: ControlType.Boolean,
                 title: "Invert",
                 defaultValue: false,
-                enabledTitle: "Edges",
-                disabledTitle: "Center",
+                enabledTitle: "Yes",
+                disabledTitle: "No",
+                hidden: (props) => props.fade?.preset === "none",
             },
             x: {
                 type: ControlType.Number,
@@ -1035,6 +1515,7 @@ addPropertyControls(DotGrid, {
                 step: 1,
                 unit: "%",
                 defaultValue: 50,
+                hidden: (props) => props.fade?.preset !== "custom",
             },
             y: {
                 type: ControlType.Number,
@@ -1044,48 +1525,7 @@ addPropertyControls(DotGrid, {
                 step: 1,
                 unit: "%",
                 defaultValue: 50,
-            },
-            radiusX: {
-                type: ControlType.Number,
-                title: "Radius X",
-                min: 0,
-                max: 0.7,
-                step: 0.01,
-                defaultValue: 0.35,
-                description:
-                    "Size of the fade area (0 = no fade, 0.7 = dots only at edges)",
-            },
-            radiusY: {
-                type: ControlType.Number,
-                title: "Radius Y",
-                min: 0,
-                max: 0.7,
-                step: 0.01,
-                defaultValue: 0.35,
-                hidden: (props) => {
-                    const shape = props.fade?.shape
-                    return shape === "circle" || shape === "horizontal-band" || shape === "vertical-band"
-                },
-                description:
-                    "Vertical extent of the fade — shown for ellipse, square, and diamond shapes",
-            },
-            softness: {
-                type: ControlType.Number,
-                title: "Softness",
-                min: 0,
-                max: 1,
-                step: 0.05,
-                defaultValue: 0.4,
-                description:
-                    "How gradual the fade transition is (0 = sharp edge, 1 = very soft)",
-            },
-            strength: {
-                type: ControlType.Number,
-                title: "Strength",
-                min: 0,
-                max: 1,
-                step: 0.05,
-                defaultValue: 1,
+                hidden: (props) => props.fade?.preset !== "custom",
             },
         },
     },
@@ -1128,8 +1568,20 @@ addPropertyControls(DotGrid, {
             easing: {
                 type: ControlType.Enum,
                 title: "Easing",
-                options: ["ease-out", "ease-in-out", "linear", "spring", "bounce"],
-                optionTitles: ["Ease Out", "Ease In-Out", "Linear", "Spring", "Bounce"],
+                options: [
+                    "ease-out",
+                    "ease-in-out",
+                    "linear",
+                    "spring",
+                    "bounce",
+                ],
+                optionTitles: [
+                    "Ease Out",
+                    "Ease In-Out",
+                    "Linear",
+                    "Spring",
+                    "Bounce",
+                ],
                 defaultValue: "ease-out",
             },
             duration: {
@@ -1173,6 +1625,62 @@ addPropertyControls(DotGrid, {
                     "Random",
                 ],
                 defaultValue: "top-left",
+            },
+        },
+    },
+    pulse: {
+        type: ControlType.Object,
+        title: "Pulse Animation",
+        controls: {
+            enabled: {
+                type: ControlType.Boolean,
+                title: "Enabled",
+                defaultValue: true,
+                enabledTitle: "On",
+                disabledTitle: "Off",
+            },
+            preset: {
+                type: ControlType.Enum,
+                title: "Preset",
+                options: [
+                    "custom",
+                    "gentle",
+                    "heartbeat",
+                    "ocean",
+                    "fireflies",
+                    "dramatic",
+                    "nervous",
+                ],
+                optionTitles: [
+                    "Custom",
+                    "Gentle Breathe",
+                    "Heartbeat",
+                    "Ocean Waves",
+                    "Fireflies",
+                    "Dramatic",
+                    "Nervous Energy",
+                ],
+                defaultValue: "custom",
+                hidden: (props) => !props.pulse?.enabled,
+            },
+            speed: {
+                type: ControlType.Number,
+                title: "Speed",
+                min: 0.1,
+                max: 5,
+                step: 0.1,
+                defaultValue: 1,
+                hidden: (props) => !props.pulse?.enabled || props.pulse?.preset !== "custom",
+            },
+            intensity: {
+                type: ControlType.Number,
+                title: "Intensity",
+                min: 0.1,
+                max: 3,
+                step: 0.1,
+                defaultValue: 1,
+                hidden: (props) => !props.pulse?.enabled || props.pulse?.preset !== "custom",
+                description: "Strength of the scale throb and opacity ripple",
             },
         },
     },

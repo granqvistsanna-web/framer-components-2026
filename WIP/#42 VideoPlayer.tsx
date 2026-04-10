@@ -2149,7 +2149,7 @@ export default function CustomVideoPlayer(props: Props) {
                     handlePlayPause()
                     break
 
-                case "ArrowLeft":
+                case "ArrowLeft": {
                     const skipBackTime = Math.max(0, state.progress - 10)
                     if (
                         props.sourceType === "youtube" &&
@@ -2168,8 +2168,9 @@ export default function CustomVideoPlayer(props: Props) {
                     }
                     setState((prev) => ({ ...prev, progress: skipBackTime }))
                     break
+                }
 
-                case "ArrowRight":
+                case "ArrowRight": {
                     const skipForwardTime = Math.min(
                         state.duration || 0,
                         state.progress + 10
@@ -2191,8 +2192,9 @@ export default function CustomVideoPlayer(props: Props) {
                     }
                     setState((prev) => ({ ...prev, progress: skipForwardTime }))
                     break
+                }
 
-                case "ArrowUp":
+                case "ArrowUp": {
                     const newVolumeUp = Math.min(1, state.volume + 0.1)
                     if (
                         props.sourceType === "youtube" &&
@@ -2217,8 +2219,9 @@ export default function CustomVideoPlayer(props: Props) {
                         muted: newVolumeUp === 0,
                     }))
                     break
+                }
 
-                case "ArrowDown":
+                case "ArrowDown": {
                     const newVolumeDown = Math.max(0, state.volume - 0.1)
                     if (
                         props.sourceType === "youtube" &&
@@ -2243,6 +2246,7 @@ export default function CustomVideoPlayer(props: Props) {
                         muted: newVolumeDown === 0,
                     }))
                     break
+                }
 
                 case "KeyM":
                     handleMute()
@@ -2271,7 +2275,7 @@ export default function CustomVideoPlayer(props: Props) {
                     setState((prev) => ({ ...prev, progress: 0 }))
                     break
 
-                case "End":
+                case "End": {
                     const endTime = state.duration || 0
                     if (
                         props.sourceType === "youtube" &&
@@ -2290,6 +2294,7 @@ export default function CustomVideoPlayer(props: Props) {
                     }
                     setState((prev) => ({ ...prev, progress: endTime }))
                     break
+                }
 
                 default:
                     if (e.code >= "Digit0" && e.code <= "Digit9") {
@@ -2437,21 +2442,20 @@ export default function CustomVideoPlayer(props: Props) {
 
     const getVideoSource = (sourceType) => {
         const currentSource = getCurrentVideoSource() // Use new helper
-        const origin =
-            typeof window !== "undefined" ? window.location.origin : ""
 
         switch (sourceType) {
             case "file":
                 return currentSource
             case "url":
                 return currentSource
-            case "youtube":
+            case "youtube": {
                 const ytOrigin =
                     typeof window !== "undefined"
                         ? encodeURIComponent(window.location.origin)
                         : ""
                 return `https://www.youtube.com/embed/${getYoutubeId(currentSource)}?enablejsapi=1&origin=${ytOrigin}&controls=0&modestbranding=1&playsinline=1&rel=0&showinfo=0&iv_load_policy=3&cc_load_policy=0&disablekb=1&fs=1&end_screen=0&pause_screen=0&annotations=false&autoplay=${props.autoPlay ? 1 : 0}&loop=${props.mode === "multiple" ? 0 : props.loop ? 1 : 0}&mute=${props.defaultSettings?.muted ? 1 : 0}`
-            case "vimeo":
+            }
+            case "vimeo": {
                 const vimeoMuted = props.autoPlay
                     ? 1
                     : props.defaultSettings?.muted
@@ -2471,8 +2475,48 @@ export default function CustomVideoPlayer(props: Props) {
                     "transparent=0",
                 ].join("&")
                 return `https://player.vimeo.com/video/${currentSource}?${vimeoParams}`
+            }
             default:
                 return currentSource
+        }
+    }
+
+    const getIframeStyle = (videoFit, cornerRadius) => {
+        const base = { border: "none", pointerEvents: "none" as const }
+        if (videoFit === "cover") {
+            return {
+                ...base,
+                position: "absolute" as const,
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                minWidth: "100%",
+                minHeight: "100%",
+                aspectRatio: "16/9",
+                width: "auto",
+                height: "auto",
+            }
+        }
+        if (videoFit === "contain") {
+            return {
+                ...base,
+                position: "absolute" as const,
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                maxWidth: "100%",
+                maxHeight: "100%",
+                aspectRatio: "16/9",
+                width: "100%",
+                borderRadius: cornerRadius ?? 8,
+            }
+        }
+        // "fill" - stretch to fit
+        return {
+            ...base,
+            width: "100%",
+            height: "100%",
+            borderRadius: cornerRadius ?? 8,
         }
     }
 
@@ -2859,7 +2903,7 @@ export default function CustomVideoPlayer(props: Props) {
 
     const shouldShowOverlay = !(
         state.isPlaying ||
-        (props.sourceType === "youtube" && props.autoPlay) ||
+        (props.autoPlay && state.hasPlayedOnce) ||
         (props.showPlayButtonOnlyOnInitial && state.hasPlayedOnce)
     )
 
@@ -3004,21 +3048,23 @@ export default function CustomVideoPlayer(props: Props) {
                         }}
                     />
                 )}
-                <svg
-                    width="50"
-                    height="50"
-                    viewBox="0 0 50 50"
-                    fill="none"
-                    style={{ position: "relative", zIndex: 1, opacity: 0.8 }}
-                >
-                    <rect
+                {shouldShowOverlay && (
+                    <svg
                         width="50"
                         height="50"
-                        rx={props.buttonStyle?.playButtonBorderRadius ?? 8}
-                        fill={props.buttonStyle?.playButtonBackgroundColor || "rgba(0,0,0,0.5)"}
-                    />
-                    <path d="M20 15L35 25L20 35V15Z" fill={props.buttonStyle?.playIconColor || "#fff"} />
-                </svg>
+                        viewBox="0 0 50 50"
+                        fill="none"
+                        style={{ position: "relative", zIndex: 1, opacity: 0.8 }}
+                    >
+                        <rect
+                            width="50"
+                            height="50"
+                            rx={props.buttonStyle?.playButtonBorderRadius ?? 8}
+                            fill={props.buttonStyle?.playButtonBackgroundColor || "rgba(0,0,0,0.5)"}
+                        />
+                        <path d="M20 15L35 25L20 35V15Z" fill={props.buttonStyle?.playIconColor || "#fff"} />
+                    </svg>
+                )}
             </div>
         )
     }
@@ -3209,13 +3255,10 @@ export default function CustomVideoPlayer(props: Props) {
                 <iframe
                     ref={iframeRef}
                     src={state.fileUrl}
-                    style={{
-                        width: "100%",
-                        height: "100%",
-                        border: "none",
-                        objectFit: props.style?.videoFit || "cover",
-                        borderRadius: props.style?.cornerRadius ?? 8,
-                    }}
+                    style={getIframeStyle(
+                        props.style?.videoFit || "cover",
+                        props.style?.cornerRadius
+                    )}
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                     allowFullScreen
                     title={props.accessibility?.title || "Embedded content"}
@@ -3236,14 +3279,10 @@ export default function CustomVideoPlayer(props: Props) {
                         id="youtube-player"
                         ref={iframeRef}
                         src={getVideoSource("youtube")}
-                        style={{
-                            width: "100%",
-                            height: "100%",
-                            border: "none",
-                            objectFit: props.style?.videoFit || "cover",
-                            borderRadius: props.style?.cornerRadius ?? 8,
-                            pointerEvents: "none", // Disable pointer events on iframe
-                        }}
+                        style={getIframeStyle(
+                            props.style?.videoFit || "cover",
+                            props.style?.cornerRadius
+                        )}
                         allow="autoplay; fullscreen"
                         allowFullScreen
                         frameBorder="0"
@@ -3309,14 +3348,10 @@ export default function CustomVideoPlayer(props: Props) {
                     <iframe
                         ref={iframeRef}
                         src={getVideoSource("vimeo")}
-                        style={{
-                            width: "100%",
-                            height: "100%",
-                            border: "none",
-                            objectFit: props.style?.videoFit || "cover",
-                            borderRadius: props.style?.cornerRadius ?? 8,
-                            pointerEvents: "none",
-                        }}
+                        style={getIframeStyle(
+                            props.style?.videoFit || "cover",
+                            props.style?.cornerRadius
+                        )}
                         allow="autoplay; fullscreen"
                         allowFullScreen
                         title={
