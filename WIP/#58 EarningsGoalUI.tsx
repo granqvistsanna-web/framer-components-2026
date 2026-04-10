@@ -250,11 +250,12 @@ function getSegmentColor(
     hoveredCategory: number | null
 ): string {
     const baseColor = getCategoryColor(index, category, mode, sharedColor)
-    if (mode === "monochrome") return baseColor
+    // Hover/lock effect takes priority
     if (hoveredCategory !== null) {
         if (index === hoveredCategory) return baseColor
         return withAlpha(baseColor, 0.15)
     }
+    if (mode === "monochrome") return baseColor
     if (mode !== "sharedFocus") return baseColor
     return index === highlightedCategory ? baseColor : withAlpha(baseColor, 0.22)
 }
