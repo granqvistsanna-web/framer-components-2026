@@ -1362,15 +1362,53 @@ export default function EarningsGoalUI(props: Props) {
                     aria-valuenow={Math.round(percentage)}
                     aria-valuemin={0}
                     aria-valuemax={100}
-                    style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", borderRadius }}
+                    style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", borderRadius, display: "flex", flexDirection: "row" as const }}
                 >
-                    <div
-                        style={{
-                            height: "100%",
-                            width: `${Math.min(percentage, 100)}%`,
-                            backgroundColor: withAlpha(accentColor, progressBarFillOpacity),
-                        }}
-                    />
+                    {normalizedCategories.length > 0 ? (
+                        // Segmented by category
+                        normalizedCategories.map((cat, i) => {
+                            const w =
+                                goal > 0
+                                    ? Math.max(
+                                          0,
+                                          ((cat.value || 0) / goal) * 100
+                                      )
+                                    : 0
+                            if (w === 0) return null
+                            const color = getSegmentColor(
+                                i,
+                                cat,
+                                categoryColorMode,
+                                sharedCategoryColor,
+                                activeCategoryIndex,
+                                activeHoverIndex
+                            )
+                            return (
+                                <div
+                                    key={`static-bar-fill-seg-${i}`}
+                                    style={{
+                                        width: `${w}%`,
+                                        height: "100%",
+                                        backgroundColor: withAlpha(
+                                            color,
+                                            progressBarFillOpacity
+                                        ),
+                                        position: "relative",
+                                        ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
+                                    }}
+                                />
+                            )
+                        })
+                    ) : (
+                        // Single color fallback (no categories)
+                        <div
+                            style={{
+                                height: "100%",
+                                width: `${Math.min(percentage, 100)}%`,
+                                backgroundColor: withAlpha(accentColor, progressBarFillOpacity),
+                            }}
+                        />
+                    )}
                 </div>
                 <div
                     style={{
@@ -2025,21 +2063,70 @@ export default function EarningsGoalUI(props: Props) {
                     zIndex: 0,
                     overflow: "hidden",
                     borderRadius,
+                    display: "flex",
+                    flexDirection: "row" as const,
                 }}
             >
-                <motion.div
-                    initial={shouldAnimate ? { width: "0%" } : false}
-                    animate={{ width: `${Math.min(percentage, 100)}%` }}
-                    transition={{
-                        duration: durationSec,
-                        ease: [0.22, 1, 0.36, 1],
-                    }}
-                    style={{
-                        height: "100%",
-                        backgroundColor: withAlpha(accentColor, progressBarFillOpacity),
-                        willChange: "width",
-                    }}
-                />
+                {normalizedCategories.length > 0 ? (
+                    // Segmented by category
+                    normalizedCategories.map((cat, i) => {
+                        const w =
+                            goal > 0
+                                ? Math.max(
+                                      0,
+                                      ((cat.value || 0) / goal) * 100
+                                  )
+                                : 0
+                        if (w === 0) return null
+                        const color = getSegmentColor(
+                            i,
+                            cat,
+                            categoryColorMode,
+                            sharedCategoryColor,
+                            activeCategoryIndex,
+                            activeHoverIndex
+                        )
+                        return (
+                            <motion.div
+                                key={`bar-fill-seg-${i}`}
+                                initial={
+                                    shouldAnimate ? { width: "0%" } : false
+                                }
+                                animate={{ width: `${w}%` }}
+                                transition={{
+                                    duration: durationSec * 0.9,
+                                    delay: stagger.bar + i * 0.08,
+                                    ease,
+                                }}
+                                style={{
+                                    height: "100%",
+                                    backgroundColor: withAlpha(
+                                        color,
+                                        progressBarFillOpacity
+                                    ),
+                                    willChange: "width",
+                                    position: "relative",
+                                    ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
+                                }}
+                            />
+                        )
+                    })
+                ) : (
+                    // Single color fallback (no categories)
+                    <motion.div
+                        initial={shouldAnimate ? { width: "0%" } : false}
+                        animate={{ width: `${Math.min(percentage, 100)}%` }}
+                        transition={{
+                            duration: durationSec,
+                            ease: [0.22, 1, 0.36, 1],
+                        }}
+                        style={{
+                            height: "100%",
+                            backgroundColor: withAlpha(accentColor, progressBarFillOpacity),
+                            willChange: "width",
+                        }}
+                    />
+                )}
             </div>
             <div
                 style={{
