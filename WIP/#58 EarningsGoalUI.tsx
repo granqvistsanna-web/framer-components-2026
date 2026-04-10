@@ -2099,7 +2099,7 @@ export default function EarningsGoalUI(props: Props) {
                                 transition={{
                                     duration: durationSec * 0.9,
                                     delay: stagger.bar + i * 0.08,
-                                    ease,
+                                    ease: [0.22, 1, 0.36, 1],
                                 }}
                                 style={{
                                     height: "100%",
@@ -2524,7 +2524,7 @@ export default function EarningsGoalUI(props: Props) {
                                 transition={{
                                     duration: durationSec * 0.9,
                                     delay: stagger.bar + i * 0.08,
-                                    ease,
+                                    ease: [0.22, 1, 0.36, 1],
                                 }}
                                 style={{
                                     height: "100%",
