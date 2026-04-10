@@ -253,10 +253,25 @@ function getSegmentColor(
     if (mode === "monochrome") return baseColor
     if (hoveredCategory !== null) {
         if (index === hoveredCategory) return baseColor
-        return withAlpha(baseColor, 0.22)
+        return withAlpha(baseColor, 0.15)
     }
     if (mode !== "sharedFocus") return baseColor
     return index === highlightedCategory ? baseColor : withAlpha(baseColor, 0.22)
+}
+
+function getSegmentGlow(
+    index: number,
+    hoveredCategory: number | null
+): React.CSSProperties {
+    if (hoveredCategory === null) return {}
+    if (index === hoveredCategory) {
+        return {
+            filter: "brightness(1.25) saturate(1.2)",
+            boxShadow: "0 0 12px 2px rgba(255,255,255,0.35), inset 0 0 0 1px rgba(255,255,255,0.5)",
+            zIndex: 10,
+        }
+    }
+    return { opacity: 0.35 }
 }
 
 // Parse a date string as UTC midnight so timezone differences don't shift
@@ -787,6 +802,11 @@ export default function EarningsGoalUI(props: Props) {
     const [hoveredCategoryIndex, setHoveredCategoryIndex] = useState<
         number | null
     >(null)
+    const [lockedCategoryIndex, setLockedCategoryIndex] = useState<
+        number | null
+    >(null)
+    
+    const activeHoverIndex = lockedCategoryIndex ?? hoveredCategoryIndex
 
     const categoryValues = sanitizeCategories(categories)
     const categoryTotal = sumCategoryValues(categoryValues)
@@ -848,6 +868,9 @@ export default function EarningsGoalUI(props: Props) {
         onMouseEnter: () => setHoveredCategoryIndex(index),
         onMouseLeave: () => setHoveredCategoryIndex((current) =>
             current === index ? null : current
+        ),
+        onClick: () => setLockedCategoryIndex((current) =>
+            current === index ? null : index
         ),
     })
 
@@ -1642,7 +1665,7 @@ export default function EarningsGoalUI(props: Props) {
                                 categoryColorMode,
                                 sharedCategoryColor,
                                 activeCategoryIndex,
-                                hoveredCategoryIndex
+                                activeHoverIndex
                             )
                             return (
                                 <div
@@ -1654,6 +1677,8 @@ export default function EarningsGoalUI(props: Props) {
                                             color,
                                             progressBarFillOpacity
                                         ),
+                                        position: "relative",
+                                        ...getSegmentGlow(i, hoveredCategoryIndex),
                                     }}
                                 />
                             )
@@ -1777,7 +1802,7 @@ export default function EarningsGoalUI(props: Props) {
                                     categoryColorMode,
                                     sharedCategoryColor,
                                     activeCategoryIndex,
-                                    hoveredCategoryIndex
+                                    activeHoverIndex
                                 )
                                 const isLast =
                                     i === normalizedCategories.length - 1
@@ -1791,6 +1816,8 @@ export default function EarningsGoalUI(props: Props) {
                                             boxShadow: !isLast
                                                 ? `inset -1px 0 0 ${withAlpha("#ffffff", 0.25)}`
                                                 : undefined,
+                                            position: "relative",
+                                            ...getSegmentGlow(i, hoveredCategoryIndex),
                                         }}
                                     />
                                 )
@@ -2526,7 +2553,7 @@ export default function EarningsGoalUI(props: Props) {
                                     categoryColorMode,
                                     sharedCategoryColor,
                                     activeCategoryIndex,
-                                    hoveredCategoryIndex
+                                    activeHoverIndex
                                 )
                                 const isLast =
                                     i === normalizedCategories.length - 1
@@ -2550,6 +2577,8 @@ export default function EarningsGoalUI(props: Props) {
                                             boxShadow: !isLast
                                                 ? `inset -1px 0 0 ${withAlpha("#ffffff", 0.25)}`
                                                 : undefined,
+                                            position: "relative",
+                                            ...getSegmentGlow(i, hoveredCategoryIndex),
                                         }}
                                     />
                                 )
