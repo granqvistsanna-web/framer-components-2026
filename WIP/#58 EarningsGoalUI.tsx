@@ -1375,6 +1375,7 @@ export default function EarningsGoalUI(props: Props) {
                                       )
                                     : 0
                             if (w === 0) return null
+                            const isDimmed = activeHoverIndex !== null && activeHoverIndex !== i
                             const color = getSegmentColor(
                                 i,
                                 cat,
@@ -1383,16 +1384,15 @@ export default function EarningsGoalUI(props: Props) {
                                 activeCategoryIndex,
                                 activeHoverIndex
                             )
+                            // When hovering, color already has correct alpha; otherwise apply fill opacity
+                            const bgColor = isDimmed ? color : withAlpha(color, progressBarFillOpacity)
                             return (
                                 <div
                                     key={`static-bar-fill-seg-${i}`}
                                     style={{
                                         width: `${w}%`,
                                         height: "100%",
-                                        backgroundColor: withAlpha(
-                                            color,
-                                            progressBarFillOpacity
-                                        ),
+                                        backgroundColor: bgColor,
                                         position: "relative",
                                         ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
                                     }}
@@ -1723,6 +1723,7 @@ export default function EarningsGoalUI(props: Props) {
                                       )
                                     : 0
                             if (w === 0) return null
+                            const isDimmed = activeHoverIndex !== null && activeHoverIndex !== i
                             const color = getSegmentColor(
                                 i,
                                 cat,
@@ -1731,16 +1732,15 @@ export default function EarningsGoalUI(props: Props) {
                                 activeCategoryIndex,
                                 activeHoverIndex
                             )
+                            // When hovering, color already has correct alpha; otherwise apply fill opacity
+                            const bgColor = isDimmed ? color : withAlpha(color, progressBarFillOpacity)
                             return (
                                 <div
                                     key={`static-weekly-fill-${i}`}
                                     style={{
                                         width: `${w}%`,
                                         height: "100%",
-                                        backgroundColor: withAlpha(
-                                            color,
-                                            progressBarFillOpacity
-                                        ),
+                                        backgroundColor: bgColor,
                                         position: "relative",
                                         ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
                                     }}
@@ -2078,6 +2078,7 @@ export default function EarningsGoalUI(props: Props) {
                                   )
                                 : 0
                         if (w === 0) return null
+                        const isDimmed = activeHoverIndex !== null && activeHoverIndex !== i
                         const color = getSegmentColor(
                             i,
                             cat,
@@ -2086,6 +2087,8 @@ export default function EarningsGoalUI(props: Props) {
                             activeCategoryIndex,
                             activeHoverIndex
                         )
+                        // When hovering, color already has correct alpha; otherwise apply fill opacity
+                        const bgColor = isDimmed ? color : withAlpha(color, progressBarFillOpacity)
                         return (
                             <motion.div
                                 key={`bar-fill-seg-${i}`}
@@ -2100,10 +2103,7 @@ export default function EarningsGoalUI(props: Props) {
                                 }}
                                 style={{
                                     height: "100%",
-                                    backgroundColor: withAlpha(
-                                        color,
-                                        progressBarFillOpacity
-                                    ),
+                                    backgroundColor: bgColor,
                                     willChange: "width",
                                     position: "relative",
                                     ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
@@ -2503,14 +2503,17 @@ export default function EarningsGoalUI(props: Props) {
                                   )
                                 : 0
                         if (w === 0) return null
+                        const isDimmed = activeHoverIndex !== null && activeHoverIndex !== i
                         const color = getSegmentColor(
                             i,
                             cat,
                             categoryColorMode,
                             sharedCategoryColor,
                             activeCategoryIndex,
-                            hoveredCategoryIndex
+                            activeHoverIndex
                         )
+                        // When hovering, color already has correct alpha; otherwise apply fill opacity
+                        const bgColor = isDimmed ? color : withAlpha(color, progressBarFillOpacity)
                         return (
                             <motion.div
                                 key={`weekly-fill-${i}`}
@@ -2525,15 +2528,14 @@ export default function EarningsGoalUI(props: Props) {
                                 }}
                                 style={{
                                     height: "100%",
-                                    backgroundColor: withAlpha(
-                                        color,
-                                        progressBarFillOpacity
-                                    ),
+                                    backgroundColor: bgColor,
                                     willChange: "width",
+                                    position: "relative",
+                                    ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
                                 }}
                             />
                         )
-                    })}
+                    })
                 </div>
             )}
             <div
