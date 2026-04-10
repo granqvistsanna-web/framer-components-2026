@@ -261,9 +261,18 @@ function getSegmentColor(
 
 function getSegmentGlow(
     index: number,
-    hoveredCategory: number | null
+    hoveredCategory: number | null,
+    mode: CategoryColorMode = "individual"
 ): React.CSSProperties {
-    if (hoveredCategory === null) return {}
+    if (hoveredCategory === null) {
+        // In monochrome mode, add subtle dividers between segments
+        if (mode === "monochrome") {
+            return {
+                boxShadow: `inset -1px 0 0 ${withAlpha("#ffffff", 0.2)}`,
+            }
+        }
+        return {}
+    }
     if (index === hoveredCategory) {
         return {
             filter: "brightness(1.25) saturate(1.2)",
@@ -1678,7 +1687,7 @@ export default function EarningsGoalUI(props: Props) {
                                             progressBarFillOpacity
                                         ),
                                         position: "relative",
-                                        ...getSegmentGlow(i, hoveredCategoryIndex),
+                                        ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
                                     }}
                                 />
                             )
@@ -1817,7 +1826,7 @@ export default function EarningsGoalUI(props: Props) {
                                                 ? `inset -1px 0 0 ${withAlpha("#ffffff", 0.25)}`
                                                 : undefined,
                                             position: "relative",
-                                            ...getSegmentGlow(i, hoveredCategoryIndex),
+                                            ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
                                         }}
                                     />
                                 )
@@ -2578,7 +2587,7 @@ export default function EarningsGoalUI(props: Props) {
                                                 ? `inset -1px 0 0 ${withAlpha("#ffffff", 0.25)}`
                                                 : undefined,
                                             position: "relative",
-                                            ...getSegmentGlow(i, hoveredCategoryIndex),
+                                            ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
                                         }}
                                     />
                                 )
