@@ -884,6 +884,20 @@ export default function EarningsGoalUI(props: Props) {
         ),
     })
 
+    const getCategoryRowStyle = (index: number): React.CSSProperties => {
+        const isActive = activeHoverIndex === index
+        const isLocked = lockedCategoryIndex === index
+        return {
+            cursor: "pointer",
+            transition: "all 0.15s ease",
+            backgroundColor: isActive ? withAlpha(textColor, 0.06) : "transparent",
+            boxShadow: isLocked ? `inset 3px 0 0 ${getCategoryColor(index, normalizedCategories[index], categoryColorMode, sharedCategoryColor)}` : undefined,
+            borderRadius: 6,
+            padding: "4px 8px",
+            margin: "-4px -8px",
+        }
+    }
+
     // ── Font styles ─────────────────────────────────────────────────────
 
     const fontCSS = toFontStyle(font)
@@ -1304,6 +1318,7 @@ export default function EarningsGoalUI(props: Props) {
                                     flexDirection: "column" as const,
                                     gap: 2,
                                     minWidth: 0,
+                                    ...getCategoryRowStyle(i),
                                 }}
                             >
                                 <span style={gridCategoryLabelStyle}>
@@ -1594,6 +1609,7 @@ export default function EarningsGoalUI(props: Props) {
                                         display: "flex",
                                         alignItems: "center",
                                         gap: 10,
+                                        ...getCategoryRowStyle(i),
                                     }}
                                 >
                                     <span
@@ -1885,7 +1901,8 @@ export default function EarningsGoalUI(props: Props) {
                                                 normalizedCategories.length -
                                                     1 && {
                                                 borderBottom: `1px solid ${withAlpha(textColor, 0.07)}`,
-                                            }),
+                                            ),
+                                        ...getCategoryRowStyle(i),
                                     }}
                                 >
                                     <span
@@ -2311,6 +2328,7 @@ export default function EarningsGoalUI(props: Props) {
                                         display: "flex",
                                         alignItems: "center",
                                         gap: 10,
+                                        ...getCategoryRowStyle(i),
                                     }}
                                 >
                                     <span
@@ -2650,7 +2668,8 @@ export default function EarningsGoalUI(props: Props) {
                                                 normalizedCategories.length -
                                                     1 && {
                                                 borderBottom: `1px solid ${withAlpha(textColor, 0.07)}`,
-                                            }),
+                                            ),
+                                        ...getCategoryRowStyle(i),
                                     }}
                                 >
                                     <span
