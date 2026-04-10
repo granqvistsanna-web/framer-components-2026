@@ -892,9 +892,9 @@ export default function EarningsGoalUI(props: Props) {
             transition: "all 0.15s ease",
             backgroundColor: isActive ? withAlpha(textColor, 0.06) : "transparent",
             boxShadow: isLocked ? `inset 3px 0 0 ${getCategoryColor(index, normalizedCategories[index], categoryColorMode, sharedCategoryColor)}` : undefined,
-            borderRadius: 6,
-            padding: "4px 8px",
-            margin: "-4px -8px",
+            borderRadius: 8,
+            padding: "10px 12px",
+            margin: "-6px -8px",
         }
     }
 
@@ -1280,7 +1280,7 @@ export default function EarningsGoalUI(props: Props) {
                     zIndex: 1,
                     display: "flex",
                     flexDirection: "column" as const,
-                    gap: 10,
+                    gap: 16,
                 }}
             >
                 {weeklyShowDivider && (
@@ -1298,8 +1298,8 @@ export default function EarningsGoalUI(props: Props) {
                     style={{
                         display: "grid",
                         gridTemplateColumns: "1fr 1fr",
-                        columnGap: 20,
-                        rowGap: 12,
+                        columnGap: 24,
+                        rowGap: 16,
                     }}
                 >
                     {normalizedCategories.map((cat, i) => {
@@ -1316,7 +1316,7 @@ export default function EarningsGoalUI(props: Props) {
                                 style={{
                                     display: "flex",
                                     flexDirection: "column" as const,
-                                    gap: 2,
+                                    gap: 6,
                                     minWidth: 0,
                                     ...getCategoryRowStyle(i),
                                 }}
@@ -1624,7 +1624,7 @@ export default function EarningsGoalUI(props: Props) {
                         style={{
                             display: "flex",
                             flexDirection: "column" as const,
-                            gap: 8,
+                            gap: 12,
                             marginTop:
                                 weeklyShowDivider &&
                                 normalizedCategories.length > 0
@@ -2391,7 +2391,7 @@ export default function EarningsGoalUI(props: Props) {
                         style={{
                             display: "flex",
                             flexDirection: "column" as const,
-                            gap: 8,
+                            gap: 12,
                             marginTop:
                                 weeklyShowDivider &&
                                 normalizedCategories.length > 0
