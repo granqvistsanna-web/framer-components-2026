@@ -269,7 +269,7 @@ function getSegmentColor(
 function getSegmentGlow(
     index: number,
     hoveredCategory: number | null,
-    mode: CategoryColorMode = "individual",
+    mode: CategoryColorMode,
     accentColor?: string
 ): React.CSSProperties {
     const baseTransition = "all 0.35s cubic-bezier(0.22, 1, 0.36, 1)"
@@ -1685,7 +1685,7 @@ export default function EarningsGoalUI(props: Props) {
                 </div>
 
                 {/* Divider */}
-                {weeklyShowDivider && normalizedCategories.length > 0 && (
+                {weeklyShowDivider && normalizedCategories.length > 0 && !mobileHideCategories && (
                     <div
                         aria-hidden="true"
                         style={{
@@ -1699,7 +1699,7 @@ export default function EarningsGoalUI(props: Props) {
                 )}
 
                 {/* Category breakdown */}
-                {normalizedCategories.length > 0 && (
+                {normalizedCategories.length > 0 && !mobileHideCategories && (
                     <div
                         style={{
                             display: "flex",
@@ -1722,12 +1722,10 @@ export default function EarningsGoalUI(props: Props) {
                             return (
                                 <div
                                     key={`static-line-cat-${i}`}
-                                    {...getCategoryRowHandlers(i)}
                                     style={{
                                         display: "flex",
                                         alignItems: "center",
                                         gap: 10,
-                                        ...getCategoryRowStyle(i),
                                     }}
                                 >
                                     <span
@@ -2008,7 +2006,6 @@ export default function EarningsGoalUI(props: Props) {
                             return (
                                 <div
                                     key={`static-cat-${i}`}
-                                    {...getCategoryRowHandlers(i)}
                                     style={{
                                         display: "flex",
                                         alignItems: "center",
@@ -2025,7 +2022,6 @@ export default function EarningsGoalUI(props: Props) {
                                                     1 && {
                                                 borderBottom: `1px solid ${withAlpha(textColor, 0.07)}`,
                                             }),
-                                        ...getCategoryRowStyle(i),
                                     }}
                                 >
                                     <span
@@ -2455,6 +2451,7 @@ export default function EarningsGoalUI(props: Props) {
                 {/* Divider */}
                 {weeklyShowDivider &&
                     normalizedCategories.length > 0 &&
+                    !mobileHideCategories &&
                     wrapMotion(
                         <div
                             aria-hidden="true"
@@ -2471,7 +2468,7 @@ export default function EarningsGoalUI(props: Props) {
                     )}
 
                 {/* Category breakdown */}
-                {normalizedCategories.length > 0 && (
+                {normalizedCategories.length > 0 && !mobileHideCategories && (
                     <div
                         style={{
                             display: "flex",
@@ -2558,7 +2555,12 @@ export default function EarningsGoalUI(props: Props) {
 
     const weeklyDelta = resolvedEarnings - weekStartValue
     const showWeeklyDelta = weekStartValue > 0 && weeklyDelta > 0
-    const displayDelta = displayEarnings - weekStartValue
+    // Scale the delta to the same count-up progress as displayEarnings so it
+    // grows from 0 → weeklyDelta in sync, instead of flashing "+$0" while
+    // displayEarnings is still below weekStartValue.
+    const animationProgress =
+        resolvedEarnings > 0 ? displayEarnings / resolvedEarnings : 1
+    const displayDelta = weeklyDelta * animationProgress
 
     const weeklyContent = (
         <>
