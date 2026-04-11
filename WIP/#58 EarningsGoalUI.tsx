@@ -96,9 +96,15 @@ interface Props {
     labelGap: number
     // Layout
     padding: { x: number; y: number }
+    mobilePadding: { x: number; y: number }
     borderRadius: number
     gap: number
+    mobileGap: number
     alignment: Alignment
+    // Mobile
+    mobileLayout: "auto" | "stack" | "compact"
+    mobileHideCategories: boolean
+    mobileSimplifyChart: boolean
     // Animation
     animationTrigger: AnimationTrigger
     animationDuration: number
@@ -263,25 +269,37 @@ function getSegmentColor(
 function getSegmentGlow(
     index: number,
     hoveredCategory: number | null,
-    mode: CategoryColorMode = "individual"
+    mode: CategoryColorMode = "individual",
+    accentColor?: string
 ): React.CSSProperties {
+    const baseTransition = "all 0.35s cubic-bezier(0.22, 1, 0.36, 1)"
+    
     if (hoveredCategory === null) {
         // In monochrome mode, add subtle dividers between segments
         if (mode === "monochrome") {
             return {
                 boxShadow: `inset -1px 0 0 ${withAlpha("#ffffff", 0.2)}`,
+                transition: baseTransition,
             }
         }
-        return {}
+        return { transition: baseTransition }
     }
     if (index === hoveredCategory) {
         return {
-            filter: "brightness(1.25) saturate(1.2)",
-            boxShadow: "0 0 12px 2px rgba(255,255,255,0.35), inset 0 0 0 1px rgba(255,255,255,0.5)",
+            filter: "brightness(1.2) saturate(1.15)",
+            boxShadow: accentColor 
+                ? `0 0 16px 3px ${withAlpha(accentColor, 0.4)}, inset 0 0 0 1px ${withAlpha("#ffffff", 0.6)}`
+                : "0 0 16px 3px rgba(255,255,255,0.3), inset 0 0 0 1px rgba(255,255,255,0.5)",
             zIndex: 10,
+            transform: "scale(1.02)",
+            transition: baseTransition,
         }
     }
-    return { opacity: 0.35 }
+    return { 
+        opacity: 0.4,
+        filter: "saturate(0.7)",
+        transition: baseTransition,
+    }
 }
 
 // Parse a date string as UTC midnight so timezone differences don't shift
@@ -394,22 +412,25 @@ function ProgressBar({
                     overflow: "hidden",
                 }}
             >
-                <motion.div
-                    animate={{ x: ["-100%", "200%"] }}
-                    transition={{
-                        duration: 2.5,
-                        ease: "linear",
-                        repeat: Infinity,
-                        repeatDelay: 3,
-                        delay: durationSec,
-                    }}
-                    style={{
-                        position: "absolute",
-                        inset: 0,
-                        background: `linear-gradient(90deg, transparent, ${withAlpha("#ffffff", 0.15)}, transparent)`,
-                        width: "40%",
-                    }}
-                />
+                {inView && (
+                    <motion.div
+                        initial={{ x: "-100%" }}
+                        animate={{ x: "200%" }}
+                        transition={{
+                            duration: 2.5,
+                            ease: "linear",
+                            repeat: Infinity,
+                            repeatDelay: 3,
+                            delay: durationSec,
+                        }}
+                        style={{
+                            position: "absolute",
+                            inset: 0,
+                            background: `linear-gradient(90deg, transparent, ${withAlpha("#ffffff", 0.15)}, transparent)`,
+                            width: "40%",
+                        }}
+                    />
+                )}
             </motion.div>
             {children && (
                 <div
@@ -453,71 +474,98 @@ function ProgressTrajectory({
     const padB = 4
     const gradId = React.useId()
 
-    const pct = Math.max(0, Math.min(target, 100)) / 100
-    const chartW = w - padL - padR
-    const chartH = h - padT - padB
+    // Memoize expensive path calculations
+    const pathData = React.useMemo(() => {
+        const pct = Math.max(0, Math.min(target, 100)) / 100
+        const chartW = w - padL - padR
+        const chartH = h - padT - padB
 
-    const goalY = padT
-    const bottomY = h - padB
+        const goalY = padT
+        const bottomY = h - padB
 
-    // Current data point sits at 72% of the chart width so there is
-    // room to the right to visualize the remaining path to goal.
-    const currentX = padL + chartW * 0.72
-    const currentY = bottomY - chartH * pct
+        // Current data point sits at 72% of the chart width
+        const currentX = padL + chartW * 0.72
+        const currentY = bottomY - chartH * pct
 
-    // Generate a plausible, slightly noisy ascending curve from (0,0)
-    // to the current data point.
-    const steps = 48
-    const points: [number, number][] = []
-    for (let i = 0; i <= steps; i++) {
-        const t = i / steps
-        const x = padL + t * (currentX - padL)
-        const base = 1 - Math.pow(1 - t, 2.2)
-        const wobble =
-            Math.sin(t * Math.PI * 3.1) * 0.035 * (1 - t * 0.5) +
-            Math.sin(t * Math.PI * 6.8) * 0.018 * (1 - t * 0.4) -
-            Math.cos(t * Math.PI * 2.2) * 0.02 * (1 - t * 0.6)
-        const frac = Math.max(0, Math.min(1, base + wobble)) * pct
-        const y = bottomY - frac * chartH
-        points.push([x, y])
-    }
+        // Generate noisy ascending curve
+        const steps = 48
+        const points: [number, number][] = []
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps
+            const x = padL + t * (currentX - padL)
+            const base = 1 - Math.pow(1 - t, 2.2)
+            const wobble =
+                Math.sin(t * Math.PI * 3.1) * 0.035 * (1 - t * 0.5) +
+                Math.sin(t * Math.PI * 6.8) * 0.018 * (1 - t * 0.4) -
+                Math.cos(t * Math.PI * 2.2) * 0.02 * (1 - t * 0.6)
+            const frac = Math.max(0, Math.min(1, base + wobble)) * pct
+            const y = bottomY - frac * chartH
+            points.push([x, y])
+        }
 
-    // Build a smooth Catmull-Rom-style Bezier path through the points.
-    let linePath = `M ${points[0][0]} ${points[0][1]}`
-    const tension = 0.22
-    for (let i = 0; i < points.length - 1; i++) {
-        const p0 = points[i - 1] || points[i]
-        const p1 = points[i]
-        const p2 = points[i + 1]
-        const p3 = points[i + 2] || p2
-        const cp1x = p1[0] + (p2[0] - p0[0]) * tension
-        const cp1y = p1[1] + (p2[1] - p0[1]) * tension
-        const cp2x = p2[0] - (p3[0] - p1[0]) * tension
-        const cp2y = p2[1] - (p3[1] - p1[1]) * tension
-        linePath += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2[0]} ${p2[1]}`
-    }
+        // Build Catmull-Rom-style Bezier path
+        let linePath = `M ${points[0][0]} ${points[0][1]}`
+        const tension = 0.22
+        for (let i = 0; i < points.length - 1; i++) {
+            const p0 = points[i - 1] || points[i]
+            const p1 = points[i]
+            const p2 = points[i + 1]
+            const p3 = points[i + 2] || p2
+            const cp1x = p1[0] + (p2[0] - p0[0]) * tension
+            const cp1y = p1[1] + (p2[1] - p0[1]) * tension
+            const cp2x = p2[0] - (p3[0] - p1[0]) * tension
+            const cp2y = p2[1] - (p3[1] - p1[1]) * tension
+            linePath += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2[0]} ${p2[1]}`
+        }
 
-    const areaPath =
-        linePath + ` L ${currentX} ${bottomY} L ${padL} ${bottomY} Z`
+        const areaPath = linePath + ` L ${currentX} ${bottomY} L ${padL} ${bottomY} Z`
 
-    // Approximate arc length from segment lengths (good enough for
-    // stroke-draw animation timing).
-    let totalLength = 0
-    for (let i = 1; i < points.length; i++) {
-        const dx = points[i][0] - points[i - 1][0]
-        const dy = points[i][1] - points[i - 1][1]
-        totalLength += Math.sqrt(dx * dx + dy * dy)
-    }
+        // Approximate arc length
+        let totalLength = 0
+        for (let i = 1; i < points.length; i++) {
+            const dx = points[i][0] - points[i - 1][0]
+            const dy = points[i][1] - points[i - 1][1]
+            totalLength += Math.sqrt(dx * dx + dy * dy)
+        }
 
-    // Dashed projection curve from current point up to the goal line.
-    const projEndX = padL + chartW
-    const projEndY = goalY
-    const projCpX = (currentX + projEndX) / 2
-    const projCpY = currentY - (currentY - projEndY) * 0.45
-    const projPath = `M ${currentX} ${currentY} Q ${projCpX} ${projCpY}, ${projEndX} ${projEndY}`
+        // Dashed projection curve
+        const projEndX = padL + chartW
+        const projEndY = goalY
+        const projCpX = (currentX + projEndX) / 2
+        const projCpY = currentY - (currentY - projEndY) * 0.45
+        const projPath = `M ${currentX} ${currentY} Q ${projCpX} ${projCpY}, ${projEndX} ${projEndY}`
 
-    // Convert SVG x-coords to container percentages for overlay dots
-    // (HTML elements stay circular regardless of preserveAspectRatio="none").
+        return {
+            linePath,
+            areaPath,
+            totalLength,
+            projPath,
+            currentX,
+            currentY,
+            projEndX,
+            projEndY,
+            chartW,
+            chartH,
+            goalY,
+            bottomY,
+        }
+    }, [target, height])
+
+    const {
+        linePath,
+        areaPath,
+        totalLength,
+        projPath,
+        currentX,
+        currentY,
+        projEndX,
+        projEndY,
+        chartW,
+        chartH,
+        goalY,
+        bottomY,
+    } = pathData
+
     const currentLeftPct = (currentX / w) * 100
     const goalLeftPct = (projEndX / w) * 100
 
@@ -775,7 +823,11 @@ export default function EarningsGoalUI(props: Props) {
         labelGap = 4,
         borderRadius = 20,
         gap = 16,
+        mobileGap = 12,
         alignment = "left",
+        mobileLayout = "auto",
+        mobileHideCategories = false,
+        mobileSimplifyChart = true,
         animationTrigger = "onLoad",
         animationDuration = 1000,
         style: externalStyle,
@@ -789,6 +841,10 @@ export default function EarningsGoalUI(props: Props) {
         percentage: percentageColor = "",
     } = props.colors ?? {}
     const { x: paddingX = 24, y: paddingY = 24 } = props.padding ?? {}
+    const {
+        x: mobilePaddingX = 16,
+        y: mobilePaddingY = 16,
+    } = props.mobilePadding ?? {}
     const {
         show: showBorder = false,
         color: borderColor = "",
@@ -805,33 +861,64 @@ export default function EarningsGoalUI(props: Props) {
 
     const isLiquid = glassEnabled && glassStyle === "liquid"
 
+    // Mobile detection - SSR-safe with media query
+    const [isMobile, setIsMobile] = React.useState(false)
+    React.useEffect(() => {
+        if (typeof window === "undefined") return
+        const mq = window.matchMedia("(max-width: 479px)")
+        const checkMobile = () => setIsMobile(mq.matches)
+        checkMobile()
+        mq.addEventListener("change", checkMobile)
+        return () => mq.removeEventListener("change", checkMobile)
+    }, [])
+
+    // Apply mobile layout settings
+    const effectiveMobileLayout = mobileLayout === "auto" ? (isMobile ? "stack" : "auto") : mobileLayout
+
+    // Responsive values
+    const responsivePaddingX = isMobile ? mobilePaddingX : paddingX
+    const responsivePaddingY = isMobile ? mobilePaddingY : paddingY
+    const responsiveGap = isMobile ? mobileGap : gap
+    const responsiveBarHeight = isMobile ? Math.min(progressBarHeight, 32) : progressBarHeight
+    const responsiveLineHeight = isMobile && mobileSimplifyChart ? Math.min(lineChartHeight, 56) : lineChartHeight
+
     const isStatic = useIsStaticRenderer()
     const reducedMotion = useReducedMotion()
     const ref = useRef<HTMLDivElement>(null)
     const inView = useInView(ref, { once: true })
-    const [hoveredCategoryIndex, setHoveredCategoryIndex] = useState<
-        number | null
-    >(null)
-    const [lockedCategoryIndex, setLockedCategoryIndex] = useState<
-        number | null
-    >(null)
+    const [hoveredCategoryIndex, setHoveredCategoryIndex] = useState<number | null>(null)
+    const [lockedCategoryIndex, setLockedCategoryIndex] = useState<number | null>(null)
     
     const activeHoverIndex = lockedCategoryIndex ?? hoveredCategoryIndex
 
-    const categoryValues = sanitizeCategories(categories)
-    const categoryTotal = sumCategoryValues(categoryValues)
-    const resolvedEarnings =
-        categoryValues.length > 0 ? categoryTotal : Math.max(0, earnings)
-    const percentage = goal > 0 ? (resolvedEarnings / goal) * 100 : 0
-    const resolvedTrackColor =
-        progressTrackColor || withAlpha(textColor, 0.08)
-    const resolvedBorderColor = borderColor || withAlpha(textColor, 0.06)
+    // Memoized category processing
+    const categoryValues = React.useMemo(() => sanitizeCategories(categories), [categories])
+    const categoryTotal = React.useMemo(() => sumCategoryValues(categoryValues), [categoryValues])
+    const resolvedEarnings = React.useMemo(() =>
+        categoryValues.length > 0 ? categoryTotal : Math.max(0, earnings),
+        [categoryValues, categoryTotal, earnings]
+    )
+    const percentage = React.useMemo(() =>
+        goal > 0 ? (resolvedEarnings / goal) * 100 : 0,
+        [resolvedEarnings, goal]
+    )
+    const resolvedTrackColor = React.useMemo(() =>
+        progressTrackColor || withAlpha(textColor, 0.08),
+        [progressTrackColor, textColor]
+    )
+    const resolvedBorderColor = React.useMemo(() =>
+        borderColor || withAlpha(textColor, 0.06),
+        [borderColor, textColor]
+    )
 
-    const computedWeekLabel = autoWeek
-        ? computeWeekLabel(challengeStart, challengeEnd, dateOverride)
-        : ""
-    const resolvedWeekLabel =
-        autoWeek && computedWeekLabel ? computedWeekLabel : eyebrow
+    const computedWeekLabel = React.useMemo(() =>
+        autoWeek ? computeWeekLabel(challengeStart, challengeEnd, dateOverride) : "",
+        [autoWeek, challengeStart, challengeEnd, dateOverride]
+    )
+    const resolvedWeekLabel = React.useMemo(() =>
+        autoWeek && computedWeekLabel ? computedWeekLabel : eyebrow,
+        [autoWeek, computedWeekLabel, eyebrow]
+    )
 
     const noAnimation = animationTrigger === "none"
     const skipAnimation = isStatic || reducedMotion || noAnimation
@@ -842,79 +929,72 @@ export default function EarningsGoalUI(props: Props) {
 
     const ease = [0.22, 1, 0.36, 1] as const
     const textAlign = alignment as React.CSSProperties["textAlign"]
-    const alignItems =
-        alignment === "center"
-            ? "center"
-            : alignment === "right"
-              ? "flex-end"
-              : "flex-start"
-    const pctJustify =
-        percentageAlign === "left"
-            ? "flex-start"
-            : percentageAlign === "right"
-              ? "flex-end"
-              : "center"
+    const alignItems = React.useMemo(() =>
+        alignment === "center" ? "center" : alignment === "right" ? "flex-end" : "flex-start",
+        [alignment]
+    )
+    const pctJustify = React.useMemo(() =>
+        percentageAlign === "left" ? "flex-start" : percentageAlign === "right" ? "flex-end" : "center",
+        [percentageAlign]
+    )
 
-    const displayEarnings = useCountUp(
-        resolvedEarnings,
-        animationDuration,
-        shouldAnimate,
-        willAnimate
-    )
-    const displayPercentage = useCountUp(
-        percentage,
-        animationDuration,
-        shouldAnimate,
-        willAnimate
-    )
+    const displayEarnings = useCountUp(resolvedEarnings, animationDuration, shouldAnimate, willAnimate)
+    const displayPercentage = useCountUp(percentage, animationDuration, shouldAnimate, willAnimate)
     const normalizedCategories = categoryValues
-    const activeCategoryIndex = Math.min(
-        Math.max(0, Math.floor(highlightedCategory) - 1),
-        Math.max(0, normalizedCategories.length - 1)
+    const activeCategoryIndex = React.useMemo(() =>
+        Math.min(Math.max(0, Math.floor(highlightedCategory) - 1), Math.max(0, normalizedCategories.length - 1)),
+        [highlightedCategory, normalizedCategories.length]
     )
-    const showCategoryLegend =
-        showCategoryAccents && categoryColorMode !== "monochrome"
-    const getCategoryRowHandlers = (index: number) => ({
-        onMouseEnter: () => setHoveredCategoryIndex(index),
-        onMouseLeave: () => setHoveredCategoryIndex((current) =>
-            current === index ? null : current
-        ),
-        onClick: () => setLockedCategoryIndex((current) =>
-            current === index ? null : index
-        ),
-    })
+    const showCategoryLegend = React.useMemo(() =>
+        showCategoryAccents && categoryColorMode !== "monochrome",
+        [showCategoryAccents, categoryColorMode]
+    )
 
-    const getCategoryRowStyle = (index: number): React.CSSProperties => {
+    // Memoized event handlers
+    const getCategoryRowHandlers = React.useCallback((index: number) => ({
+        onMouseEnter: () => setHoveredCategoryIndex(index),
+        onMouseLeave: () => setHoveredCategoryIndex(current => current === index ? null : current),
+        onClick: () => setLockedCategoryIndex(current => current === index ? null : index),
+    }), [])
+
+    const getCategoryRowStyle = React.useCallback((index: number): React.CSSProperties => {
         const isActive = activeHoverIndex === index
         const isLocked = lockedCategoryIndex === index
+        const category = normalizedCategories[index]
         return {
             cursor: "pointer",
-            transition: "all 0.15s ease",
+            transition: "all 0.2s cubic-bezier(0.22, 1, 0.36, 1)",
             backgroundColor: isActive ? withAlpha(textColor, 0.06) : "transparent",
-            boxShadow: isLocked ? `inset 3px 0 0 ${getCategoryColor(index, normalizedCategories[index], categoryColorMode, sharedCategoryColor)}` : undefined,
-            borderRadius: 8,
-            padding: "10px 12px",
-            margin: "-6px -8px",
+            boxShadow: isLocked && category 
+                ? `inset 3px 0 0 ${getCategoryColor(index, category, categoryColorMode, sharedCategoryColor)}` 
+                : undefined,
+            borderRadius: 6,
+            padding: "6px 0",
+            margin: "-2px 0",
         }
-    }
+    }, [activeHoverIndex, lockedCategoryIndex, normalizedCategories, categoryColorMode, sharedCategoryColor, textColor])
 
     // ── Font styles ─────────────────────────────────────────────────────
 
-    const fontCSS = toFontStyle(font)
-    const labelFontCSS = toFontStyle(labelFont)
+    const fontCSS = React.useMemo(() => toFontStyle(font), [font])
+    const labelFontCSS = React.useMemo(() => {
+        const { fontSize: _labelFontSize, ...rest } = toFontStyle(labelFont)
+        return rest
+    }, [labelFont])
 
-    const valueStyle: React.CSSProperties = {
-        fontSize: "2em",
-        fontWeight: 700,
+    const valueStyle: React.CSSProperties = React.useMemo(() => ({
+        ...fontCSS,
+        fontSize: isMobile ? "1.6em" : "2em",
+        fontWeight: fontCSS.fontWeight ?? 700,
         color: textColor,
-        lineHeight: 1.1,
+        lineHeight: fontCSS.lineHeight ?? 1.15,
         margin: 0,
         fontVariantNumeric: "tabular-nums",
         textAlign,
-        ...fontCSS,
-    }
+        wordBreak: "break-word",
+    }), [isMobile, textColor, textAlign, fontCSS])
 
-    const percentStyle: React.CSSProperties = {
+    const percentStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.9em",
         fontWeight: 600,
         color: percentageColor || accentColor,
@@ -922,9 +1002,9 @@ export default function EarningsGoalUI(props: Props) {
         margin: 0,
         fontVariantNumeric: "tabular-nums",
         ...labelFontCSS,
-    }
+    }), [percentageColor, accentColor, labelFontCSS])
 
-    const labelStyle: React.CSSProperties = {
+    const labelStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.75em",
         fontWeight: 500,
         color: textColor,
@@ -933,9 +1013,9 @@ export default function EarningsGoalUI(props: Props) {
         margin: 0,
         textAlign,
         ...labelFontCSS,
-    }
+    }), [textColor, labelOpacity, textAlign, labelFontCSS])
 
-    const goalStyle: React.CSSProperties = {
+    const goalStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.75em",
         fontWeight: 400,
         color: textColor,
@@ -944,11 +1024,11 @@ export default function EarningsGoalUI(props: Props) {
         margin: 0,
         fontVariantNumeric: "tabular-nums",
         ...labelFontCSS,
-    }
+    }), [textColor, labelOpacity, labelFontCSS])
 
     // ── Weekly variant text styles ──────────────────────────────────────
 
-    const weeklyEyebrowStyle: React.CSSProperties = {
+    const weeklyEyebrowStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.62em",
         fontWeight: 600,
         color: textColor,
@@ -958,9 +1038,9 @@ export default function EarningsGoalUI(props: Props) {
         letterSpacing: "0.16em",
         textTransform: "uppercase",
         ...labelFontCSS,
-    }
+    }), [textColor, labelFontCSS])
 
-    const weeklyMetaStyle: React.CSSProperties = {
+    const weeklyMetaStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.66em",
         fontWeight: 500,
         color: textColor,
@@ -970,20 +1050,21 @@ export default function EarningsGoalUI(props: Props) {
         fontVariantNumeric: "tabular-nums",
         letterSpacing: "0.01em",
         ...labelFontCSS,
-    }
+    }), [textColor, labelFontCSS])
 
-    const weeklyValueStyle: React.CSSProperties = {
-        fontSize: "3.1em",
-        fontWeight: 700,
-        color: textColor,
-        lineHeight: 0.9,
-        margin: 0,
-        letterSpacing: "-0.04em",
-        fontVariantNumeric: "tabular-nums",
+    const weeklyValueStyle: React.CSSProperties = React.useMemo(() => ({
         ...fontCSS,
-    }
+        fontSize: isMobile ? "2.2em" : "3.1em",
+        fontWeight: fontCSS.fontWeight ?? 700,
+        color: textColor,
+        lineHeight: isMobile ? 1 : (fontCSS.lineHeight ?? 0.9),
+        margin: 0,
+        letterSpacing: fontCSS.letterSpacing ?? "-0.04em",
+        fontVariantNumeric: "tabular-nums",
+        wordBreak: "break-word",
+    }), [isMobile, textColor, fontCSS])
 
-    const weeklyGoalLineStyle: React.CSSProperties = {
+    const weeklyGoalLineStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.72em",
         fontWeight: 500,
         color: textColor,
@@ -992,9 +1073,9 @@ export default function EarningsGoalUI(props: Props) {
         margin: 0,
         fontVariantNumeric: "tabular-nums",
         ...labelFontCSS,
-    }
+    }), [textColor, labelFontCSS])
 
-    const weeklyDeltaStyle: React.CSSProperties = {
+    const weeklyDeltaStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.7em",
         fontWeight: 600,
         color: textColor,
@@ -1004,9 +1085,9 @@ export default function EarningsGoalUI(props: Props) {
         fontVariantNumeric: "tabular-nums",
         letterSpacing: "-0.005em",
         ...labelFontCSS,
-    }
+    }), [textColor, labelFontCSS])
 
-    const weeklyCategoryLabelStyle: React.CSSProperties = {
+    const weeklyCategoryLabelStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.7em",
         fontWeight: 500,
         color: textColor,
@@ -1015,9 +1096,9 @@ export default function EarningsGoalUI(props: Props) {
         margin: 0,
         whiteSpace: "nowrap",
         ...labelFontCSS,
-    }
+    }), [textColor, labelFontCSS])
 
-    const weeklyCategoryValueStyle: React.CSSProperties = {
+    const weeklyCategoryValueStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.7em",
         fontWeight: 600,
         color: textColor,
@@ -1027,9 +1108,9 @@ export default function EarningsGoalUI(props: Props) {
         fontVariantNumeric: "tabular-nums",
         whiteSpace: "nowrap",
         ...labelFontCSS,
-    }
+    }), [textColor, labelFontCSS])
 
-    const weeklyCategoryPercentStyle: React.CSSProperties = {
+    const weeklyCategoryPercentStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.6em",
         fontWeight: 500,
         color: textColor,
@@ -1040,11 +1121,11 @@ export default function EarningsGoalUI(props: Props) {
         whiteSpace: "nowrap",
         letterSpacing: "0.01em",
         ...labelFontCSS,
-    }
+    }), [textColor, labelFontCSS])
 
     // ── Trajectory (line) variant text styles ───────────────────────────
 
-    const lineEyebrowStyle: React.CSSProperties = {
+    const lineEyebrowStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.68em",
         fontWeight: 600,
         color: textColor,
@@ -1054,20 +1135,21 @@ export default function EarningsGoalUI(props: Props) {
         letterSpacing: "0.09em",
         textTransform: "uppercase",
         ...labelFontCSS,
-    }
+    }), [textColor, labelFontCSS])
 
-    const lineHeroValueStyle: React.CSSProperties = {
-        fontSize: "2.6em",
-        fontWeight: 700,
-        color: textColor,
-        lineHeight: 0.95,
-        margin: 0,
-        letterSpacing: "-0.035em",
-        fontVariantNumeric: "tabular-nums",
+    const lineHeroValueStyle: React.CSSProperties = React.useMemo(() => ({
         ...fontCSS,
-    }
+        fontSize: isMobile ? "2em" : "2.6em",
+        fontWeight: fontCSS.fontWeight ?? 700,
+        color: textColor,
+        lineHeight: isMobile ? 1.1 : (fontCSS.lineHeight ?? 0.95),
+        margin: 0,
+        letterSpacing: fontCSS.letterSpacing ?? "-0.035em",
+        fontVariantNumeric: "tabular-nums",
+        wordBreak: "break-word",
+    }), [isMobile, textColor, fontCSS])
 
-    const lineHeroPercentStyle: React.CSSProperties = {
+    const lineHeroPercentStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.85em",
         fontWeight: 600,
         color: accentColor,
@@ -1076,9 +1158,9 @@ export default function EarningsGoalUI(props: Props) {
         letterSpacing: "-0.01em",
         fontVariantNumeric: "tabular-nums",
         ...labelFontCSS,
-    }
+    }), [accentColor, labelFontCSS])
 
-    const lineHeroSubStyle: React.CSSProperties = {
+    const lineHeroSubStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.72em",
         fontWeight: 500,
         color: textColor,
@@ -1087,20 +1169,20 @@ export default function EarningsGoalUI(props: Props) {
         margin: 0,
         fontVariantNumeric: "tabular-nums",
         ...labelFontCSS,
-    }
+    }), [textColor, labelFontCSS])
 
     // ── Card style ──────────────────────────────────────────────────────
 
-    const innerRadius = borderRadius - (showBorder ? borderWidth : 0)
+    const innerRadius = React.useMemo(() => Math.max(0, borderRadius - (showBorder ? borderWidth : 0)), [borderRadius, showBorder, borderWidth])
 
-    const cardStyle: React.CSSProperties = {
+    const cardStyle: React.CSSProperties = React.useMemo(() => ({
         display: "flex",
         flexDirection: "column",
         fontFamily: FONT_STACK,
         width: "100%",
         height: "100%",
-        padding: `${paddingY}px ${paddingX}px`,
-        gap,
+        padding: `${responsivePaddingY}px ${responsivePaddingX}px`,
+        gap: responsiveGap,
         borderRadius,
         backgroundColor: glassEnabled
             ? withAlpha(backgroundColor, isLiquid ? glassOpacity * 0.5 : glassOpacity)
@@ -1108,33 +1190,28 @@ export default function EarningsGoalUI(props: Props) {
         boxSizing: "border-box",
         overflow: "hidden",
         position: "relative",
+        minWidth: 280,
+        willChange: shouldAnimate ? "transform" : undefined,
+        backfaceVisibility: "hidden" as const,
         ...(showBorder && {
             border: `${borderWidth}px solid ${resolvedBorderColor}`,
         }),
         ...(glassEnabled && !isLiquid && {
             backdropFilter: `blur(${glassBlur}px) saturate(1.4)`,
             WebkitBackdropFilter: `blur(${glassBlur}px) saturate(1.4)`,
-            boxShadow: `
-                0 8px 32px rgba(0, 0, 0, 0.12),
-                0 2px 8px rgba(0, 0, 0, 0.08)
-            `,
+            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08)",
         }),
         ...(isLiquid && {
             backdropFilter: `blur(${glassBlur * 1.5}px) saturate(1.8) brightness(1.05)`,
             WebkitBackdropFilter: `blur(${glassBlur * 1.5}px) saturate(1.8) brightness(1.05)`,
-            boxShadow: `
-                0 0 0 0.5px ${withAlpha("#ffffff", 0.15)},
-                0 8px 40px rgba(0, 0, 0, 0.15),
-                0 2px 12px rgba(0, 0, 0, 0.1),
-                inset 0 1px 0 0 ${withAlpha("#ffffff", 0.2)}
-            `,
+            boxShadow: `0 0 0 0.5px ${withAlpha("#ffffff", 0.15)}, 0 8px 40px rgba(0, 0, 0, 0.15), 0 2px 12px rgba(0, 0, 0, 0.1), inset 0 1px 0 0 ${withAlpha("#ffffff", 0.2)}`,
         }),
         ...externalStyle,
-    }
+    }), [responsivePaddingY, responsivePaddingX, responsiveGap, borderRadius, glassEnabled, backgroundColor, isLiquid, glassOpacity, showBorder, borderWidth, resolvedBorderColor, glassBlur, externalStyle, shouldAnimate])
 
     // ── Glass overlay ───────────────────────────────────────────────────
 
-    const glassOverlay = glassEnabled ? (
+    const glassOverlay = React.useMemo(() => glassEnabled ? (
         isLiquid ? (
             <>
                 {/* Liquid: specular top edge */}
@@ -1165,10 +1242,7 @@ export default function EarningsGoalUI(props: Props) {
                         position: "absolute",
                         inset: 0,
                         borderRadius: innerRadius,
-                        boxShadow: `
-                            inset 0 1px 0 0 ${withAlpha("#ffffff", glassHighlight * 3)},
-                            inset 0 -0.5px 0 0 ${withAlpha("#ffffff", glassHighlight)}
-                        `,
+                        boxShadow: `inset 0 1px 0 0 ${withAlpha("#ffffff", glassHighlight * 3)}, inset 0 -0.5px 0 0 ${withAlpha("#ffffff", glassHighlight)}`,
                         pointerEvents: "none",
                         zIndex: 0,
                     }}
@@ -1240,7 +1314,7 @@ export default function EarningsGoalUI(props: Props) {
                 )}
             </>
         )
-    ) : null
+    ) : null, [glassEnabled, isLiquid, innerRadius, glassHighlight, accentColor, glassNoise])
 
     // ── Bar-variant week eyebrow + category ledger (shared) ────────────
 
@@ -1249,7 +1323,7 @@ export default function EarningsGoalUI(props: Props) {
             <p style={weeklyEyebrowStyle}>{eyebrow}</p>
         ) : null
 
-    const gridCategoryLabelStyle: React.CSSProperties = {
+    const gridCategoryLabelStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "0.82em",
         fontWeight: 500,
         color: textColor,
@@ -1260,9 +1334,9 @@ export default function EarningsGoalUI(props: Props) {
         overflow: "hidden",
         textOverflow: "ellipsis",
         ...labelFontCSS,
-    }
+    }), [textColor, labelFontCSS])
 
-    const gridCategoryValueStyle: React.CSSProperties = {
+    const gridCategoryValueStyle: React.CSSProperties = React.useMemo(() => ({
         fontSize: "1.15em",
         fontWeight: 600,
         lineHeight: 1.15,
@@ -1270,17 +1344,17 @@ export default function EarningsGoalUI(props: Props) {
         fontVariantNumeric: "tabular-nums",
         whiteSpace: "nowrap",
         ...labelFontCSS,
-    }
+    }), [labelFontCSS])
 
     const barCategoriesBlock =
-        progressShape === "bar" && normalizedCategories.length > 0 ? (
+        progressShape === "bar" && normalizedCategories.length > 0 && !mobileHideCategories ? (
             <div
                 style={{
                     position: "relative",
                     zIndex: 1,
                     display: "flex",
                     flexDirection: "column" as const,
-                    gap: 16,
+                    gap: 10,
                 }}
             >
                 {weeklyShowDivider && (
@@ -1297,9 +1371,9 @@ export default function EarningsGoalUI(props: Props) {
                 <div
                     style={{
                         display: "grid",
-                        gridTemplateColumns: "1fr 1fr",
-                        columnGap: 24,
-                        rowGap: 16,
+                        gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                        columnGap: 16,
+                        rowGap: isMobile ? 4 : 8,
                     }}
                 >
                     {normalizedCategories.map((cat, i) => {
@@ -1315,13 +1389,18 @@ export default function EarningsGoalUI(props: Props) {
                                 {...getCategoryRowHandlers(i)}
                                 style={{
                                     display: "flex",
-                                    flexDirection: "column" as const,
-                                    gap: 6,
+                                    flexDirection: isMobile ? "row" as const : "column" as const,
+                                    gap: isMobile ? 8 : 3,
                                     minWidth: 0,
+                                    justifyContent: isMobile ? "space-between" : undefined,
+                                    alignItems: isMobile ? "center" : undefined,
                                     ...getCategoryRowStyle(i),
                                 }}
                             >
-                                <span style={gridCategoryLabelStyle}>
+                                <span style={{
+                                    ...gridCategoryLabelStyle,
+                                    fontSize: isMobile ? "0.75em" : "0.82em",
+                                }}>
                                     {cat.label}
                                 </span>
                                 <span
@@ -1330,6 +1409,7 @@ export default function EarningsGoalUI(props: Props) {
                                         color: showCategoryLegend
                                             ? color
                                             : textColor,
+                                        fontSize: isMobile ? "1em" : "1.15em",
                                     }}
                                 >
                                     {formatValue(
@@ -1375,7 +1455,6 @@ export default function EarningsGoalUI(props: Props) {
                                       )
                                     : 0
                             if (w === 0) return null
-                            const isDimmed = activeHoverIndex !== null && activeHoverIndex !== i
                             const color = getSegmentColor(
                                 i,
                                 cat,
@@ -1384,15 +1463,16 @@ export default function EarningsGoalUI(props: Props) {
                                 activeCategoryIndex,
                                 activeHoverIndex
                             )
-                            // When hovering, color already has correct alpha; otherwise apply fill opacity
-                            const bgColor = isDimmed ? color : withAlpha(color, progressBarFillOpacity)
                             return (
                                 <div
                                     key={`static-bar-fill-seg-${i}`}
                                     style={{
                                         width: `${w}%`,
                                         height: "100%",
-                                        backgroundColor: bgColor,
+                                        backgroundColor: withAlpha(
+                                            color,
+                                            progressBarFillOpacity
+                                        ),
                                         position: "relative",
                                         ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
                                     }}
@@ -1489,7 +1569,7 @@ export default function EarningsGoalUI(props: Props) {
                         style={{
                             position: "relative",
                             width: "100%",
-                            height: progressBarHeight,
+                            height: responsiveBarHeight,
                             borderRadius: progressBarRadius,
                             backgroundColor: resolvedTrackColor,
                             overflow: "hidden",
@@ -1517,7 +1597,7 @@ export default function EarningsGoalUI(props: Props) {
                             <p
                                 style={{
                                     ...percentStyle,
-                                    fontSize: `${Math.max(progressBarHeight * 0.55, 10)}px`,
+                                    fontSize: `${Math.max(responsiveBarHeight * 0.55, isMobile ? 12 : 10)}px`,
                                 }}
                             >
                                 {percentage.toFixed(1)}%
@@ -1551,7 +1631,7 @@ export default function EarningsGoalUI(props: Props) {
                         display: "flex",
                         flexDirection: "column" as const,
                         gap: 4,
-                        marginTop: 6,
+                        marginTop: 2,
                     }}
                 >
                     <div
@@ -1600,7 +1680,7 @@ export default function EarningsGoalUI(props: Props) {
                         durationSec={0}
                         color={accentColor}
                         trackColor={resolvedTrackColor}
-                        height={lineChartHeight}
+                        height={responsiveLineHeight}
                     />
                 </div>
 
@@ -1624,7 +1704,7 @@ export default function EarningsGoalUI(props: Props) {
                         style={{
                             display: "flex",
                             flexDirection: "column" as const,
-                            gap: 12,
+                            gap: 2,
                             marginTop:
                                 weeklyShowDivider &&
                                 normalizedCategories.length > 0
@@ -1723,7 +1803,6 @@ export default function EarningsGoalUI(props: Props) {
                                       )
                                     : 0
                             if (w === 0) return null
-                            const isDimmed = activeHoverIndex !== null && activeHoverIndex !== i
                             const color = getSegmentColor(
                                 i,
                                 cat,
@@ -1732,15 +1811,16 @@ export default function EarningsGoalUI(props: Props) {
                                 activeCategoryIndex,
                                 activeHoverIndex
                             )
-                            // When hovering, color already has correct alpha; otherwise apply fill opacity
-                            const bgColor = isDimmed ? color : withAlpha(color, progressBarFillOpacity)
                             return (
                                 <div
                                     key={`static-weekly-fill-${i}`}
                                     style={{
                                         width: `${w}%`,
                                         height: "100%",
-                                        backgroundColor: bgColor,
+                                        backgroundColor: withAlpha(
+                                            color,
+                                            progressBarFillOpacity
+                                        ),
                                         position: "relative",
                                         ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
                                     }}
@@ -1767,10 +1847,14 @@ export default function EarningsGoalUI(props: Props) {
                         justifyContent: "space-between",
                         alignItems: "center",
                         gap: 12,
+                        flexWrap: isMobile ? "wrap" as const : undefined,
                     }}
                 >
                     <p style={weeklyEyebrowStyle}>{resolvedWeekLabel}</p>
-                    <p style={weeklyMetaStyle}>
+                    <p style={{
+                        ...weeklyMetaStyle,
+                        fontSize: isMobile ? "0.6em" : "0.66em",
+                    }}>
                         {hashtag}
                         <span style={{ opacity: 0.7, marginLeft: 8 }}>
                             {handle}
@@ -1781,12 +1865,12 @@ export default function EarningsGoalUI(props: Props) {
                 {/* Hero block — dominant */}
                 <div
                     style={{
-                        marginTop: "auto",
+                        marginTop: 8,
                         marginBottom: "auto",
                         display: "flex",
                         flexDirection: "column" as const,
-                        gap: 6,
-                        paddingTop: 20,
+                        gap: 12,
+                        paddingTop: 12,
                         paddingBottom: 20,
                     }}
                 >
@@ -1808,7 +1892,7 @@ export default function EarningsGoalUI(props: Props) {
                     >
                         <p style={weeklyGoalLineStyle}>
                             of {formatValue(goal, prefix, suffix, decimals)}
-                            <span style={{ opacity: 0.55, marginLeft: 8 }}>
+                            <span style={{ opacity: 0.55, marginLeft: 14 }}>
                                 · {percentage.toFixed(0)}%
                             </span>
                         </p>
@@ -1841,9 +1925,9 @@ export default function EarningsGoalUI(props: Props) {
                             aria-valuemin={0}
                             aria-valuemax={100}
                             style={{
-                                marginTop: 16,
+                                marginTop: isMobile ? 12 : 16,
                                 width: "100%",
-                                height: 14,
+                                height: isMobile ? 12 : 14,
                                 borderRadius: 99,
                                 backgroundColor: withAlpha(textColor, 0.06),
                                 overflow: "hidden",
@@ -1903,7 +1987,7 @@ export default function EarningsGoalUI(props: Props) {
                     >
                         Add categories in the right panel
                     </p>
-                ) : (
+                ) : mobileHideCategories ? null : (
                     <div
                         style={{
                             display: "flex",
@@ -1929,8 +2013,9 @@ export default function EarningsGoalUI(props: Props) {
                                         display: "flex",
                                         alignItems: "center",
                                         gap: 10,
-                                        paddingTop: 9,
-                                        paddingBottom: 9,
+                                        flexWrap: isMobile ? "wrap" as const : undefined,
+                                        paddingTop: isMobile ? 10 : 7,
+                                        paddingBottom: isMobile ? 10 : 7,
                                         borderTop: weeklyShowDivider
                                             ? `1px solid ${withAlpha(textColor, 0.07)}`
                                             : "none",
@@ -2078,7 +2163,6 @@ export default function EarningsGoalUI(props: Props) {
                                   )
                                 : 0
                         if (w === 0) return null
-                        const isDimmed = activeHoverIndex !== null && activeHoverIndex !== i
                         const color = getSegmentColor(
                             i,
                             cat,
@@ -2087,8 +2171,6 @@ export default function EarningsGoalUI(props: Props) {
                             activeCategoryIndex,
                             activeHoverIndex
                         )
-                        // When hovering, color already has correct alpha; otherwise apply fill opacity
-                        const bgColor = isDimmed ? color : withAlpha(color, progressBarFillOpacity)
                         return (
                             <motion.div
                                 key={`bar-fill-seg-${i}`}
@@ -2099,11 +2181,14 @@ export default function EarningsGoalUI(props: Props) {
                                 transition={{
                                     duration: durationSec * 0.9,
                                     delay: stagger.bar + i * 0.08,
-                                    ease: [0.22, 1, 0.36, 1],
+                                    ease,
                                 }}
                                 style={{
                                     height: "100%",
-                                    backgroundColor: bgColor,
+                                    backgroundColor: withAlpha(
+                                        color,
+                                        progressBarFillOpacity
+                                    ),
                                     willChange: "width",
                                     position: "relative",
                                     ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
@@ -2360,7 +2445,7 @@ export default function EarningsGoalUI(props: Props) {
                             durationSec={durationSec}
                             color={accentColor}
                             trackColor={resolvedTrackColor}
-                            height={lineChartHeight}
+                            height={responsiveLineHeight}
                         />,
                         stagger.bar,
                         "line-chart"
@@ -2391,7 +2476,7 @@ export default function EarningsGoalUI(props: Props) {
                         style={{
                             display: "flex",
                             flexDirection: "column" as const,
-                            gap: 12,
+                            gap: 8,
                             marginTop:
                                 weeklyShowDivider &&
                                 normalizedCategories.length > 0
@@ -2503,7 +2588,6 @@ export default function EarningsGoalUI(props: Props) {
                                   )
                                 : 0
                         if (w === 0) return null
-                        const isDimmed = activeHoverIndex !== null && activeHoverIndex !== i
                         const color = getSegmentColor(
                             i,
                             cat,
@@ -2512,8 +2596,6 @@ export default function EarningsGoalUI(props: Props) {
                             activeCategoryIndex,
                             activeHoverIndex
                         )
-                        // When hovering, color already has correct alpha; otherwise apply fill opacity
-                        const bgColor = isDimmed ? color : withAlpha(color, progressBarFillOpacity)
                         return (
                             <motion.div
                                 key={`weekly-fill-${i}`}
@@ -2524,18 +2606,19 @@ export default function EarningsGoalUI(props: Props) {
                                 transition={{
                                     duration: durationSec * 0.9,
                                     delay: stagger.bar + i * 0.08,
-                                    ease: [0.22, 1, 0.36, 1],
+                                    ease,
                                 }}
                                 style={{
                                     height: "100%",
-                                    backgroundColor: bgColor,
+                                    backgroundColor: withAlpha(
+                                        color,
+                                        progressBarFillOpacity
+                                    ),
                                     willChange: "width",
-                                    position: "relative",
-                                    ...getSegmentGlow(i, activeHoverIndex, categoryColorMode),
                                 }}
                             />
                         )
-                    })
+                    })}
                 </div>
             )}
             <div
@@ -2557,10 +2640,14 @@ export default function EarningsGoalUI(props: Props) {
                             justifyContent: "space-between",
                             alignItems: "center",
                             gap: 12,
+                            flexWrap: isMobile ? "wrap" as const : undefined,
                         }}
                     >
                         <p style={weeklyEyebrowStyle}>{resolvedWeekLabel}</p>
-                        <p style={weeklyMetaStyle}>
+                        <p style={{
+                            ...weeklyMetaStyle,
+                            fontSize: isMobile ? "0.6em" : "0.66em",
+                        }}>
                             {hashtag}
                             <span style={{ opacity: 0.7, marginLeft: 8 }}>
                                 {handle}
@@ -2574,12 +2661,12 @@ export default function EarningsGoalUI(props: Props) {
                 {/* Hero block — dominant */}
                 <div
                     style={{
-                        marginTop: "auto",
+                        marginTop: 8,
                         marginBottom: "auto",
                         display: "flex",
                         flexDirection: "column" as const,
-                        gap: 6,
-                        paddingTop: 20,
+                        gap: 12,
+                        paddingTop: 12,
                         paddingBottom: 20,
                     }}
                 >
@@ -2608,7 +2695,7 @@ export default function EarningsGoalUI(props: Props) {
                                 of{" "}
                                 {formatValue(goal, prefix, suffix, decimals)}
                                 <span
-                                    style={{ opacity: 0.55, marginLeft: 8 }}
+                                    style={{ opacity: 0.55, marginLeft: 14 }}
                                 >
                                     · {displayPercentage.toFixed(0)}%
                                 </span>
@@ -2645,9 +2732,9 @@ export default function EarningsGoalUI(props: Props) {
                             aria-valuemin={0}
                             aria-valuemax={100}
                             style={{
-                                marginTop: 16,
+                                marginTop: isMobile ? 12 : 16,
                                 width: "100%",
-                                height: 14,
+                                height: isMobile ? 12 : 14,
                                 borderRadius: 99,
                                 backgroundColor: withAlpha(textColor, 0.06),
                                 overflow: "hidden",
@@ -2721,7 +2808,7 @@ export default function EarningsGoalUI(props: Props) {
                         stagger.goal + 0.1,
                         "weekly-empty"
                     )
-                ) : (
+                ) : mobileHideCategories ? null : (
                     <div
                         style={{
                             display: "flex",
@@ -2747,8 +2834,9 @@ export default function EarningsGoalUI(props: Props) {
                                         display: "flex",
                                         alignItems: "center",
                                         gap: 10,
-                                        paddingTop: 9,
-                                        paddingBottom: 9,
+                                        flexWrap: isMobile ? "wrap" as const : undefined,
+                                        paddingTop: isMobile ? 10 : 7,
+                                        paddingBottom: isMobile ? 10 : 7,
                                         borderTop: weeklyShowDivider
                                             ? `1px solid ${withAlpha(textColor, 0.07)}`
                                             : "none",
@@ -3366,12 +3454,47 @@ addPropertyControls(EarningsGoalUI, {
             },
         },
     },
+    mobilePadding: {
+        type: ControlType.Object,
+        title: "Mobile Padding",
+        section: "Layout",
+        controls: {
+            x: {
+                type: ControlType.Number,
+                title: "X",
+                defaultValue: 16,
+                min: 0,
+                max: 48,
+                step: 2,
+                unit: "px",
+            },
+            y: {
+                type: ControlType.Number,
+                title: "Y",
+                defaultValue: 16,
+                min: 0,
+                max: 48,
+                step: 2,
+                unit: "px",
+            },
+        },
+    },
     gap: {
         type: ControlType.Number,
         title: "Gap",
         defaultValue: 16,
         min: 0,
         max: 48,
+        step: 2,
+        unit: "px",
+        section: "Layout",
+    },
+    mobileGap: {
+        type: ControlType.Number,
+        title: "Mobile Gap",
+        defaultValue: 12,
+        min: 0,
+        max: 32,
         step: 2,
         unit: "px",
         section: "Layout",
@@ -3393,6 +3516,30 @@ addPropertyControls(EarningsGoalUI, {
         optionTitles: ["Left", "Center", "Right"],
         defaultValue: "left",
         section: "Layout",
+    },
+    // ── Mobile ───────────────────────────────────────────────────────────
+    mobileLayout: {
+        type: ControlType.Enum,
+        title: "Mobile Layout",
+        options: ["auto", "stack", "compact"],
+        optionTitles: ["Auto", "Stack", "Compact"],
+        defaultValue: "auto",
+        description: "Auto detects screen width. Stack forces single column. Compact hides non-essential elements.",
+        section: "Mobile",
+    },
+    mobileHideCategories: {
+        type: ControlType.Boolean,
+        title: "Hide Categories",
+        defaultValue: false,
+        description: "Hide category breakdown on mobile for cleaner look",
+        section: "Mobile",
+    },
+    mobileSimplifyChart: {
+        type: ControlType.Boolean,
+        title: "Simplify Chart",
+        defaultValue: true,
+        description: "Reduce chart height on mobile",
+        section: "Mobile",
     },
     // ── Animation ────────────────────────────────────────────────────────
     animationTrigger: {
