@@ -3,14 +3,22 @@
  * #16 Fluid Pixel Text
  */
 // Fluid Pixel Text
-// @framerSupportedLayoutWidth any-prefer-fixed
+// @framerSupportedLayoutWidth any
 // @framerSupportedLayoutHeight any-prefer-fixed
 import React, { useEffect, useRef, useState, useCallback } from "react"
 import { addPropertyControls, ControlType } from "framer"
 
 const MAX_PARTICLES = 20000
 const MIN_CONTAINER_HEIGHT = 50
-const RESIZE_DEBOUNCE_MS = 150
+const RESIZE_DEBOUNCE_MS = 80
+const MOUSE_VELOCITY_DECAY = 0.9
+const MOUSE_SPEED_MIN = 0.2
+const MOUSE_SPEED_FULL = 3
+const TARGET_FRAME_MS = 16.67
+const MAX_DT_FACTOR = 3
+const POINTER_STALE_MS = 100
+const POINTER_IDLE_DECAY_MS = 30
+const POINTER_MAX_DELTA_PX = 150
 
 interface Particle {
   x: number
@@ -51,6 +59,7 @@ function FluidPixelText(props: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const sizerImgRef = useRef<HTMLImageElement>(null)
   const particlesRef = useRef<Particle[]>([])
   const mouseRef = useRef({ x: -9999, y: -9999, vx: 0, vy: 0 })
   const rafRef = useRef<number | null>(null)
@@ -59,17 +68,18 @@ function FluidPixelText(props: Props) {
   const dprRef = useRef(
     typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1
   )
-  const layoutRef = useRef({ pad: 0, imgW: 0, imgH: 0 })
+  const layoutRef = useRef({ pad: 0 })
+  const lastFrameTimeRef = useRef(0)
+  const lastPointerTimeRef = useRef(0)
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(false)
-  const [dims, setDims] = useState({ w: 0, h: 0, cssW: 0, cssH: 0, cssPad: 0 })
+  const [dims, setDims] = useState({ w: 0, h: 0, cssPad: 0 })
 
   const buildParticles = useCallback(
     (img: HTMLImageElement, containerWidth: number, containerHeight: number) => {
       if (!img.naturalWidth || !img.naturalHeight) return
 
-      // Release previous offscreen canvas bitmap
       if (cleanCanvasRef.current) {
         cleanCanvasRef.current.width = 0
         cleanCanvasRef.current.height = 0
@@ -86,7 +96,6 @@ function FluidPixelText(props: Props) {
           ? containerHeight
           : (cw * img.naturalHeight) / img.naturalWidth
 
-      // Contain: fit image within container without clipping
       const scaleX = cw / img.naturalWidth
       const scaleY = ch / img.naturalHeight
       const scale = Math.min(scaleX, scaleY)
@@ -96,23 +105,14 @@ function FluidPixelText(props: Props) {
       const imgW = Math.floor(imgCssW * dpr)
       const imgH = Math.floor(imgCssH * dpr)
 
-      // Padding around image so displaced particles aren't clipped at edges
-      // 2.5x radius so fast-moving particles stay within drawable canvas area
       const pad = Math.ceil(dispersionRadius * 2.5 * dpr)
       const cssPad = Math.ceil(dispersionRadius * 2.5)
       const w = imgW + pad * 2
       const h = imgH + pad * 2
 
-      layoutRef.current = { pad, imgW, imgH }
-      setDims({
-        w,
-        h,
-        cssW: imgCssW + cssPad * 2,
-        cssH: imgCssH + cssPad * 2,
-        cssPad,
-      })
+      layoutRef.current = { pad }
+      setDims({ w, h, cssPad })
 
-      // Sample pixel data from the image area only
       const oc = document.createElement("canvas")
       const octx = oc.getContext("2d")
       if (!octx) return
@@ -123,7 +123,14 @@ function FluidPixelText(props: Props) {
 
       cleanCanvasRef.current = oc
 
-      const idata = octx.getImageData(0, 0, imgW, imgH)
+      let idata: ImageData
+      try {
+        idata = octx.getImageData(0, 0, imgW, imgH)
+      } catch {
+        // Tainted canvas (CORS) — surface failure instead of rendering blank
+        setError(true)
+        return
+      }
       const d = idata.data
 
       const particles: Particle[] = []
@@ -134,8 +141,6 @@ function FluidPixelText(props: Props) {
         step = Math.ceil(Math.sqrt((imgW * imgH) / MAX_PARTICLES))
       }
 
-      // Sample particles — scan each block for max alpha so every visible
-      // pixel has a covering particle (prevents ghost outline at edges)
       for (let y = 0; y < imgH; y += step) {
         for (let x = 0; x < imgW; x += step) {
           let maxAlpha = 0
@@ -152,6 +157,8 @@ function FluidPixelText(props: Props) {
             }
           }
           if (maxAlpha > 10) {
+            // Preserve sampled alpha so anti-aliased source edges stay soft
+            const a = maxAlpha / 255
             particles.push({
               x: x + pad,
               y: y + pad,
@@ -159,7 +166,7 @@ function FluidPixelText(props: Props) {
               originY: y + pad,
               vx: 0,
               vy: 0,
-              color: `rgb(${d[bestIdx]},${d[bestIdx + 1]},${d[bestIdx + 2]})`,
+              color: `rgba(${d[bestIdx]},${d[bestIdx + 1]},${d[bestIdx + 2]},${a})`,
               size: step,
             })
           }
@@ -172,14 +179,14 @@ function FluidPixelText(props: Props) {
     [particleSize, dispersionRadius]
   )
 
-  // Stable ref to always-current buildParticles (avoids triggering effects)
   const buildFnRef = useRef(buildParticles)
   buildFnRef.current = buildParticles
 
-  // Load image — only re-runs when image URL changes
+  // Load image via DOM sizer — one source of truth for layout + pixel data
   useEffect(() => {
+    const img = sizerImgRef.current
     const container = containerRef.current
-    if (!container) return
+    if (!img || !container) return
 
     let cancelled = false
 
@@ -193,32 +200,40 @@ function FluidPixelText(props: Props) {
       return
     }
 
-    const img = new Image()
-    img.crossOrigin = "anonymous"
-
-    img.onload = () => {
+    const tryBuild = () => {
       if (cancelled) return
       if (!img.naturalWidth || !img.naturalHeight) {
         setError(true)
         return
       }
       imgRef.current = img
-      buildFnRef.current(img, container.clientWidth, container.clientHeight)
+      const cw = container.clientWidth
+      const ch = container.clientHeight
+      // Defer to ResizeObserver if container hasn't laid out yet
+      if (cw === 0 && ch === 0) return
+      buildFnRef.current(img, cw, ch)
     }
 
-    img.onerror = () => {
-      if (cancelled) return
-      setError(true)
+    const handleLoad = () => tryBuild()
+    const handleError = () => {
+      if (!cancelled) setError(true)
     }
 
-    img.src = image
+    if (img.complete && img.naturalWidth > 0) {
+      tryBuild()
+    } else {
+      img.addEventListener("load", handleLoad)
+      img.addEventListener("error", handleError)
+    }
 
     return () => {
       cancelled = true
+      img.removeEventListener("load", handleLoad)
+      img.removeEventListener("error", handleError)
     }
   }, [image])
 
-  // Rebuild particles when particleSize/dispersionRadius changes (no blink)
+  // Rebuild particles when particleSize/dispersionRadius changes
   useEffect(() => {
     const img = imgRef.current
     const container = containerRef.current
@@ -227,7 +242,7 @@ function FluidPixelText(props: Props) {
     }
   }, [buildParticles])
 
-  // Resize observer (debounced, stable — uses ref)
+  // Resize observer — CSS scales canvas smoothly between rebuilds via object-fit
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -252,7 +267,6 @@ function FluidPixelText(props: Props) {
     }
   }, [])
 
-  // Animation loop
   const loop = useCallback(() => {
     const c = canvasRef.current
     const base = cleanCanvasRef.current
@@ -260,10 +274,16 @@ function FluidPixelText(props: Props) {
     const ctx = ctxRef.current
     if (!ctx) return
 
+    // Delta-time normalization — physics stays constant across 60/120/144Hz
+    const now = performance.now()
+    const prevTime = lastFrameTimeRef.current
+    const dt = prevTime ? now - prevTime : TARGET_FRAME_MS
+    lastFrameTimeRef.current = now
+    const dtFactor = Math.min(dt / TARGET_FRAME_MS, MAX_DT_FACTOR)
+
     const dpr = dprRef.current
     const { pad } = layoutRef.current
 
-    // Draw crisp base image (alpha-thresholded — no edge halo)
     ctx.clearRect(0, 0, c.width, c.height)
     ctx.drawImage(base, pad, pad)
 
@@ -272,63 +292,78 @@ function FluidPixelText(props: Props) {
     const mvx = mouseRef.current.vx
     const mvy = mouseRef.current.vy
     const mouseSpeed = Math.sqrt(mvx * mvx + mvy * mvy)
+    // Soft falloff replaces hard gate — slow swipes still register
+    const mouseInfluence = Math.max(
+      0,
+      Math.min(
+        1,
+        (mouseSpeed - MOUSE_SPEED_MIN) /
+          (MOUSE_SPEED_FULL - MOUSE_SPEED_MIN)
+      )
+    )
     const scaledRadius = dispersionRadius * dpr
     const scaledStrength = repulsionStrength * dpr
     const maxVel = scaledRadius * 0.5
+    const frictionF = Math.pow(friction, dtFactor)
+    const returnF = returnSpeed * dtFactor
+    const pushK = scaledStrength * 0.2 * dtFactor
+    const spreadK = scaledStrength * 0.08 * dtFactor
+    const swirlK = scaledStrength * swirl * 0.2 * dtFactor
 
-    // Physics
     particlesRef.current.forEach((p) => {
       const dx = mx - p.x
       const dy = my - p.y
       const dist = Math.sqrt(dx * dx + dy * dy)
 
-      if (dist < scaledRadius && dist > 0 && mouseSpeed > 0.3) {
+      if (mouseInfluence > 0 && dist < scaledRadius && dist > 0) {
         const t = 1 - dist / scaledRadius
-        const f = t * t
+        const f = t * t * mouseInfluence
         const a = Math.atan2(dy, dx)
+        const cosA = Math.cos(a)
+        const sinA = Math.sin(a)
 
-        // Smudge: push in mouse movement direction
-        p.vx += mvx * f * scaledStrength * 0.2
-        p.vy += mvy * f * scaledStrength * 0.2
+        p.vx += mvx * f * pushK
+        p.vy += mvy * f * pushK
 
-        // Subtle radial spread for organic feel
-        p.vx -= Math.cos(a) * f * scaledStrength * 0.08
-        p.vy -= Math.sin(a) * f * scaledStrength * 0.08
+        p.vx -= cosA * f * spreadK
+        p.vy -= sinA * f * spreadK
 
-        // Swirl
-        p.vx += Math.sin(a) * f * scaledStrength * swirl * 0.2
-        p.vy -= Math.cos(a) * f * scaledStrength * swirl * 0.2
+        p.vx += sinA * f * swirlK
+        p.vy -= cosA * f * swirlK
       }
 
-      // Spring back to origin
-      p.vx += (p.originX - p.x) * returnSpeed
-      p.vy += (p.originY - p.y) * returnSpeed
-      p.vx *= friction
-      p.vy *= friction
+      p.vx += (p.originX - p.x) * returnF
+      p.vy += (p.originY - p.y) * returnF
+      p.vx *= frictionF
+      p.vy *= frictionF
 
-      // Clamp velocity
       p.vx = Math.max(-maxVel, Math.min(maxVel, p.vx))
       p.vy = Math.max(-maxVel, Math.min(maxVel, p.vy))
 
-      p.x += p.vx
-      p.y += p.vy
+      p.x += p.vx * dtFactor
+      p.y += p.vy * dtFactor
 
-      // Erase origin + draw displaced particle
       const drift = Math.abs(p.x - p.originX) + Math.abs(p.y - p.originY)
       if (drift > p.size) {
         ctx.clearRect(p.originX, p.originY, p.size, p.size)
       }
-
     })
 
-    // Draw displaced particles + smear trails
+    // Decay only when pointer is stationary or off-canvas — preserves full
+    // velocity during active drags where pointer events arrive every frame
+    if (now - lastPointerTimeRef.current > POINTER_IDLE_DECAY_MS) {
+      const mouseDecayF = Math.pow(MOUSE_VELOCITY_DECAY, dtFactor)
+      mouseRef.current.vx *= mouseDecayF
+      mouseRef.current.vy *= mouseDecayF
+    }
+
+    const originalAlpha = ctx.globalAlpha
     particlesRef.current.forEach((p) => {
       const drift = Math.abs(p.x - p.originX) + Math.abs(p.y - p.originY)
       if (drift > 0.3) {
         ctx.fillStyle = p.color
         ctx.fillRect(p.x, p.y, p.size, p.size)
 
-        // Smear trail for fast-moving particles
         const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy)
         if (speed > 1.5) {
           const trailLen = Math.min(speed * 0.7, p.size * 5)
@@ -336,7 +371,9 @@ function FluidPixelText(props: Props) {
           const ny = -p.vy / speed
           const steps = Math.min(Math.ceil(trailLen / p.size), 4)
           const stepDist = trailLen / steps
+          // Alpha-faded trail reads as motion blur, not stamped copies
           for (let s = 1; s <= steps; s++) {
+            ctx.globalAlpha = originalAlpha * (1 - s / (steps + 1))
             ctx.fillRect(
               p.x + nx * stepDist * s,
               p.y + ny * stepDist * s,
@@ -344,6 +381,7 @@ function FluidPixelText(props: Props) {
               p.size
             )
           }
+          ctx.globalAlpha = originalAlpha
         }
       }
     })
@@ -351,11 +389,11 @@ function FluidPixelText(props: Props) {
     rafRef.current = requestAnimationFrame(loop)
   }, [dispersionRadius, returnSpeed, friction, repulsionStrength, swirl])
 
-  // Start animation when ready
   useEffect(() => {
     if (!loaded) return
 
     ctxRef.current = canvasRef.current?.getContext("2d") ?? null
+    lastFrameTimeRef.current = performance.now()
     rafRef.current = requestAnimationFrame(loop)
 
     return () => {
@@ -370,11 +408,27 @@ function FluidPixelText(props: Props) {
     const nx = (e.clientX - r.left) * (c.width / r.width)
     const ny = (e.clientY - r.top) * (c.height / r.height)
     const prev = mouseRef.current
+    const now = performance.now()
 
-    const isReentry = prev.x < -9000
+    const lastT = lastPointerTimeRef.current
+    const dt = lastT ? now - lastT : TARGET_FRAME_MS
+    lastPointerTimeRef.current = now
+
+    // Time-normalize velocity so event-rate differences don't change feel.
+    // Clamp raw delta to suppress teleport spikes (window switch, cursor warp).
+    const isReentry = prev.x < -9000 || dt > POINTER_STALE_MS
+    const timeScale = TARGET_FRAME_MS / Math.max(dt, 1)
     const smooth = 0.5
-    const rawVx = isReentry ? 0 : nx - prev.x
-    const rawVy = isReentry ? 0 : ny - prev.y
+    const clampedDx = Math.max(
+      -POINTER_MAX_DELTA_PX,
+      Math.min(POINTER_MAX_DELTA_PX, nx - prev.x)
+    )
+    const clampedDy = Math.max(
+      -POINTER_MAX_DELTA_PX,
+      Math.min(POINTER_MAX_DELTA_PX, ny - prev.y)
+    )
+    const rawVx = isReentry ? 0 : clampedDx * timeScale
+    const rawVy = isReentry ? 0 : clampedDy * timeScale
 
     mouseRef.current = {
       x: nx,
@@ -382,11 +436,13 @@ function FluidPixelText(props: Props) {
       vx: prev.vx * smooth + rawVx * (1 - smooth),
       vy: prev.vy * smooth + rawVy * (1 - smooth),
     }
-
   }, [])
 
   const onPointerLeave = useCallback(() => {
-    mouseRef.current = { x: -9999, y: -9999, vx: 0, vy: 0 }
+    // Move off-canvas but let velocity trail off naturally via loop decay
+    mouseRef.current.x = -9999
+    mouseRef.current.y = -9999
+    lastPointerTimeRef.current = 0
   }, [])
 
   return (
@@ -398,22 +454,42 @@ function FluidPixelText(props: Props) {
         width: "100%",
         height: "100%",
         position: "relative",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
         overflow: "visible",
         touchAction: "none",
         minHeight: MIN_CONTAINER_HEIGHT,
       }}
     >
+      {/* Flow-participating sizer — gives component intrinsic aspect + drives fluid scaling */}
+      <img
+        ref={sizerImgRef}
+        src={image}
+        crossOrigin="anonymous"
+        alt=""
+        aria-hidden
+        draggable={false}
+        style={{
+          display: "block",
+          width: "100%",
+          height: "auto",
+          maxHeight: "100%",
+          visibility: "hidden",
+          pointerEvents: "none",
+          userSelect: "none",
+        }}
+      />
+      {/* Canvas fills container + bleed for particles, object-fit keeps aspect while CSS scales */}
       <canvas
         ref={canvasRef}
         width={dims.w}
         height={dims.h}
         style={{
-          width: dims.cssW || "100%",
-          height: dims.cssH || "100%",
-          margin: dims.cssPad ? -dims.cssPad : 0,
+          position: "absolute",
+          top: `-${dims.cssPad}px`,
+          left: `-${dims.cssPad}px`,
+          right: `-${dims.cssPad}px`,
+          bottom: `-${dims.cssPad}px`,
+          objectFit: "contain",
+          pointerEvents: "none",
           opacity: loaded ? 1 : 0,
           transition: fadeIn
             ? `opacity ${fadeInDuration}s ease`
@@ -493,12 +569,12 @@ addPropertyControls(FluidPixelText, {
   },
   friction: {
     type: ControlType.Number,
-    title: "Damping",
+    title: "Momentum",
     defaultValue: 0.85,
     min: 0.8,
     max: 0.99,
     step: 0.01,
-    description: "Higher = more bounce",
+    description: "Higher = particles keep moving longer",
   },
   fadeIn: {
     type: ControlType.Boolean,
