@@ -477,7 +477,8 @@ function FluidPixelText(props: Props) {
           userSelect: "none",
         }}
       />
-      {/* Canvas fills container + bleed for particles, object-fit keeps aspect while CSS scales */}
+      {/* Canvas fills container + bleed. Explicit width/height required: canvas is a
+          replaced element, so auto width resolves to intrinsic (not left+right insets). */}
       <canvas
         ref={canvasRef}
         width={dims.w}
@@ -486,8 +487,8 @@ function FluidPixelText(props: Props) {
           position: "absolute",
           top: `-${dims.cssPad}px`,
           left: `-${dims.cssPad}px`,
-          right: `-${dims.cssPad}px`,
-          bottom: `-${dims.cssPad}px`,
+          width: `calc(100% + ${dims.cssPad * 2}px)`,
+          height: `calc(100% + ${dims.cssPad * 2}px)`,
           objectFit: "contain",
           pointerEvents: "none",
           opacity: loaded ? 1 : 0,

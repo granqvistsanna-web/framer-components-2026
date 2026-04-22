@@ -146,6 +146,8 @@ interface Props {
     subtitleTransform?: string
     textPosition?: string
     textAlignment?: string
+    subtitlePosition?: string
+    subtitleAlignment?: string
     arrowPosition?: string
     openInNewTab?: boolean
     mobileBreakpoint?: number
@@ -210,6 +212,8 @@ interface CardProps {
     subtitleTransform: string
     textPosition: string
     textAlignment: string
+    subtitlePosition: string
+    subtitleAlignment: string
     arrowPosition: string
     duration: number
     ease: string
@@ -239,6 +243,8 @@ function GridCard({
     subtitleTransform,
     textPosition,
     textAlignment,
+    subtitlePosition,
+    subtitleAlignment,
     arrowPosition,
     duration,
     ease,
@@ -483,19 +489,19 @@ function GridCard({
         </svg>
     )
 
-    const justifyMap: Record<string, string> = {
-        top: "flex-start",
-        center: "center",
-        bottom: "flex-end",
-    }
-    const alignMap: Record<string, string> = {
-        left: "flex-start",
-        center: "center",
-        right: "flex-end",
-    }
-    const justifyContent = justifyMap[textPosition] || "flex-end"
-    const alignItems = alignMap[textAlignment] || "flex-start"
-    const textAlign = textAlignment === "center" ? "center" : textAlignment === "right" ? "right" : "left"
+    const positionStyle = (pos: string, align: string): React.CSSProperties => ({
+        position: "absolute",
+        zIndex: 1,
+        top: pos === "top" ? cardPadding : pos === "center" ? "50%" : undefined,
+        bottom: pos === "bottom" ? cardPadding : undefined,
+        left: align === "left" ? cardPadding : align === "center" ? cardPadding : undefined,
+        right: align === "right" ? cardPadding : align === "center" ? cardPadding : undefined,
+        transform: pos === "center" ? "translateY(-50%)" : undefined,
+        textAlign: align === "center" ? "center" : align === "right" ? "right" : "left",
+        width: align === "center" ? `calc(100% - ${cardPadding * 2}px)` : undefined,
+    })
+
+    const samePosition = textPosition === subtitlePosition && textAlignment === subtitleAlignment
 
     return (
         <Tag
@@ -507,10 +513,6 @@ function GridCard({
             style={{
                 position: "relative",
                 overflow: "hidden",
-                display: "flex",
-                flexDirection: "column",
-                justifyContent,
-                alignItems,
                 padding: cardPadding,
                 aspectRatio: aspectRatio === "auto" ? undefined : aspectRatio,
                 minHeight: aspectRatio === "auto" ? 80 : undefined,
@@ -539,47 +541,80 @@ function GridCard({
                 }}
             />
 
-            {/* Content */}
-            <div
-                style={{
-                    position: "relative",
-                    zIndex: 1,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
-                    textAlign: textAlign as any,
-                    width: textAlignment === "center" ? "100%" : undefined,
-                }}
-            >
-                <p
-                    ref={(el: HTMLParagraphElement | null) => {
-                        textRefs.current[0] = el
-                    }}
+            {samePosition ? (
+                /* Grouped: title + subtitle at the same position */
+                <div
                     style={{
-                        ...titleFont,
-                        textTransform: titleTransform as any,
-                        color: textColor,
-                        margin: 0,
-                        willChange: "color",
+                        ...positionStyle(textPosition, textAlignment),
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
                     }}
                 >
-                    {item.title || "\u00A0"}
-                </p>
-                <p
-                    ref={(el: HTMLParagraphElement | null) => {
-                        textRefs.current[1] = el
-                    }}
-                    style={{
-                        ...subtitleFont,
-                        textTransform: subtitleTransform as any,
-                        color: textColor,
-                        margin: 0,
-                        willChange: "color",
-                    }}
-                >
-                    {item.subtitle || "\u00A0"}
-                </p>
-            </div>
+                    <p
+                        ref={(el: HTMLParagraphElement | null) => {
+                            textRefs.current[0] = el
+                        }}
+                        style={{
+                            ...titleFont,
+                            textTransform: titleTransform as any,
+                            color: textColor,
+                            margin: 0,
+                            willChange: "color",
+                        }}
+                    >
+                        {item.title || "\u00A0"}
+                    </p>
+                    <p
+                        ref={(el: HTMLParagraphElement | null) => {
+                            textRefs.current[1] = el
+                        }}
+                        style={{
+                            ...subtitleFont,
+                            textTransform: subtitleTransform as any,
+                            color: textColor,
+                            margin: 0,
+                            willChange: "color",
+                        }}
+                    >
+                        {item.subtitle || "\u00A0"}
+                    </p>
+                </div>
+            ) : (
+                /* Split: title and subtitle at different positions */
+                <>
+                    <p
+                        ref={(el: HTMLParagraphElement | null) => {
+                            textRefs.current[0] = el
+                        }}
+                        style={{
+                            ...titleFont,
+                            ...positionStyle(textPosition, textAlignment),
+                            textTransform: titleTransform as any,
+                            color: textColor,
+                            margin: 0,
+                            willChange: "color",
+                        }}
+                    >
+                        {item.title || "\u00A0"}
+                    </p>
+                    <p
+                        ref={(el: HTMLParagraphElement | null) => {
+                            textRefs.current[1] = el
+                        }}
+                        style={{
+                            ...subtitleFont,
+                            ...positionStyle(subtitlePosition, subtitleAlignment),
+                            textTransform: subtitleTransform as any,
+                            color: textColor,
+                            margin: 0,
+                            willChange: "color",
+                        }}
+                    >
+                        {item.subtitle || "\u00A0"}
+                    </p>
+                </>
+            )}
 
             {/* Arrow */}
             {hasLink && (
@@ -629,6 +664,8 @@ function StaticPlaceholder({
     subtitleTransform,
     textPosition,
     textAlignment,
+    subtitlePosition,
+    subtitleAlignment,
     arrowPosition,
     openInNewTab,
 }: {
@@ -649,22 +686,23 @@ function StaticPlaceholder({
     subtitleTransform: string
     textPosition: string
     textAlignment: string
+    subtitlePosition: string
+    subtitleAlignment: string
     arrowPosition: string
     openInNewTab: boolean
 }) {
-    const justifyMap: Record<string, string> = {
-        top: "flex-start",
-        center: "center",
-        bottom: "flex-end",
-    }
-    const alignMap: Record<string, string> = {
-        left: "flex-start",
-        center: "center",
-        right: "flex-end",
-    }
-    const jc = justifyMap[textPosition] || "flex-end"
-    const ai = alignMap[textAlignment] || "flex-start"
-    const ta = textAlignment === "center" ? "center" : textAlignment === "right" ? "right" : "left"
+    const posStyle = (pos: string, align: string): React.CSSProperties => ({
+        position: "absolute",
+        zIndex: 1,
+        top: pos === "top" ? cardPadding : pos === "center" ? "50%" : undefined,
+        bottom: pos === "bottom" ? cardPadding : undefined,
+        left: align === "left" ? cardPadding : align === "center" ? cardPadding : undefined,
+        right: align === "right" ? cardPadding : align === "center" ? cardPadding : undefined,
+        transform: pos === "center" ? "translateY(-50%)" : undefined,
+        textAlign: align === "center" ? "center" : align === "right" ? "right" : "left",
+        width: align === "center" ? `calc(100% - ${cardPadding * 2}px)` : undefined,
+    })
+
     return (
         <div
             style={{
@@ -680,16 +718,13 @@ function StaticPlaceholder({
             {items.map((item, i) => {
                 const hasLink = !!item.link
                 const isExt = hasLink && isExternalUrl(item.link!)
+                const grouped = textPosition === subtitlePosition && textAlignment === subtitleAlignment
                 return (
                     <div
                         key={i}
                         style={{
                             position: "relative",
                             overflow: "hidden",
-                            display: "flex",
-                            flexDirection: "column",
-                            justifyContent: jc,
-                            alignItems: ai,
                             padding: cardPadding,
                             aspectRatio: aspectRatio === "auto" ? undefined : aspectRatio,
                             minHeight: aspectRatio === "auto" ? 80 : undefined,
@@ -698,14 +733,25 @@ function StaticPlaceholder({
                             backgroundColor: cardBackgroundColor,
                         }}
                     >
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4, textAlign: ta as any, width: textAlignment === "center" ? "100%" : undefined }}>
-                            <p style={{ ...titleFont, textTransform: titleTransform as any, color: textColor, margin: 0 }}>
-                                {item.title || "\u00A0"}
-                            </p>
-                            <p style={{ ...subtitleFont, textTransform: subtitleTransform as any, color: textColor, margin: 0 }}>
-                                {item.subtitle || "\u00A0"}
-                            </p>
-                        </div>
+                        {grouped ? (
+                            <div style={{ ...posStyle(textPosition, textAlignment), display: "flex", flexDirection: "column", gap: 4 }}>
+                                <p style={{ ...titleFont, textTransform: titleTransform as any, color: textColor, margin: 0 }}>
+                                    {item.title || "\u00A0"}
+                                </p>
+                                <p style={{ ...subtitleFont, textTransform: subtitleTransform as any, color: textColor, margin: 0 }}>
+                                    {item.subtitle || "\u00A0"}
+                                </p>
+                            </div>
+                        ) : (
+                            <>
+                                <p style={{ ...titleFont, ...posStyle(textPosition, textAlignment), textTransform: titleTransform as any, color: textColor, margin: 0 }}>
+                                    {item.title || "\u00A0"}
+                                </p>
+                                <p style={{ ...subtitleFont, ...posStyle(subtitlePosition, subtitleAlignment), textTransform: subtitleTransform as any, color: textColor, margin: 0 }}>
+                                    {item.subtitle || "\u00A0"}
+                                </p>
+                            </>
+                        )}
                         {hasLink && (
                             <span
                                 style={{
@@ -754,6 +800,8 @@ export default function HoverGrid(props: Props) {
         subtitleTransform = "none",
         textPosition = "bottom",
         textAlignment = "left",
+        subtitlePosition = "bottom",
+        subtitleAlignment = "left",
         arrowPosition = "bottom-right",
         openInNewTab = true,
         mobileBreakpoint = 480,
@@ -858,6 +906,8 @@ export default function HoverGrid(props: Props) {
                 subtitleTransform={subtitleTransform}
                 textPosition={textPosition}
                 textAlignment={textAlignment}
+                subtitlePosition={subtitlePosition}
+                subtitleAlignment={subtitleAlignment}
                 arrowPosition={arrowPosition}
                 openInNewTab={openInNewTab}
             />
@@ -899,6 +949,8 @@ export default function HoverGrid(props: Props) {
                     subtitleTransform={subtitleTransform}
                     textPosition={textPosition}
                     textAlignment={textAlignment}
+                    subtitlePosition={subtitlePosition}
+                    subtitleAlignment={subtitleAlignment}
                     arrowPosition={arrowPosition}
                     duration={duration}
                     ease={ease}
@@ -991,14 +1043,28 @@ addPropertyControls(HoverGrid, {
     },
     textPosition: {
         type: ControlType.Enum,
-        title: "Text Position",
+        title: "Title Position",
         options: ["top", "center", "bottom"],
         optionTitles: ["Top", "Center", "Bottom"],
         defaultValue: "bottom",
     },
     textAlignment: {
         type: ControlType.Enum,
-        title: "Text Alignment",
+        title: "Title Alignment",
+        options: ["left", "center", "right"],
+        optionTitles: ["Left", "Center", "Right"],
+        defaultValue: "left",
+    },
+    subtitlePosition: {
+        type: ControlType.Enum,
+        title: "Subtitle Position",
+        options: ["top", "center", "bottom"],
+        optionTitles: ["Top", "Center", "Bottom"],
+        defaultValue: "bottom",
+    },
+    subtitleAlignment: {
+        type: ControlType.Enum,
+        title: "Subtitle Alignment",
         options: ["left", "center", "right"],
         optionTitles: ["Left", "Center", "Right"],
         defaultValue: "left",

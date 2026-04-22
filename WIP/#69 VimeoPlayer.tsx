@@ -1,3 +1,4 @@
+import * as React from "react"
 import {
     useState,
     useRef,
@@ -11,7 +12,7 @@ import { motion, AnimatePresence } from "framer-motion"
 
 /**
  * Vimeo Player
- * Custom Vimeo video player with controls, playlist, and fullscreen support.
+ * Custom Vimeo video player with controls and fullscreen support.
  * Stripped-down version of FramePlay focused exclusively on Vimeo embeds.
  *
  * @framerDisableUnlink
@@ -22,9 +23,7 @@ import { motion, AnimatePresence } from "framer-motion"
  */
 
 interface Props {
-    mode?: "single" | "multiple"
     vimeoId?: string
-    vimeoIds?: string[]
     autoPlay?: boolean
     pauseWhenHidden?: boolean
     debug?: boolean
@@ -106,7 +105,6 @@ export default function VimeoPlayer(props: Props) {
     const [state, setState] = useState({
         isPlaying: false,
         isInView: false,
-        userInteracted: false,
         hasPlayedOnce: false,
         muted: initialMuted,
         volume: props.defaultSettings?.volume ?? 1,
@@ -116,14 +114,11 @@ export default function VimeoPlayer(props: Props) {
         hovering: false,
         fullscreen: false,
         loading: true,
-        loop: props.loop ?? false,
-        currentVideoIndex: 0,
-        totalVideos: 1,
-        isPlaylistComplete: false,
+        isBuffering: false,
+        hasStartedPlayback: false,
         volumeHover: false,
         showPlayPauseFeedback: false,
         feedbackIcon: null as string | null,
-        isTransitioning: false,
         userPaused: false,
     })
 
@@ -152,105 +147,76 @@ export default function VimeoPlayer(props: Props) {
         )
     }, [])
 
-    // ── Playlist helpers ────────────────────────────────────────────────
-
-    const getCurrentVideoSource = useCallback(() => {
-        if (props.mode === "single") return props.vimeoId
-        return props.vimeoIds?.[state.currentVideoIndex]
-    }, [props.mode, props.vimeoId, props.vimeoIds, state.currentVideoIndex])
-
-    const getTotalVideos = useCallback(() => {
-        if (props.mode === "single") return 1
-        return props.vimeoIds?.length || 0
-    }, [props.mode, props.vimeoIds])
-
-    const advanceToNextVideo = useCallback(() => {
-        debugLog("advanceToNextVideo()")
-        startTransition(() =>
-            setState((prev) => ({ ...prev, isTransitioning: true }))
-        )
-
-        setTimeout(() => {
-            const totalVideos = getTotalVideos()
-
-            startTransition(() =>
-                setState((prev) => {
-                    const nextIndex = prev.currentVideoIndex + 1
-
-                    if (nextIndex >= totalVideos) {
-                        if (props.loop) {
-                            debugLog("Looping back to first video")
-                            return {
-                                ...prev,
-                                currentVideoIndex: 0,
-                                isTransitioning: false,
-                                progress: 0,
-                            }
-                        } else {
-                            debugLog("Playlist complete")
-                            return {
-                                ...prev,
-                                isPlaying: false,
-                                isPlaylistComplete: true,
-                                isTransitioning: false,
-                            }
-                        }
-                    } else {
-                        debugLog("Advancing to video", nextIndex)
-                        return {
-                            ...prev,
-                            currentVideoIndex: nextIndex,
-                            isTransitioning: false,
-                            progress: 0,
-                        }
-                    }
-                })
-            )
-        }, 150)
-    }, [
-        getTotalVideos,
-        props.loop,
-        debugLog,
-    ])
-
     // ── Vimeo Player API ────────────────────────────────────────────────
 
     useEffect(() => {
         if (!iframeRef.current) return
 
+        let mounted = true
         let pollInterval: number | null = null
+        let pollStopTimeout: number | null = null
         let vimeoLoadedTimeout: number | null = null
+        let scriptLoadTimeout: number | null = null
 
         function loadVimeoAPI() {
             if ((window as any).Vimeo) {
                 initializeVimeoPlayer()
-            } else {
-                const existingScript = document.querySelector(
-                    "#vimeo-player-script"
-                )
-                if (!existingScript) {
-                    const script = document.createElement("script")
-                    script.id = "vimeo-player-script"
-                    script.src =
-                        "https://player.vimeo.com/api/player.js"
-                    script.async = true
-                    script.onload = () => initializeVimeoPlayer()
-                    document.body.appendChild(script)
-                } else {
-                    pollInterval = window.setInterval(() => {
-                        if ((window as any).Vimeo) {
-                            if (pollInterval) clearInterval(pollInterval)
-                            pollInterval = null
-                            initializeVimeoPlayer()
-                        }
-                    }, 50)
-                    setTimeout(() => {
-                        if (pollInterval) {
-                            clearInterval(pollInterval)
-                            pollInterval = null
-                        }
-                    }, 10000)
+                return
+            }
+
+            const existingScript = document.querySelector(
+                "#vimeo-player-script"
+            )
+            if (!existingScript) {
+                const script = document.createElement("script")
+                script.id = "vimeo-player-script"
+                // Vimeo's official API URL is unversioned by design — they maintain backward compat.
+                // No versioned CDN path is published.
+                script.src = "https://player.vimeo.com/api/player.js"
+                script.async = true
+                script.onload = () => {
+                    if (scriptLoadTimeout) {
+                        clearTimeout(scriptLoadTimeout)
+                        scriptLoadTimeout = null
+                    }
+                    if (!mounted) return
+                    initializeVimeoPlayer()
                 }
+                script.onerror = () => {
+                    if (scriptLoadTimeout) {
+                        clearTimeout(scriptLoadTimeout)
+                        scriptLoadTimeout = null
+                    }
+                    console.warn(
+                        "[VimeoPlayer] Failed to load Vimeo Player API"
+                    )
+                }
+                scriptLoadTimeout = window.setTimeout(() => {
+                    console.warn(
+                        "[VimeoPlayer] Vimeo Player API load timed out"
+                    )
+                }, 10000)
+                document.body.appendChild(script)
+            } else {
+                pollInterval = window.setInterval(() => {
+                    if ((window as any).Vimeo) {
+                        if (pollInterval) clearInterval(pollInterval)
+                        pollInterval = null
+                        if (pollStopTimeout) {
+                            clearTimeout(pollStopTimeout)
+                            pollStopTimeout = null
+                        }
+                        if (!mounted) return
+                        initializeVimeoPlayer()
+                    }
+                }, 50)
+                pollStopTimeout = window.setTimeout(() => {
+                    if (pollInterval) {
+                        clearInterval(pollInterval)
+                        pollInterval = null
+                    }
+                    pollStopTimeout = null
+                }, 10000)
             }
         }
 
@@ -277,18 +243,27 @@ export default function VimeoPlayer(props: Props) {
                 )
             )
 
+            vimeoPlayer.current.on("bufferstart", () =>
+                startTransition(() =>
+                    setState((prev) => ({ ...prev, isBuffering: true }))
+                )
+            )
+
+            vimeoPlayer.current.on("bufferend", () =>
+                startTransition(() =>
+                    setState((prev) => ({ ...prev, isBuffering: false }))
+                )
+            )
+
             vimeoPlayer.current.on("ended", () => {
                 debugLog("Video ended")
-                if (props.mode === "multiple") {
-                    advanceToNextVideo()
-                } else if (props.loop) {
+                if (props.loop) {
                     vimeoPlayer.current.play()
                 }
             })
 
             vimeoPlayer.current.on("error", (error: any) => {
                 console.warn("[VimeoPlayer] Error:", error)
-                if (props.mode === "multiple") advanceToNextVideo()
             })
 
             vimeoPlayer.current.on("timeupdate", (data: any) => {
@@ -297,6 +272,8 @@ export default function VimeoPlayer(props: Props) {
                         ...prev,
                         progress: data.seconds,
                         duration: data.duration,
+                        hasStartedPlayback:
+                            prev.hasStartedPlayback || data.seconds > 0,
                     }))
                 )
             })
@@ -356,14 +333,17 @@ export default function VimeoPlayer(props: Props) {
         loadVimeoAPI()
 
         return () => {
+            mounted = false
             if (pollInterval) clearInterval(pollInterval)
+            if (pollStopTimeout) clearTimeout(pollStopTimeout)
             if (vimeoLoadedTimeout) clearTimeout(vimeoLoadedTimeout)
+            if (scriptLoadTimeout) clearTimeout(scriptLoadTimeout)
             if (vimeoPlayer.current) {
                 vimeoPlayer.current.destroy().catch(() => {})
                 vimeoPlayer.current = null
             }
         }
-    }, [getCurrentVideoSource(), props.autoPlay, props.loop])
+    }, [props.vimeoId, props.autoPlay, props.loop])
 
     // ── Intersection Observer — autoplay on view ────────────────────────
 
@@ -428,10 +408,12 @@ export default function VimeoPlayer(props: Props) {
         if (!shouldPause) return
         if (userPausedRef.current || state.userPaused) return
 
+        let mounted = true
         const resume = async () => {
             if (vimeoPlayer.current) {
                 try {
                     await vimeoPlayer.current.play()
+                    if (!mounted) return
                     startTransition(() =>
                         setState((prev) => ({
                             ...prev,
@@ -444,6 +426,9 @@ export default function VimeoPlayer(props: Props) {
             }
         }
         resume()
+        return () => {
+            mounted = false
+        }
     }, [
         state.isInView,
         props.autoPlay,
@@ -474,44 +459,6 @@ export default function VimeoPlayer(props: Props) {
             }
         }
     }, [state.isPlaying])
-
-    // Update total videos
-    useEffect(() => {
-        const totalVideos = getTotalVideos()
-        startTransition(() =>
-            setState((prev) => ({
-                ...prev,
-                totalVideos,
-                currentVideoIndex:
-                    prev.currentVideoIndex >= totalVideos
-                        ? 0
-                        : prev.currentVideoIndex,
-                isPlaylistComplete: false,
-            }))
-        )
-    }, [getTotalVideos])
-
-    // Auto-play next in playlist
-    useEffect(() => {
-        if (props.mode !== "multiple") return
-        if (state.currentVideoIndex === 0 && !state.hasPlayedOnce) return
-        const shouldAutoPlay =
-            state.isPlaying && !state.isPlaylistComplete
-
-        if (shouldAutoPlay && vimeoPlayer.current) {
-            const timer = setTimeout(() => {
-                debugLog("Auto-playing next Vimeo video")
-                vimeoPlayer.current.play()
-            }, 100)
-            return () => clearTimeout(timer)
-        }
-    }, [
-        props.mode,
-        state.currentVideoIndex,
-        state.isPlaying,
-        state.isPlaylistComplete,
-        state.hasPlayedOnce,
-    ])
 
     // ── Slider thumb styles ─────────────────────────────────────────────
 
@@ -563,7 +510,7 @@ export default function VimeoPlayer(props: Props) {
             }
         `
         document.head.appendChild(style)
-        return () => document.head.removeChild(style)
+        return () => style.remove()
     }, [
         props.controlsStyle?.thumbSize,
         props.controlsStyle?.thumbColor,
@@ -600,7 +547,7 @@ export default function VimeoPlayer(props: Props) {
             }
         `
         document.head.appendChild(style)
-        return () => document.head.removeChild(style)
+        return () => style.remove()
     }, [])
 
     // ── Helpers ──────────────────────────────────────────────────────────
@@ -613,7 +560,7 @@ export default function VimeoPlayer(props: Props) {
     }
 
     const getVimeoSrc = useCallback(() => {
-        const currentSource = getCurrentVideoSource()
+        const currentSource = props.vimeoId?.trim()
         if (!currentSource) return ""
         const vimeoMuted = props.autoPlay
             ? 1
@@ -622,7 +569,7 @@ export default function VimeoPlayer(props: Props) {
               : 0
         const params = [
             `autoplay=${props.autoPlay ? 1 : 0}`,
-            `loop=${props.mode === "multiple" ? 0 : props.loop ? 1 : 0}`,
+            `loop=${props.loop ? 1 : 0}`,
             `muted=${vimeoMuted}`,
             "fullscreen=1",
             "controls=0",
@@ -635,10 +582,9 @@ export default function VimeoPlayer(props: Props) {
         ].join("&")
         return `https://player.vimeo.com/video/${currentSource}?${params}`
     }, [
-        getCurrentVideoSource,
+        props.vimeoId,
         props.autoPlay,
         props.loop,
-        props.mode,
         props.defaultSettings?.muted,
     ])
 
@@ -805,12 +751,7 @@ export default function VimeoPlayer(props: Props) {
                         )
                         // On mobile, open Vimeo directly
                         if (isMobileDevice()) {
-                            const vimeoId =
-                                props.mode === "single"
-                                    ? props.vimeoId
-                                    : props.vimeoIds?.[
-                                          state.currentVideoIndex
-                                      ]
+                            const vimeoId = props.vimeoId
                             if (vimeoId) {
                                 window.open(
                                     `https://vimeo.com/${vimeoId}`,
@@ -852,10 +793,7 @@ export default function VimeoPlayer(props: Props) {
             console.error("[VimeoPlayer] Fullscreen error:", error)
         }
     }, [
-        state.currentVideoIndex,
-        props.mode,
         props.vimeoId,
-        props.vimeoIds,
         isMobileDevice,
         debugLog,
     ])
@@ -1090,15 +1028,18 @@ export default function VimeoPlayer(props: Props) {
             }
         }
         const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === "Escape") {
-                startTransition(() =>
-                    setState((prev) => ({
-                        ...prev,
-                        fullscreen: false,
-                        hovering: false,
-                    }))
-                )
-            }
+            if (e.key !== "Escape") return
+            const isFS =
+                (document as any).fullscreenElement ||
+                (document as any).webkitFullscreenElement
+            if (!isFS) return
+            startTransition(() =>
+                setState((prev) => ({
+                    ...prev,
+                    fullscreen: false,
+                    hovering: false,
+                }))
+            )
         }
 
         document.addEventListener("fullscreenchange", handleFSChange)
@@ -1221,10 +1162,8 @@ export default function VimeoPlayer(props: Props) {
     // ── Visibility ──────────────────────────────────────────────────────
 
     const hasSource = useMemo(() => {
-        if (props.mode === "multiple")
-            return (props.vimeoIds?.length ?? 0) > 0
         return !!(props.vimeoId?.trim())
-    }, [props.mode, props.vimeoId, props.vimeoIds])
+    }, [props.vimeoId])
 
     const shouldShowOverlay =
         props.showControls !== false &&
@@ -1271,17 +1210,6 @@ export default function VimeoPlayer(props: Props) {
         },
         [shouldShowOverlay, safeToggle, props.showControls]
     )
-
-    const markUserInteracted = useCallback(() => {
-        startTransition(() =>
-            setState((prev) => {
-                if (!prev.userInteracted) {
-                    return { ...prev, userInteracted: true }
-                }
-                return prev
-            })
-        )
-    }, [])
 
     // ── Static renderer ─────────────────────────────────────────────────
 
@@ -1408,25 +1336,20 @@ export default function VimeoPlayer(props: Props) {
                 )
             }
             onPointerDown={() => {
-                markUserInteracted()
-                if (typeof window !== "undefined") {
-                    const isTouch =
-                        "ontouchstart" in window ||
-                        navigator.maxTouchPoints > 0
-                    if (isTouch) {
-                        startTransition(() =>
-                            setState((prev) => ({
-                                ...prev,
-                                hovering: true,
-                            }))
-                        )
-                    }
+                if (typeof window === "undefined") return
+                const isTouch =
+                    "ontouchstart" in window ||
+                    navigator.maxTouchPoints > 0
+                if (isTouch) {
+                    startTransition(() =>
+                        setState((prev) => ({
+                            ...prev,
+                            hovering: true,
+                        }))
+                    )
                 }
             }}
-            onKeyDown={(e) => {
-                markUserInteracted()
-                handleKeyDown(e)
-            }}
+            onKeyDown={handleKeyDown}
             onClickCapture={handleContainerClickCapture}
             tabIndex={0}
             role="region"
@@ -1463,44 +1386,52 @@ export default function VimeoPlayer(props: Props) {
                         justifyContent: "center",
                         gap: "12px",
                         borderRadius: cornerRadius,
-                        background:
-                            props.style?.backgroundColor || "#000",
-                        color: "rgba(255, 255, 255, 0.4)",
+                        background: "#F4F4F5",
+                        color: "#71717A",
                         fontFamily:
                             "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
                         userSelect: "none",
                     }}
                 >
                     <svg
-                        width="48"
-                        height="48"
+                        width="40"
+                        height="40"
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
-                        strokeWidth="1.2"
+                        strokeWidth="1.25"
                         strokeLinecap="round"
                         strokeLinejoin="round"
-                        style={{ opacity: 0.6 }}
+                        style={{ opacity: 0.7 }}
                     >
-                        <polygon points="5 3 19 12 5 21 5 3" />
+                        <rect
+                            x="3"
+                            y="5"
+                            width="18"
+                            height="14"
+                            rx="2"
+                        />
+                        <path d="M3 9h18" />
+                        <path d="M7 5v4" />
+                        <path d="M17 5v4" />
+                        <path d="M7 15v4" />
+                        <path d="M17 15v4" />
                     </svg>
                     <span
                         style={{
-                            fontSize: "14px",
+                            fontSize: "13px",
                             fontWeight: 500,
                             letterSpacing: "-0.01em",
-                            opacity: 0.8,
+                            color: "#52525B",
                         }}
                     >
-                        {props.mode === "multiple"
-                            ? "Add Vimeo video IDs"
-                            : "Add a Vimeo video ID"}
+                        Add a Vimeo video ID
                     </span>
                     <span
                         style={{
                             fontSize: "12px",
-                            opacity: 0.45,
-                            maxWidth: "200px",
+                            color: "#A1A1AA",
+                            maxWidth: "220px",
                             textAlign: "center",
                             lineHeight: 1.4,
                         }}
@@ -1533,23 +1464,35 @@ export default function VimeoPlayer(props: Props) {
                         }
                     />
 
-                    {/* Poster overlay — shown during loading and before first play */}
-                    {props.posterImage && (state.loading || !state.hasPlayedOnce) && (
-                        <div
+                    {/* Poster overlay — covers Vimeo's spinner until actual frames render (autoplay) or until user-initiated play */}
+                    {props.posterImage &&
+                        (state.loading ||
+                            !state.hasPlayedOnce ||
+                            (props.autoPlay &&
+                                (!state.hasStartedPlayback ||
+                                    state.isBuffering))) && (
+                        <img
+                            src={props.posterImage}
+                            alt=""
+                            aria-hidden="true"
+                            draggable={false}
                             style={{
                                 position: "absolute",
                                 top: 0,
                                 left: 0,
-                                right: 0,
-                                bottom: 0,
-                                backgroundImage: `url(${props.posterImage})`,
-                                backgroundSize:
-                                    props.style?.videoFit || "cover",
-                                backgroundPosition: "center",
-                                backgroundRepeat: "no-repeat",
+                                width: "100%",
+                                height: "100%",
+                                objectFit:
+                                    (props.style?.videoFit as any) ||
+                                    "cover",
+                                objectPosition: "center",
+                                backgroundColor:
+                                    props.style?.backgroundColor ||
+                                    "#000",
                                 borderRadius: cornerRadius,
                                 zIndex: 1,
                                 pointerEvents: "none",
+                                display: "block",
                             }}
                         />
                     )}
@@ -2320,22 +2263,6 @@ export default function VimeoPlayer(props: Props) {
                                             state.duration
                                         )}
                                     </span>
-                                    {props.mode === "multiple" && (
-                                        <span
-                                            style={{
-                                                color: iconColor,
-                                                fontSize: "12px",
-                                                opacity: 0.8,
-                                                userSelect: "none",
-                                                fontFamily:
-                                                    "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-                                            }}
-                                        >
-                                            {state.currentVideoIndex +
-                                                1}{" "}
-                                            of {state.totalVideos}
-                                        </span>
-                                    )}
                                 </div>
                             )}
 
@@ -2440,8 +2367,9 @@ export default function VimeoPlayer(props: Props) {
                             height: controlsVisible ? "3px" : "2px",
                             background: "rgba(255, 255, 255, 0.1)",
                             zIndex: 9999,
-                            transition:
-                                "height 0.2s ease, opacity 0.2s ease",
+                            transition: reducedMotion
+                                ? "none"
+                                : "height 0.2s ease, opacity 0.2s ease",
                             opacity: state.isPlaying ? 1 : 0.5,
                             borderRadius: `0 0 ${cornerRadius}px ${cornerRadius}px`,
                             overflow: "hidden",
@@ -2455,7 +2383,9 @@ export default function VimeoPlayer(props: Props) {
                                     accentColor ||
                                     "rgba(255, 255, 255, 0.6)",
                                 borderRadius: "inherit",
-                                transition: "width 0.3s linear",
+                                transition: reducedMotion
+                                    ? "none"
+                                    : "width 0.3s linear",
                             }}
                         />
                     </div>
@@ -2467,9 +2397,7 @@ export default function VimeoPlayer(props: Props) {
 VimeoPlayer.displayName = "Vimeo Player"
 
 VimeoPlayer.defaultProps = {
-    mode: "single",
     vimeoId: "",
-    vimeoIds: [],
     autoPlay: false,
     pauseWhenHidden: true,
     debug: false,
@@ -2477,7 +2405,6 @@ VimeoPlayer.defaultProps = {
     controlsMode: "default",
     controlsPreset: "glass",
     loop: false,
-    posterImage: null,
     useCustomPlayButton: false,
     customPlayButton: null,
     showPlayButtonOnlyOnInitial: true,
@@ -2513,26 +2440,11 @@ VimeoPlayer.defaultProps = {
 }
 
 addPropertyControls(VimeoPlayer, {
-    mode: {
-        type: ControlType.Enum,
-        title: "Mode",
-        options: ["single", "multiple"],
-        optionTitles: ["Single Video", "Playlist"],
-        defaultValue: "single",
-    },
     vimeoId: {
         type: ControlType.String,
         title: "Vimeo ID",
         defaultValue: "",
-        hidden: (props: any) => props.mode !== "single",
         description: "Enter Vimeo video ID (e.g., 123456789)",
-    },
-    vimeoIds: {
-        type: ControlType.Array,
-        title: "Vimeo Videos",
-        propertyControl: { type: ControlType.String },
-        hidden: (props: any) => props.mode !== "multiple",
-        description: "Add multiple Vimeo video IDs",
     },
 
     showControls: {

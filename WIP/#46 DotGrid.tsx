@@ -73,6 +73,16 @@ interface Props {
     // Colors
     color?: string | null
     backgroundColor: string
+    // Gradient
+    gradient: {
+        enabled: boolean
+        count: ColorCount
+        direction: ColorDirection
+        color1?: string | null
+        color2?: string | null
+        color3?: string | null
+        color4?: string | null
+    }
     // Fade
     fade: {
         preset: FadePreset
@@ -520,6 +530,7 @@ export default function DotGrid(props: Props) {
         grid = {} as Props["grid"],
         color: rawColor,
         backgroundColor: rawBg,
+        gradient = {} as Props["gradient"],
         fade = {} as Props["fade"],
         mouse = {} as Props["mouse"],
         animation = {} as Props["animation"],
@@ -536,8 +547,23 @@ export default function DotGrid(props: Props) {
         color4?: string | null
     }
 
-    // Null-guard colors — JS default values only cover undefined, not null.
-    // Framer can pass null during color picker transitions or undo.
+    const {
+        enabled: gradientEnabled = false,
+        count: gradientCount = "2" as ColorCount,
+        direction: gradientDirection = "diagonal" as ColorDirection,
+        color1: gradientColor1Raw,
+        color2: gradientColor2Raw,
+        color3: gradientColor3Raw,
+        color4: gradientColor4Raw,
+    } = gradient
+    const gradientColor1 = gradientColor1Raw ?? "#F97316"
+    const gradientColor2 = gradientColor2Raw ?? "#EC4899"
+    const gradientColor3 = gradientColor3Raw ?? "#8B5CF6"
+    const gradientColor4 = gradientColor4Raw ?? "#3B82F6"
+
+    // Legacy gradient path — older instances stored gradient config at the top
+    // level before the `gradient` object existed. Null-guard because Framer
+    // can pass null during color picker transitions or undo.
     const legacyColorCount = legacyProps.colorCount ?? "4"
     const legacyColorDirection = legacyProps.colorDirection ?? "diagonal"
     const legacyColor1 = legacyProps.color1 ?? "#F97316"
@@ -545,6 +571,7 @@ export default function DotGrid(props: Props) {
     const legacyColor3 = legacyProps.color3 ?? "#8B5CF6"
     const legacyColor4 = legacyProps.color4 ?? "#3B82F6"
     const useLegacyGradient =
+        !gradientEnabled &&
         rawColor == null &&
         (
             legacyProps.color1 != null ||
@@ -552,6 +579,7 @@ export default function DotGrid(props: Props) {
             legacyProps.color3 != null ||
             legacyProps.color4 != null
         )
+    const useGradient = gradientEnabled || useLegacyGradient
     const color = rawColor ?? legacyColor1 ?? "#F97316"
     const backgroundColor = rawBg ?? "#FAF5F0"
 
@@ -665,17 +693,33 @@ export default function DotGrid(props: Props) {
 
     // Stable random seed for "random" appear direction
     const randomSeedRef = useRef<Float32Array>(new Float32Array(0))
-    const legacyCornerColors = useMemo(
+    const cornerColors = useMemo(
         () =>
-            resolveCornerColors(
-                legacyColorCount,
-                legacyColorDirection,
-                cssColorToRgb(legacyColor1),
-                cssColorToRgb(legacyColor2),
-                cssColorToRgb(legacyColor3),
-                cssColorToRgb(legacyColor4)
-            ),
+            gradientEnabled
+                ? resolveCornerColors(
+                      gradientCount,
+                      gradientDirection,
+                      cssColorToRgb(gradientColor1),
+                      cssColorToRgb(gradientColor2),
+                      cssColorToRgb(gradientColor3),
+                      cssColorToRgb(gradientColor4)
+                  )
+                : resolveCornerColors(
+                      legacyColorCount,
+                      legacyColorDirection,
+                      cssColorToRgb(legacyColor1),
+                      cssColorToRgb(legacyColor2),
+                      cssColorToRgb(legacyColor3),
+                      cssColorToRgb(legacyColor4)
+                  ),
         [
+            gradientEnabled,
+            gradientCount,
+            gradientDirection,
+            gradientColor1,
+            gradientColor2,
+            gradientColor3,
+            gradientColor4,
             legacyColorCount,
             legacyColorDirection,
             legacyColor1,
@@ -799,15 +843,15 @@ export default function DotGrid(props: Props) {
                           })()
                 }
 
-                if (useLegacyGradient) {
+                if (useGradient) {
                     const topColor = lerpColor(
-                        legacyCornerColors[0],
-                        legacyCornerColors[3],
+                        cornerColors[0],
+                        cornerColors[3],
                         nx
                     )
                     const bottomColor = lerpColor(
-                        legacyCornerColors[1],
-                        legacyCornerColors[2],
+                        cornerColors[1],
+                        cornerColors[2],
                         nx
                     )
                     const dotColor = lerpColor(topColor, bottomColor, ny)
@@ -1022,8 +1066,8 @@ export default function DotGrid(props: Props) {
         dotSize,
         gap,
         color,
-        useLegacyGradient,
-        legacyCornerColors,
+        useGradient,
+        cornerColors,
         fadeEnabled,
         useLegacyFade,
         fadeResolved,
@@ -1282,16 +1326,16 @@ export default function DotGrid(props: Props) {
                           })()
                 }
 
-                const fill = useLegacyGradient
+                const fill = useGradient
                     ? (() => {
                           const topColor = lerpColor(
-                              legacyCornerColors[0],
-                              legacyCornerColors[3],
+                              cornerColors[0],
+                              cornerColors[3],
                               nx
                           )
                           const bottomColor = lerpColor(
-                              legacyCornerColors[1],
-                              legacyCornerColors[2],
+                              cornerColors[1],
+                              cornerColors[2],
                               nx
                           )
                           const dotColor = lerpColor(topColor, bottomColor, ny)
@@ -1375,6 +1419,15 @@ DotGrid.defaultProps = {
     grid: { dotShape: "circle", dotSize: 10, gap: 28 },
     color: "#F97316",
     backgroundColor: "#FAF5F0",
+    gradient: {
+        enabled: false,
+        count: "2",
+        direction: "diagonal",
+        color1: "#F97316",
+        color2: "#EC4899",
+        color3: "#8B5CF6",
+        color4: "#3B82F6",
+    },
     fade: {
         preset: "center",
         size: 0.35,
@@ -1447,11 +1500,61 @@ addPropertyControls(DotGrid, {
         type: ControlType.Color,
         title: "Color",
         defaultValue: "#F97316",
+        hidden: (props) => props.gradient?.enabled === true,
     },
     backgroundColor: {
         type: ControlType.Color,
         title: "Background",
         defaultValue: "#FAF5F0",
+    },
+    gradient: {
+        type: ControlType.Object,
+        title: "Gradient",
+        controls: {
+            enabled: {
+                type: ControlType.Boolean,
+                title: "Enabled",
+                defaultValue: false,
+                enabledTitle: "On",
+                disabledTitle: "Off",
+            },
+            count: {
+                type: ControlType.Enum,
+                title: "Colors",
+                options: ["2", "4"],
+                optionTitles: ["2 Colors", "4 Colors"],
+                defaultValue: "2",
+            },
+            direction: {
+                type: ControlType.Enum,
+                title: "Direction",
+                options: ["horizontal", "vertical", "diagonal"],
+                optionTitles: ["Horizontal", "Vertical", "Diagonal"],
+                defaultValue: "diagonal",
+            },
+            color1: {
+                type: ControlType.Color,
+                title: "Color 1",
+                defaultValue: "#F97316",
+            },
+            color2: {
+                type: ControlType.Color,
+                title: "Color 2",
+                defaultValue: "#EC4899",
+            },
+            color3: {
+                type: ControlType.Color,
+                title: "Color 3",
+                defaultValue: "#8B5CF6",
+                hidden: (props) => props.gradient?.count !== "4",
+            },
+            color4: {
+                type: ControlType.Color,
+                title: "Color 4",
+                defaultValue: "#3B82F6",
+                hidden: (props) => props.gradient?.count !== "4",
+            },
+        },
     },
     fade: {
         type: ControlType.Object,
