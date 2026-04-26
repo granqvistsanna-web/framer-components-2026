@@ -215,7 +215,7 @@ function useWordReveal(
     wordMs: number,
     pauseMs: number,
     reducedMotion: boolean
-): { revealed: string; done: boolean } {
+): { revealed: string; revealedTokens: string[]; done: boolean } {
     const tokens = useMemo(
         () => text.split(/\s+/).filter(Boolean),
         [text]
@@ -245,17 +245,17 @@ function useWordReveal(
         return () => clearTimeout(timer)
     }, [active, reducedMotion, index, tokens, wordMs, pauseMs])
 
-    const revealed = reducedMotion
-        ? text
-        : tokens.slice(0, index).join(" ")
+    const revealedTokens = reducedMotion ? tokens : tokens.slice(0, index)
+    const revealed = reducedMotion ? text : revealedTokens.join(" ")
     const done = index >= tokens.length
 
-    return { revealed, done }
+    return { revealed, revealedTokens, done }
 }
 
 interface FeedEntry {
     id: number
     text: string
+    tokens: string[]
 }
 
 function useFeedStream({
@@ -279,11 +279,18 @@ function useFeedStream({
 }): {
     committed: FeedEntry[]
     partial: string
+    partialTokens: string[]
     partialId: number
     phase: "streaming" | "idle"
 } {
     const buildPrecommit = (): FeedEntry[] =>
-        lines.map((text, i) => ({ id: i, text })).slice(-bufferSize)
+        lines
+            .map((text, i) => ({
+                id: i,
+                text,
+                tokens: text.split(/\s+/).filter(Boolean),
+            }))
+            .slice(-bufferSize)
 
     const [committed, setCommitted] = useState<FeedEntry[]>(() =>
         reducedMotion ? buildPrecommit() : []
@@ -314,7 +321,7 @@ function useFeedStream({
             : ""
     const isStreaming = total > 0 && (loop || lineIndex < total)
 
-    const { revealed, done } = useWordReveal(
+    const { revealed, revealedTokens, done } = useWordReveal(
         currentLine,
         active && isStreaming && !reducedMotion,
         wordMs,
@@ -329,9 +336,16 @@ function useFeedStream({
         const timer = window.setTimeout(() => {
             startTransition(() => {
                 setCommitted((prev) =>
-                    [...prev, { id: lineIndex, text: currentLine }].slice(
-                        -bufferSize
-                    )
+                    [
+                        ...prev,
+                        {
+                            id: lineIndex,
+                            text: currentLine,
+                            tokens: currentLine
+                                .split(/\s+/)
+                                .filter(Boolean),
+                        },
+                    ].slice(-bufferSize)
                 )
                 setLineIndex((i) => i + 1)
             })
@@ -350,8 +364,10 @@ function useFeedStream({
 
     const phase: "streaming" | "idle" = isStreaming ? "streaming" : "idle"
     const partial = phase === "idle" || reducedMotion ? "" : revealed
+    const partialTokens =
+        phase === "idle" || reducedMotion ? [] : revealedTokens
 
-    return { committed, partial, partialId: lineIndex, phase }
+    return { committed, partial, partialTokens, partialId: lineIndex, phase }
 }
 
 // ── Utilities ───────────────────────────────────────────────────────────────
@@ -417,6 +433,8 @@ function parsePipeList(value: string): string[] {
 // ── Stagger variants (matches DetailUI family) ──────────────────────────────
 
 const ease = [0.22, 1, 0.36, 1] as const
+
+const NOISE_BG = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`
 
 function makeStaggerContainer(durationMs: number) {
     const d = durationMs / 1000
@@ -618,6 +636,7 @@ function Waveform({
 
 function FeedLine({
     text,
+    tokens,
     distance,
     isPartial,
     fadeStrength,
@@ -627,6 +646,7 @@ function FeedLine({
     style,
 }: {
     text: string
+    tokens?: string[]
     distance: number
     isPartial: boolean
     fadeStrength: number
@@ -641,6 +661,7 @@ function FeedLine({
         : Math.max(0.12, baseOpacity * (1 - distance * fadeStrength))
     const blurPx = isPartial ? 0 : Math.min(2.4, distance * 0.5)
     const filter = blurPx > 0 ? `blur(${blurPx.toFixed(2)}px)` : "none"
+    const renderPerWord = canAnimate && tokens && tokens.length > 0
     return (
         <motion.div
             layout
@@ -652,7 +673,29 @@ function FeedLine({
                 ...style,
             }}
         >
-            {text}
+            {renderPerWord
+                ? tokens!.map((word, i) => (
+                      <React.Fragment key={i}>
+                          <motion.span
+                              initial={{
+                                  opacity: 0,
+                                  filter: "blur(4px)",
+                                  y: 2,
+                              }}
+                              animate={{
+                                  opacity: 1,
+                                  filter: "blur(0px)",
+                                  y: 0,
+                              }}
+                              transition={{ duration: 0.22, ease }}
+                              style={{ display: "inline-block" }}
+                          >
+                              {word}
+                          </motion.span>
+                          {i < tokens!.length - 1 ? " " : ""}
+                      </React.Fragment>
+                  ))
+                : text}
         </motion.div>
     )
 }
@@ -963,7 +1006,7 @@ export default function ListeningUI(props: Props) {
                         borderRadius:
                             borderRadius - (showBorder ? borderWidth : 0),
                         opacity: 0.035,
-                        backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+                        backgroundImage: NOISE_BG,
                         backgroundSize: "128px 128px",
                         pointerEvents: "none",
                         zIndex: 0,
@@ -1028,7 +1071,7 @@ export default function ListeningUI(props: Props) {
                             inset: 0,
                             borderRadius: iconBorderRadius,
                             opacity: 0.03,
-                            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+                            backgroundImage: NOISE_BG,
                             backgroundSize: "128px 128px",
                             pointerEvents: "none",
                         }}
@@ -1345,6 +1388,7 @@ export default function ListeningUI(props: Props) {
                                 <FeedLine
                                     key={`line-${entry.id}`}
                                     text={entry.text}
+                                    tokens={entry.tokens}
                                     distance={distance}
                                     isPartial={false}
                                     fadeStrength={feedFadeStrength}
@@ -1359,6 +1403,7 @@ export default function ListeningUI(props: Props) {
                             <FeedLine
                                 key={`line-${feedStream.partialId}`}
                                 text={feedStream.partial}
+                                tokens={feedStream.partialTokens}
                                 distance={0}
                                 isPartial={true}
                                 fadeStrength={feedFadeStrength}

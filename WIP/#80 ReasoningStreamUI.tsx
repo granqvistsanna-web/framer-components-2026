@@ -64,8 +64,10 @@ interface AppearanceGroup {
     paneStyle: PaneStyle
     backgroundColor: string
     glassBlur: number
-    glassTint: number
-    textColor: string
+    glassOpacity: number
+    glassHighlight: number
+    glassNoise: boolean
+    glassShadow: number
     accentColor: string
     chipColors: Partial<ChipColors>
     showTopMask: boolean
@@ -79,6 +81,7 @@ interface AppearanceGroup {
 
 interface TypographyGroup {
     monoFont: Record<string, any>
+    textColor: string
     labelFontSize: number
     statusBarFontSize: number
     currentOpacity: number
@@ -114,6 +117,8 @@ const ease = [0.22, 1, 0.36, 1] as const
 
 const MONO_STACK =
     '"JetBrains Mono", "Berkeley Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace'
+
+const NOISE_BG = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`
 
 const DEFAULT_CHIP_COLORS: ChipColors = {
     tool: "#3a8a5c",
@@ -419,6 +424,86 @@ function StatusRow({
     )
 }
 
+interface InlineEditProps {
+    parts: { before: string; from: string; to: string; after: string }
+    color: string
+    holdAfterRevisionMs: number
+    isActive: boolean
+    shouldAnimate: boolean
+    reducedMotion: boolean
+}
+
+// Three phases: show "from" → strike "from" through → swap to "to".
+// The intermediate strike phase reads as a deliberate correction
+// rather than a silent swap.
+function InlineEdit({
+    parts,
+    color,
+    holdAfterRevisionMs,
+    isActive,
+    shouldAnimate,
+    reducedMotion,
+}: InlineEditProps) {
+    const [editPhase, setEditPhase] = useState<"before" | "striking" | "after">(
+        !shouldAnimate || reducedMotion ? "after" : "before"
+    )
+    useEffect(() => {
+        if (!shouldAnimate || reducedMotion) {
+            setEditPhase("after")
+            return
+        }
+        if (!isActive) return
+        setEditPhase("before")
+        const strikeAt = Math.max(220, holdAfterRevisionMs * 0.5)
+        const swapAt = strikeAt + 220
+        const t1 = window.setTimeout(
+            () => setEditPhase("striking"),
+            strikeAt
+        )
+        const t2 = window.setTimeout(() => setEditPhase("after"), swapAt)
+        return () => {
+            clearTimeout(t1)
+            clearTimeout(t2)
+        }
+    }, [isActive, shouldAnimate, reducedMotion, holdAfterRevisionMs])
+
+    return (
+        <>
+            {parts.before}
+            {editPhase === "after" ? (
+                <motion.span
+                    initial={
+                        shouldAnimate && !reducedMotion
+                            ? { opacity: 0 }
+                            : false
+                    }
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.18, ease }}
+                    style={{ display: "inline" }}
+                >
+                    {parts.to}
+                </motion.span>
+            ) : (
+                <span
+                    style={{
+                        display: "inline",
+                        textDecoration: "line-through",
+                        textDecorationColor:
+                            editPhase === "striking"
+                                ? withAlpha(color, 0.7)
+                                : "transparent",
+                        textDecorationThickness: 1,
+                        transition: "text-decoration-color 220ms ease",
+                    }}
+                >
+                    {parts.from}
+                </span>
+            )}
+            {parts.after}
+        </>
+    )
+}
+
 interface StreamLineProps {
     line: Line
     isActive: boolean
@@ -460,35 +545,7 @@ function StreamLine({
             ? 0
             : Math.min(blurMaxPx, distanceFromActive * 0.4)
 
-    // ── Inline edit (typo-correction effect) ──────────────────────────
-    // Three phases: show "from" → strike "from" through → swap to "to".
-    // The intermediate strike phase reads as a deliberate correction
-    // rather than a silent swap.
     const hasEdit = !!line.inlineEditFrom && !!line.inlineEditTo
-    const [editPhase, setEditPhase] = useState<
-        "before" | "striking" | "after"
-    >(!hasEdit || !shouldAnimate || reducedMotion ? "after" : "before")
-    useEffect(() => {
-        if (!hasEdit) return
-        if (!shouldAnimate || reducedMotion) {
-            setEditPhase("after")
-            return
-        }
-        if (!isActive) return
-        setEditPhase("before")
-        const strikeAt = Math.max(220, holdAfterRevisionMs * 0.5)
-        const swapAt = strikeAt + 220
-        const t1 = window.setTimeout(
-            () => setEditPhase("striking"),
-            strikeAt
-        )
-        const t2 = window.setTimeout(() => setEditPhase("after"), swapAt)
-        return () => {
-            clearTimeout(t1)
-            clearTimeout(t2)
-        }
-    }, [hasEdit, isActive, shouldAnimate, reducedMotion, holdAfterRevisionMs])
-
     const editParts = useMemo(() => {
         if (!hasEdit) return null
         const idx = line.text.indexOf(line.inlineEditFrom)
@@ -561,40 +618,14 @@ function StreamLine({
                 </span>
             )}
             {editParts ? (
-                <>
-                    {editParts.before}
-                    {editPhase === "after" ? (
-                        <motion.span
-                            initial={
-                                shouldAnimate && !reducedMotion
-                                    ? { opacity: 0 }
-                                    : false
-                            }
-                            animate={{ opacity: 1 }}
-                            transition={{ duration: 0.18, ease }}
-                            style={{ display: "inline" }}
-                        >
-                            {editParts.to}
-                        </motion.span>
-                    ) : (
-                        <span
-                            style={{
-                                display: "inline",
-                                textDecoration: "line-through",
-                                textDecorationColor:
-                                    editPhase === "striking"
-                                        ? withAlpha(color, 0.7)
-                                        : "transparent",
-                                textDecorationThickness: 1,
-                                transition:
-                                    "text-decoration-color 220ms ease",
-                            }}
-                        >
-                            {editParts.from}
-                        </span>
-                    )}
-                    {editParts.after}
-                </>
+                <InlineEdit
+                    parts={editParts}
+                    color={color}
+                    holdAfterRevisionMs={holdAfterRevisionMs}
+                    isActive={isActive}
+                    shouldAnimate={shouldAnimate}
+                    reducedMotion={reducedMotion}
+                />
             ) : (
                 line.text
             )}
@@ -699,8 +730,13 @@ export default function ReasoningStreamUI(props: Props) {
     const paneStyle = appearance.paneStyle ?? "solid"
     const backgroundColor = appearance.backgroundColor ?? "#0a0a0b"
     const glassBlur = appearance.glassBlur ?? 14
-    const glassTint = appearance.glassTint ?? 55
-    const textColor = appearance.textColor ?? "#e6e6e6"
+    const glassOpacityPct = appearance.glassOpacity ?? 55
+    const glassHighlightPct = appearance.glassHighlight ?? 8
+    const glassShadowPct = appearance.glassShadow ?? 8
+    const glassNoise = appearance.glassNoise ?? true
+    const glassOpacity = glassOpacityPct / 100
+    const glassHighlight = glassHighlightPct / 100
+    const glassShadow = glassShadowPct / 100
     const accentColor = appearance.accentColor ?? "#ffb547"
     const chipColors: ChipColors = {
         ...DEFAULT_CHIP_COLORS,
@@ -715,6 +751,7 @@ export default function ReasoningStreamUI(props: Props) {
     const paneBorderWidth = appearance.paneBorderWidth ?? 1
 
     const monoFont = typography.monoFont
+    const textColor = typography.textColor ?? "#e6e6e6"
     const labelFontSize = typography.labelFontSize ?? 12
     const statusBarFontSize = typography.statusBarFontSize ?? 11
     const currentOpacityPct = typography.currentOpacity ?? 60
@@ -775,8 +812,12 @@ export default function ReasoningStreamUI(props: Props) {
     const lastIdx = revealedCount - 1
 
     // ── Timer ───────────────────────────────────────────────────────────
-
-    const elapsed = useElapsedTimer(shouldAnimate && !reducedMotion)
+    // Once a non-looping stream has revealed its last line, freeze the
+    // timer so the 1Hz interval doesn't keep re-rendering forever.
+    const isSettled = !loop && cycleRevealed >= lines.length && lines.length > 0
+    const elapsed = useElapsedTimer(
+        shouldAnimate && !reducedMotion && !isSettled
+    )
     const displayedElapsed = shouldAnimate && !reducedMotion ? elapsed : "0:00"
 
     // ── Counts ──────────────────────────────────────────────────────────
@@ -805,9 +846,18 @@ export default function ReasoningStreamUI(props: Props) {
         : {}
 
     const isGlass = paneStyle === "glass"
-    const glassBg = withAlpha(backgroundColor, glassTint / 100)
-    const glassFilter = `blur(${glassBlur}px) saturate(140%)`
+    const glassBg = withAlpha(backgroundColor, glassOpacity)
+    const glassFilter = `blur(${glassBlur}px) saturate(180%) brightness(1.05)`
     const glassHairline = `1px solid ${withAlpha(textColor, 0.1)}`
+    const innerRadius = borderRadius - (paneBorder ? paneBorderWidth : 0)
+
+    const paneShadow = isGlass
+        ? [
+              `0 1px 2px rgba(0, 0, 0, ${(glassShadow * 0.6).toFixed(3)})`,
+              `0 12px 40px rgba(0, 0, 0, ${glassShadow.toFixed(3)})`,
+              `0 24px 64px rgba(0, 0, 0, ${(glassShadow * 0.5).toFixed(3)})`,
+          ].join(", ")
+        : `inset 0 1px 0 ${withAlpha(textColor, 0.045)}`
 
     const paneCss: React.CSSProperties = {
         position: "relative",
@@ -818,18 +868,11 @@ export default function ReasoningStreamUI(props: Props) {
         backgroundColor: isGlass ? glassBg : backgroundColor,
         borderRadius,
         overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        gap: topRowGap,
-        ...(isGlass
-            ? {
-                  backdropFilter: glassFilter,
-                  WebkitBackdropFilter: glassFilter,
-                  boxShadow: `inset 0 1px 0 ${withAlpha(textColor, 0.08)}, inset 0 0 40px ${withAlpha(textColor, 0.025)}`,
-              }
-            : {
-                  boxShadow: `inset 0 1px 0 ${withAlpha(textColor, 0.045)}`,
-              }),
+        boxShadow: paneShadow,
+        ...(isGlass && {
+            backdropFilter: glassFilter,
+            WebkitBackdropFilter: glassFilter,
+        }),
         border: paneBorder
             ? `${paneBorderWidth}px solid ${paneBorderColor}`
             : isGlass
@@ -837,6 +880,67 @@ export default function ReasoningStreamUI(props: Props) {
               : undefined,
         ...externalStyle,
     }
+
+    const contentLayer: React.CSSProperties = {
+        position: "relative",
+        zIndex: 1,
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        gap: topRowGap,
+        minHeight: 0,
+    }
+
+    const glassOverlay = isGlass ? (
+        <>
+            <div
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    borderRadius: innerRadius,
+                    background: `linear-gradient(180deg, ${withAlpha("#ffffff", glassHighlight * 1.8)} 0%, ${withAlpha("#ffffff", glassHighlight * 0.5)} 18%, transparent 55%, ${withAlpha("#000000", glassShadow * 0.6)} 100%)`,
+                    pointerEvents: "none",
+                    zIndex: 0,
+                }}
+            />
+            <div
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    borderRadius: innerRadius,
+                    background: `radial-gradient(ellipse 70% 50% at 18% -10%, ${withAlpha("#ffffff", glassHighlight * 1.4)} 0%, transparent 60%)`,
+                    pointerEvents: "none",
+                    zIndex: 0,
+                    mixBlendMode: "screen",
+                }}
+            />
+            <div
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    borderRadius: innerRadius,
+                    boxShadow: `inset 0 1px 0 0 ${withAlpha("#ffffff", glassHighlight * 2.4)}, inset 0 -1px 0 0 ${withAlpha("#000000", glassShadow * 0.8)}, inset 1px 0 0 0 ${withAlpha("#ffffff", glassHighlight * 0.6)}, inset -1px 0 0 0 ${withAlpha("#000000", glassShadow * 0.3)}`,
+                    pointerEvents: "none",
+                    zIndex: 0,
+                }}
+            />
+            {glassNoise && (
+                <div
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        borderRadius: innerRadius,
+                        opacity: 0.035,
+                        backgroundImage: NOISE_BG,
+                        backgroundSize: "128px 128px",
+                        pointerEvents: "none",
+                        zIndex: 0,
+                    }}
+                />
+            )}
+        </>
+    ) : null
 
     const streamStyle: React.CSSProperties = {
         flex: 1,
@@ -874,109 +978,112 @@ export default function ReasoningStreamUI(props: Props) {
             aria-label={statusLabel}
             style={paneCss}
         >
-            <StatusRow
-                label={statusLabel}
-                elapsed={displayedElapsed}
-                showTimer={showTimer}
-                accentColor={accentColor}
-                textColor={textColor}
-                fontFamily={monoFamily}
-                labelFontSize={labelFontSize}
-                reducedMotion={reducedMotion}
-                shouldAnimate={shouldAnimate}
-            />
+            {glassOverlay}
+            <div style={contentLayer}>
+                <StatusRow
+                    label={statusLabel}
+                    elapsed={displayedElapsed}
+                    showTimer={showTimer}
+                    accentColor={accentColor}
+                    textColor={textColor}
+                    fontFamily={monoFamily}
+                    labelFontSize={labelFontSize}
+                    reducedMotion={reducedMotion}
+                    shouldAnimate={shouldAnimate}
+                />
 
-            <div style={streamStyle}>
-                <AnimatePresence initial={false}>
-                    {visibleLines.map((line, idx) => {
-                        const lineIdx = visibleStart + idx
-                        const isActive = lineIdx === lastIdx
-                        const distanceFromActive = lastIdx - lineIdx
-                        // A line is struck-through when the immediately
-                        // following line was authored with revisesPrev: true
-                        // and that following line has been revealed.
-                        const nextLine = lines[lineIdx + 1]
-                        const isStruck =
-                            !!nextLine &&
-                            nextLine.revisesPrev === true &&
-                            lineIdx + 1 < revealedCount
-                        return (
-                            <motion.div
-                                key={`line-${lineIdx}`}
-                                initial={
-                                    shouldAnimate && !reducedMotion
-                                        ? { opacity: 0 }
-                                        : false
-                                }
-                                animate={{ opacity: 1 }}
-                                exit={
-                                    shouldAnimate && !reducedMotion
-                                        ? {
-                                              opacity: 0,
-                                              transition: {
-                                                  duration:
-                                                      lineFadeMs / 1000,
-                                                  ease,
-                                              },
-                                          }
-                                        : { opacity: 0 }
-                                }
-                                transition={{
-                                    duration: lineFadeMs / 1000,
-                                    ease,
-                                }}
-                            >
-                                <StreamLine
-                                    line={line}
-                                    isActive={isActive}
-                                    isStruck={isStruck}
-                                    distanceFromActive={distanceFromActive}
-                                    fontFamily={monoFamily}
-                                    fontSize={monoFontSize}
-                                    color={textColor}
-                                    currentOpacity={currentOpacityPct / 100}
-                                    dimOpacity={dimOpacityPct / 100}
-                                    blurMaxPx={blurMaxPx}
-                                    chipColors={chipColors}
-                                    fadeMs={lineFadeMs}
-                                    holdAfterRevisionMs={holdAfterRevisionMs}
-                                    reducedMotion={reducedMotion}
-                                    shouldAnimate={shouldAnimate}
-                                />
-                            </motion.div>
-                        )
-                    })}
-                </AnimatePresence>
-            </div>
-
-            {showStatusBar && (
-                <div
-                    style={{
-                        marginTop: bottomRowGap - topRowGap,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 8,
-                    }}
-                >
-                    {showDivider && (
-                        <div
-                            style={{
-                                height: 1,
-                                width: "100%",
-                                background: `linear-gradient(90deg, transparent 0%, ${withAlpha(textColor, 0.12)} 18%, ${withAlpha(textColor, 0.12)} 82%, transparent 100%)`,
-                            }}
-                        />
-                    )}
-                    <StatusBar
-                        tokens={tokens}
-                        tools={tools}
-                        fontFamily={monoFamily}
-                        fontSize={statusBarFontSize}
-                        color={textColor}
-                        label="reasoning"
-                    />
+                <div style={streamStyle}>
+                    <AnimatePresence initial={false}>
+                        {visibleLines.map((line, idx) => {
+                            const lineIdx = visibleStart + idx
+                            const isActive = lineIdx === lastIdx
+                            const distanceFromActive = lastIdx - lineIdx
+                            // A line is struck-through when the immediately
+                            // following line was authored with revisesPrev: true
+                            // and that following line has been revealed.
+                            const nextLine = lines[lineIdx + 1]
+                            const isStruck =
+                                !!nextLine &&
+                                nextLine.revisesPrev === true &&
+                                lineIdx + 1 < revealedCount
+                            return (
+                                <motion.div
+                                    key={`line-${lineIdx}`}
+                                    initial={
+                                        shouldAnimate && !reducedMotion
+                                            ? { opacity: 0 }
+                                            : false
+                                    }
+                                    animate={{ opacity: 1 }}
+                                    exit={
+                                        shouldAnimate && !reducedMotion
+                                            ? {
+                                                  opacity: 0,
+                                                  transition: {
+                                                      duration:
+                                                          lineFadeMs / 1000,
+                                                      ease,
+                                                  },
+                                              }
+                                            : { opacity: 0 }
+                                    }
+                                    transition={{
+                                        duration: lineFadeMs / 1000,
+                                        ease,
+                                    }}
+                                >
+                                    <StreamLine
+                                        line={line}
+                                        isActive={isActive}
+                                        isStruck={isStruck}
+                                        distanceFromActive={distanceFromActive}
+                                        fontFamily={monoFamily}
+                                        fontSize={monoFontSize}
+                                        color={textColor}
+                                        currentOpacity={currentOpacityPct / 100}
+                                        dimOpacity={dimOpacityPct / 100}
+                                        blurMaxPx={blurMaxPx}
+                                        chipColors={chipColors}
+                                        fadeMs={lineFadeMs}
+                                        holdAfterRevisionMs={holdAfterRevisionMs}
+                                        reducedMotion={reducedMotion}
+                                        shouldAnimate={shouldAnimate}
+                                    />
+                                </motion.div>
+                            )
+                        })}
+                    </AnimatePresence>
                 </div>
-            )}
+
+                {showStatusBar && (
+                    <div
+                        style={{
+                            marginTop: bottomRowGap - topRowGap,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 8,
+                        }}
+                    >
+                        {showDivider && (
+                            <div
+                                style={{
+                                    height: 1,
+                                    width: "100%",
+                                    background: `linear-gradient(90deg, transparent 0%, ${withAlpha(textColor, 0.12)} 18%, ${withAlpha(textColor, 0.12)} 82%, transparent 100%)`,
+                                }}
+                            />
+                        )}
+                        <StatusBar
+                            tokens={tokens}
+                            tools={tools}
+                            fontFamily={monoFamily}
+                            fontSize={statusBarFontSize}
+                            color={textColor}
+                            label="reasoning"
+                        />
+                    </div>
+                )}
+            </div>
         </div>
     )
 }
@@ -1153,9 +1260,9 @@ addPropertyControls(ReasoningStreamUI, {
                 unit: "px",
                 hidden: (p: any) => isSolidPane(p),
             },
-            glassTint: {
+            glassOpacity: {
                 type: ControlType.Number,
-                title: "Glass Tint",
+                title: "Background Opacity",
                 defaultValue: 55,
                 min: 0,
                 max: 100,
@@ -1164,10 +1271,31 @@ addPropertyControls(ReasoningStreamUI, {
                 description: "Background opacity behind the blur.",
                 hidden: (p: any) => isSolidPane(p),
             },
-            textColor: {
-                type: ControlType.Color,
-                title: "Text",
-                defaultValue: "#e6e6e6",
+            glassHighlight: {
+                type: ControlType.Number,
+                title: "Highlight",
+                defaultValue: 8,
+                min: 0,
+                max: 40,
+                step: 2,
+                unit: "%",
+                hidden: (p: any) => isSolidPane(p),
+            },
+            glassNoise: {
+                type: ControlType.Boolean,
+                title: "Noise",
+                defaultValue: true,
+                hidden: (p: any) => isSolidPane(p),
+            },
+            glassShadow: {
+                type: ControlType.Number,
+                title: "Shadow",
+                defaultValue: 8,
+                min: 0,
+                max: 40,
+                step: 2,
+                unit: "%",
+                hidden: (p: any) => isSolidPane(p),
             },
             accentColor: {
                 type: ControlType.Color,
@@ -1280,6 +1408,11 @@ addPropertyControls(ReasoningStreamUI, {
                     fontWeight: 400,
                     lineHeight: 1.45,
                 },
+            },
+            textColor: {
+                type: ControlType.Color,
+                title: "Text Color",
+                defaultValue: "#e6e6e6",
             },
             labelFontSize: {
                 type: ControlType.Number,

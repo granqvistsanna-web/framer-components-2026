@@ -157,30 +157,36 @@ function parsePairs(raw: string): MessagePair[] {
 // ── Sub-components ──────────────────────────────────────────────────────────
 
 function TypewriterCursor({ color }: { color: string }) {
+    // Thin styled bar (not a "|" glyph) — renders identically across
+    // fonts and weights, with a softer breathing blink in place of the
+    // hard square pulse most chat UIs ship by default.
     return (
         <motion.span
-            animate={{ opacity: [1, 0] }}
+            aria-hidden="true"
+            animate={{ opacity: [1, 0.15, 1] }}
             transition={{
-                duration: 0.5,
+                duration: 1.05,
                 repeat: Infinity,
-                repeatType: "reverse",
-                ease: "easeInOut",
+                ease: [0.45, 0, 0.55, 1],
             }}
             style={{
-                color,
-                fontWeight: 300,
-                marginLeft: 1,
+                display: "inline-block",
+                width: 1.5,
+                height: "0.95em",
+                marginLeft: 2,
+                verticalAlign: "-0.12em",
+                backgroundColor: color,
+                borderRadius: 0.5,
                 userSelect: "none",
             }}
-        >
-            |
-        </motion.span>
+        />
     )
 }
 
 function ThinkingDots({ color }: { color: string }) {
     return (
         <span
+            aria-hidden="true"
             style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -191,18 +197,22 @@ function ThinkingDots({ color }: { color: string }) {
                 <motion.span
                     key={i}
                     style={{
-                        width: 5,
-                        height: 5,
+                        width: 4,
+                        height: 4,
                         borderRadius: 999,
                         backgroundColor: color,
                         display: "inline-block",
                     }}
-                    animate={{ opacity: [0.25, 1, 0.25], y: [0, -2, 0] }}
+                    animate={{
+                        opacity: [0.22, 1, 0.22],
+                        scale: [0.85, 1.05, 0.85],
+                        y: [0, -1.5, 0],
+                    }}
                     transition={{
-                        duration: 1.1,
+                        duration: 1.25,
                         repeat: Infinity,
-                        ease: "easeInOut",
-                        delay: i * 0.15,
+                        ease: [0.42, 0, 0.58, 1],
+                        delay: i * 0.18,
                     }}
                 />
             ))}
@@ -215,6 +225,8 @@ function ThinkingDots({ color }: { color: string }) {
 const ease = [0.22, 1, 0.36, 1] as const
 const SEND_TIME = 360
 const REPLY_DELAY = 220
+
+const NOISE_BG = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`
 
 export default function ChatUI(props: Props) {
     const content = props.content ?? {}
@@ -527,7 +539,7 @@ export default function ChatUI(props: Props) {
                             inset: 0,
                             borderRadius: innerRadius,
                             opacity: 0.035,
-                            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+                            backgroundImage: NOISE_BG,
                             backgroundSize: "128px 128px",
                             pointerEvents: "none",
                             zIndex: 0,
@@ -557,15 +569,20 @@ export default function ChatUI(props: Props) {
         ...fontCSS,
     }
 
+    // Tighter bottom-right corner — restrained tail-less affordance that
+    // signals "outgoing" the way Telegram and modern messengers do without
+    // resorting to a tail SVG.
+    const tightCorner = Math.max(3, Math.round(bubbleRadius * 0.32))
     const userBubbleStyle: React.CSSProperties = {
         ...messageBaseStyle,
         alignSelf: "flex-end",
         maxWidth: "80%",
-        padding: "8px 12px",
-        borderRadius: bubbleRadius,
+        padding: "7px 13px",
+        borderRadius: `${bubbleRadius}px ${bubbleRadius}px ${tightCorner}px ${bubbleRadius}px`,
         backgroundColor: resolvedUserBubble,
         color: textColor,
         opacity: bodyOpacity / 100,
+        boxShadow: `inset 0 1px 0 ${withAlpha("#ffffff", 0.05)}`,
     }
 
     const assistantStyle: React.CSSProperties = {
@@ -577,6 +594,10 @@ export default function ChatUI(props: Props) {
         paddingLeft: 2,
     }
 
+    // Soft fades on both ends — top fade keeps incoming messages from
+    // hard-cutting against the card edge; the bottom fade lets the
+    // conversation dissolve into the input zone instead of stopping
+    // abruptly above the pill.
     const conversationStyle: React.CSSProperties = {
         flex: 1,
         minHeight: 0,
@@ -587,9 +608,9 @@ export default function ChatUI(props: Props) {
         justifyContent: "flex-end",
         marginBottom: gap,
         maskImage:
-            "linear-gradient(to bottom, transparent 0%, #000 18%, #000 100%)",
+            "linear-gradient(to bottom, transparent 0%, #000 14%, #000 92%, transparent 100%)",
         WebkitMaskImage:
-            "linear-gradient(to bottom, transparent 0%, #000 18%, #000 100%)",
+            "linear-gradient(to bottom, transparent 0%, #000 14%, #000 92%, transparent 100%)",
     }
 
     const renderMessage = (m: Message, isLast: boolean) => {
@@ -711,12 +732,13 @@ export default function ChatUI(props: Props) {
         flexDirection: "row",
         alignItems: "flex-end",
         gap: 10,
-        padding: "10px 10px 10px 16px",
+        padding: "9px 9px 9px 14px",
         borderRadius: inputRadius,
         backgroundColor: resolvedInputBg,
-        border: `1px solid ${withAlpha(textColor, 0.06)}`,
+        border: `1px solid ${withAlpha(textColor, 0.08)}`,
+        boxShadow: `inset 0 1px 0 ${withAlpha("#ffffff", 0.04)}`,
         width: "100%",
-        minHeight: 44,
+        minHeight: 46,
         boxSizing: "border-box",
     }
 
@@ -733,6 +755,12 @@ export default function ChatUI(props: Props) {
     const hasDraft = draftDisplay.length > 0
     const isSending = phase === "send"
     const sendActive = phase === "holdPrompt" || isSending
+    // Input pill dims softly while the assistant has the floor — a quiet
+    // signal that the user's turn is paused without spelling it out.
+    const aiTurn =
+        phase === "thinking" ||
+        phase === "typingReply" ||
+        phase === "holdReply"
 
     const inputTextStyle: React.CSSProperties = {
         display: "block",
@@ -749,6 +777,9 @@ export default function ChatUI(props: Props) {
         ...fontCSS,
     }
 
+    // Layered finish: a top-light → bottom-shadow gradient over the
+    // accent fill, plus a 1px inset highlight ring and a subtle drop
+    // shadow. Reads as a tactile pressable button on a glass surface.
     const sendButtonStyle: React.CSSProperties = {
         display: "inline-flex",
         alignItems: "center",
@@ -757,11 +788,13 @@ export default function ChatUI(props: Props) {
         height: 32,
         borderRadius: 999,
         backgroundColor: resolvedAccent,
+        backgroundImage: `linear-gradient(180deg, ${withAlpha("#ffffff", 0.1)} 0%, ${withAlpha("#ffffff", 0)} 45%, ${withAlpha("#000000", 0.06)} 100%)`,
         color: backgroundColor,
         flexShrink: 0,
         border: "none",
         padding: 0,
         cursor: "default",
+        boxShadow: `inset 0 1px 0 ${withAlpha("#ffffff", 0.18)}, inset 0 -1px 0 ${withAlpha("#000000", 0.14)}, 0 1px 2px rgba(0, 0, 0, 0.2)`,
     }
 
     const renderInputText = () => {
@@ -823,9 +856,10 @@ export default function ChatUI(props: Props) {
                 <path
                     d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
                     stroke="currentColor"
-                    strokeWidth="1.6"
+                    strokeWidth="1.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
+                    vectorEffect="non-scaling-stroke"
                 />
             </motion.svg>
         </motion.span>
@@ -839,7 +873,11 @@ export default function ChatUI(props: Props) {
     ) : (
         <motion.div
             layout
-            transition={{ layout: { duration: 0.28, ease } }}
+            animate={{ opacity: aiTurn && shouldAnimate ? 0.78 : 1 }}
+            transition={{
+                layout: { duration: 0.28, ease },
+                opacity: { duration: 0.4, ease },
+            }}
             style={inputBarStyle}
         >
             <motion.div layout="position" style={textColumnStyle}>
