@@ -90,6 +90,21 @@ uniform float uObjectFit;
 
 // ── texture-based gradient noise ──
 
+vec4 sampleImageTexture(vec2 uv) {
+    vec2 clampedUv = clamp(uv, 0.0, 1.0);
+    vec4 sampleColor = texture2D(uTexture, clampedUv);
+    float inBounds =
+        step(0.0, uv.x) *
+        step(uv.x, 1.0) *
+        step(0.0, uv.y) *
+        step(uv.y, 1.0);
+    float alpha = sampleColor.a * inBounds;
+    vec3 rgb = alpha > 0.0001
+        ? sampleColor.rgb / max(sampleColor.a, 0.0001)
+        : vec3(0.0);
+    return vec4(rgb, alpha);
+}
+
 vec2 noiseTexCoord(vec2 i) {
     return (floor(mod(i, 256.0)) + 0.5) / 256.0;
 }
@@ -230,6 +245,10 @@ void main() {
     float hoverDist = distance(p, uPointer * aspect);
     float hoverT = 1.0 - smoothstep(0.0, radiusScaled, hoverDist);
     float hoverInfluence = hoverT * hoverT * hoverT * uPointerActive * uStrength;
+    float orbCore = pow(hoverT, 1.8) * uPointerActive;
+    float orbHalo = pow(hoverT, 0.8) * uPointerActive;
+    float orbRing = smoothstep(0.12, 0.58, hoverT) * (1.0 - smoothstep(0.58, 0.92, hoverT)) * uPointerActive;
+    float orbPulse = (0.5 + 0.5 * sin(uTime * 1.2)) * (0.12 + 0.2 * orbCore);
 
     // ── trail: vortex + curl + smudge ──
     float trailInfluence = 0.0;
@@ -291,7 +310,7 @@ void main() {
     // add subtle curl warp near cursor even when still
     swirlUv += flowField * hoverInfluence * 0.03;
     vec2 smudgedTexUv = texUv + swirlUv;
-    vec4 smudgedColor = texture2D(uTexture, smudgedTexUv);
+    vec4 smudgedColor = sampleImageTexture(smudgedTexUv);
 
     // warped boundary mask — edges distort with the swirl
     vec2 warpedImageUv = imageUv - swirlUv;
@@ -336,6 +355,8 @@ void main() {
     // remap FBM output (~[-0.94, 0.94]) to smooth [0, 1]
     float gt = clamp(gradientT * 0.5 + 0.5, 0.0, 1.0);
     gt = gt * gt * (3.0 - 2.0 * gt); // hermite smooth
+    float premiumShift = (fbm(uv * 1.6 + flowField * 0.9 + time * 0.08) * 0.5 + 0.5) - 0.5;
+    gt = clamp(gt + premiumShift * (0.08 * orbHalo + 0.05 * orbRing), 0.0, 1.0);
 
     // 4-stop gradient: color1 -> color2 -> color3 -> color4
     float seg = gt * 3.0;
@@ -350,14 +371,20 @@ void main() {
 
     // blend: more gradient when swirling fast
     float swirlMag = length(totalSwirl * uPointerActive + burstSwirl);
-    float gradientMix = smoothstep(0.0, 0.8, combined * 0.35 + swirlMag * 2.5) * uShowGradient;
-    vec3 effectColor = mix(hueShifted, gradientColor, gradientMix);
+    float distortionBand = clamp(orbRing * 1.15 + burstInfluence * 0.5 + trailInfluence * 0.35, 0.0, 1.0);
+    float gradientMix = smoothstep(0.02, 0.72, combined * 0.28 + orbHalo * 0.3 + swirlMag * 1.4) * uShowGradient;
+    vec3 premiumGradientColor = mix(gradientColor, vec3(1.0), 0.18 * orbCore + 0.06 * orbPulse);
+    vec3 premiumHueShifted = mix(hueShifted, smudgedColor.rgb, 0.18 * (1.0 - orbHalo));
+    vec3 effectColor = mix(premiumHueShifted, premiumGradientColor, gradientMix * (0.78 + 0.22 * orbHalo));
 
     // compositing: image area blends normally, overflow fades out
-    vec3 imageBlend = mix(smudgedColor.rgb, effectColor, combined);
+    float imageMix = clamp(combined * 0.55 + orbCore * 0.2 + orbHalo * 0.15, 0.0, 1.0);
+    vec3 imageBlend = mix(smudgedColor.rgb, effectColor, imageMix);
     vec3 finalColor = mix(effectColor, imageBlend, inImage);
-    float glow = combined * combined * combined; // cubic for softer glow
-    finalColor += gradientColor * glow * 0.35 * uShowGradient;
+    float glow = clamp(orbHalo * 0.55 + orbCore * orbCore * 0.45 + distortionBand * 0.18, 0.0, 1.0);
+    vec3 outerGlowColor = mix(gradientColor, premiumGradientColor, 0.5);
+    finalColor += outerGlowColor * glow * (0.16 + 0.08 * orbPulse) * uShowGradient;
+    finalColor += vec3(1.0) * orbCore * 0.045 * uShowGradient;
     finalColor = clamp(finalColor, 0.0, 1.0);
 
     float alpha = inImage * smudgedColor.a;
@@ -996,6 +1023,7 @@ export default function FluidImage(props: FluidImageProps) {
                 })
                 gl.activeTexture(gl.TEXTURE0)
                 gl.bindTexture(gl.TEXTURE_2D, texture)
+                gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1)
                 gl.texImage2D(
                     gl.TEXTURE_2D,
                     0,
@@ -1004,6 +1032,7 @@ export default function FluidImage(props: FluidImageProps) {
                     gl.UNSIGNED_BYTE,
                     img
                 )
+                gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0)
                 requestAnimationFrame(() => {
                     canvas.style.opacity = "1"
                 })

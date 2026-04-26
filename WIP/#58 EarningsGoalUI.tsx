@@ -516,6 +516,9 @@ export default function EarningsGoalUI(props: Props) {
     } = props.glass ?? {}
 
     const isLiquid = glassEnabled && glassStyle === "liquid"
+    const surfaceGlassOpacity = glassEnabled
+        ? Math.min(1, glassOpacity + 0.06)
+        : glassOpacity
 
     // Mobile detection - SSR-safe with media query.
     // Lazy initializer reads matchMedia on first client render so we don't
@@ -1324,7 +1327,10 @@ export default function EarningsGoalUI(props: Props) {
         gap: gap,
         borderRadius,
         backgroundColor: glassEnabled
-            ? withAlpha(backgroundColor, isLiquid ? glassOpacity * 0.5 : glassOpacity)
+            ? withAlpha(
+                  backgroundColor,
+                  isLiquid ? surfaceGlassOpacity * 0.5 : surfaceGlassOpacity
+              )
             : backgroundColor,
         boxSizing: "border-box",
         overflow: "hidden",
@@ -1338,7 +1344,7 @@ export default function EarningsGoalUI(props: Props) {
         ...(glassEnabled && !isLiquid && {
             backdropFilter: `blur(${glassBlur}px) saturate(1.4)`,
             WebkitBackdropFilter: `blur(${glassBlur}px) saturate(1.4)`,
-            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08)",
+            boxShadow: `inset 0 1px 0 ${withAlpha(textColor, 0.04)}, 0 8px 32px rgba(0, 0, 0, ${glassShadow})`,
         }),
         ...(isLiquid && {
             backdropFilter: `blur(${glassBlur * 1.5}px) saturate(1.8) brightness(1.05)`,
@@ -1346,7 +1352,7 @@ export default function EarningsGoalUI(props: Props) {
             boxShadow: `0 0 0 0.5px ${withAlpha("#ffffff", 0.15)}, 0 8px 40px rgba(0, 0, 0, 0.15), 0 2px 12px rgba(0, 0, 0, 0.1), inset 0 1px 0 0 ${withAlpha("#ffffff", 0.2)}`,
         }),
         ...externalStyle,
-    }), [valueFontSize, paddingY, paddingX, gap, borderRadius, glassEnabled, backgroundColor, isLiquid, glassOpacity, showBorder, borderWidth, resolvedBorderColor, glassBlur, externalStyle, shouldAnimate])
+    }), [valueFontSize, paddingY, paddingX, gap, borderRadius, glassEnabled, backgroundColor, isLiquid, surfaceGlassOpacity, showBorder, borderWidth, resolvedBorderColor, glassBlur, externalStyle, shouldAnimate, textColor, glassShadow])
 
     // ── Glass overlay ───────────────────────────────────────────────────
 

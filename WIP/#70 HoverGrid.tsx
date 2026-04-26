@@ -121,6 +121,7 @@ interface StyleGroup {
     borderWidth?: number
     cardPadding?: number
     cardRadius?: number
+    hideOuterBorders?: boolean
 }
 
 interface LayoutGroup {
@@ -203,6 +204,10 @@ interface CardProps {
     borderColor: string
     cardBackgroundColor: string
     borderWidth: number
+    borderTop: number
+    borderRight: number
+    borderBottom: number
+    borderLeft: number
     cardPadding: number
     cardRadius: number
     aspectRatio: string
@@ -234,6 +239,10 @@ function GridCard({
     borderColor,
     cardBackgroundColor,
     borderWidth,
+    borderTop,
+    borderRight,
+    borderBottom,
+    borderLeft,
     cardPadding,
     cardRadius,
     aspectRatio,
@@ -517,7 +526,12 @@ function GridCard({
                 aspectRatio: aspectRatio === "auto" ? undefined : aspectRatio,
                 minHeight: aspectRatio === "auto" ? 80 : undefined,
                 borderRadius: cardRadius,
-                border: `${borderWidth}px solid ${borderColor}`,
+                borderTopWidth: borderTop,
+                borderRightWidth: borderRight,
+                borderBottomWidth: borderBottom,
+                borderLeftWidth: borderLeft,
+                borderStyle: "solid",
+                borderColor,
                 backgroundColor: cardBackgroundColor,
                 textDecoration: "none",
                 color: textColor,
@@ -655,6 +669,7 @@ function StaticPlaceholder({
     cardBackgroundColor,
     backgroundColor,
     borderWidth,
+    hideOuterBorders,
     cardPadding,
     cardRadius,
     aspectRatio,
@@ -677,6 +692,7 @@ function StaticPlaceholder({
     cardBackgroundColor: string
     backgroundColor: string
     borderWidth: number
+    hideOuterBorders: boolean
     cardPadding: number
     cardRadius: number
     aspectRatio: string
@@ -719,6 +735,13 @@ function StaticPlaceholder({
                 const hasLink = !!item.link
                 const isExt = hasLink && isExternalUrl(item.link!)
                 const grouped = textPosition === subtitlePosition && textAlignment === subtitleAlignment
+                const totalRows = Math.ceil(items.length / columns)
+                const row = Math.floor(i / columns)
+                const col = i % columns
+                const bTop = hideOuterBorders && row === 0 ? 0 : borderWidth
+                const bBottom = hideOuterBorders && row === totalRows - 1 ? 0 : borderWidth
+                const bLeft = hideOuterBorders && col === 0 ? 0 : borderWidth
+                const bRight = hideOuterBorders && col === columns - 1 ? 0 : borderWidth
                 return (
                     <div
                         key={i}
@@ -729,7 +752,12 @@ function StaticPlaceholder({
                             aspectRatio: aspectRatio === "auto" ? undefined : aspectRatio,
                             minHeight: aspectRatio === "auto" ? 80 : undefined,
                             borderRadius: cardRadius,
-                            border: `${borderWidth}px solid ${borderColor}`,
+                            borderTopWidth: bTop,
+                            borderRightWidth: bRight,
+                            borderBottomWidth: bBottom,
+                            borderLeftWidth: bLeft,
+                            borderStyle: "solid",
+                            borderColor,
                             backgroundColor: cardBackgroundColor,
                         }}
                     >
@@ -818,6 +846,7 @@ export default function HoverGrid(props: Props) {
         borderWidth = 1,
         cardPadding = 20,
         cardRadius = 12,
+        hideOuterBorders = false,
     } = styleGroup
 
     const {
@@ -897,6 +926,7 @@ export default function HoverGrid(props: Props) {
                 cardBackgroundColor={cardBackgroundColor}
                 backgroundColor={backgroundColor}
                 borderWidth={borderWidth}
+                hideOuterBorders={hideOuterBorders}
                 cardPadding={cardPadding}
                 cardRadius={cardRadius}
                 aspectRatio={aspectRatio}
@@ -929,7 +959,21 @@ export default function HoverGrid(props: Props) {
                 overflow: "auto",
             }}
         >
-            {safeItems.map((item, i) => (
+            {(() => {
+                const totalRows = Math.ceil(safeItems.length / effectiveColumns)
+                return safeItems.map((item, i) => {
+                    const row = Math.floor(i / effectiveColumns)
+                    const col = i % effectiveColumns
+                    const bTop = hideOuterBorders && row === 0 ? 0 : borderWidth
+                    const bBottom =
+                        hideOuterBorders && row === totalRows - 1 ? 0 : borderWidth
+                    const bLeft =
+                        hideOuterBorders && col === 0 ? 0 : borderWidth
+                    const bRight =
+                        hideOuterBorders && col === effectiveColumns - 1
+                            ? 0
+                            : borderWidth
+                    return (
                 <GridCard
                     key={`${item.title}-${item.subtitle}-${i}`}
                     item={item}
@@ -940,6 +984,10 @@ export default function HoverGrid(props: Props) {
                     borderColor={borderColor}
                     cardBackgroundColor={cardBackgroundColor}
                     borderWidth={borderWidth}
+                    borderTop={bTop}
+                    borderRight={bRight}
+                    borderBottom={bBottom}
+                    borderLeft={bLeft}
                     cardPadding={cardPadding}
                     cardRadius={cardRadius}
                     aspectRatio={aspectRatio}
@@ -961,7 +1009,9 @@ export default function HoverGrid(props: Props) {
                     isActive={activeCardIndex === i}
                     onTapToggle={handleTapToggle}
                 />
-            ))}
+                    )
+                })
+            })()}
         </nav>
     )
 }
@@ -1188,6 +1238,13 @@ addPropertyControls(HoverGrid, {
                 max: 32,
                 step: 1,
                 unit: "px",
+            },
+            hideOuterBorders: {
+                type: ControlType.Boolean,
+                title: "Outer Borders",
+                enabledTitle: "Hide",
+                disabledTitle: "Show",
+                defaultValue: false,
             },
         },
     },

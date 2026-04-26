@@ -83,6 +83,16 @@ interface AnimationGroup {
     duration: number
 }
 
+interface FeedGroup {
+    wordMs: number
+    pauseMs: number
+    lineGapMs: number
+    maxVisible: number
+    partialDim: number
+    fadeStrength: number
+    loop: boolean
+}
+
 interface Props {
     variant: Variant
     content?: Partial<ContentGroup>
@@ -91,6 +101,7 @@ interface Props {
     typography?: Partial<TypographyGroup>
     layout?: Partial<LayoutGroup>
     animation?: Partial<AnimationGroup>
+    feed?: Partial<FeedGroup>
     // Legacy flat props (hidden)
     title: string
     showTranscript: boolean
@@ -198,7 +209,157 @@ function useTranscriptReveal(
     return text.slice(0, count)
 }
 
+function useWordReveal(
+    text: string,
+    active: boolean,
+    wordMs: number,
+    pauseMs: number,
+    reducedMotion: boolean
+): { revealed: string; done: boolean } {
+    const tokens = useMemo(
+        () => text.split(/\s+/).filter(Boolean),
+        [text]
+    )
+    const [index, setIndex] = useState(() =>
+        reducedMotion ? tokens.length : 0
+    )
+
+    useEffect(() => {
+        startTransition(() => {
+            setIndex(reducedMotion ? tokens.length : 0)
+        })
+    }, [text, reducedMotion, tokens.length])
+
+    useEffect(() => {
+        if (!active || reducedMotion) return
+        if (index >= tokens.length) return
+        const prev = index > 0 ? tokens[index - 1] : ""
+        const lastChar = prev.slice(-1)
+        const needsPause = /[,.—…?!:;]/.test(lastChar)
+        const delay = wordMs + (needsPause ? pauseMs : 0)
+        const timer = window.setTimeout(() => {
+            startTransition(() =>
+                setIndex((i) => Math.min(tokens.length, i + 1))
+            )
+        }, delay)
+        return () => clearTimeout(timer)
+    }, [active, reducedMotion, index, tokens, wordMs, pauseMs])
+
+    const revealed = reducedMotion
+        ? text
+        : tokens.slice(0, index).join(" ")
+    const done = index >= tokens.length
+
+    return { revealed, done }
+}
+
+interface FeedEntry {
+    id: number
+    text: string
+}
+
+function useFeedStream({
+    lines,
+    active,
+    wordMs,
+    pauseMs,
+    lineGapMs,
+    loop,
+    bufferSize,
+    reducedMotion,
+}: {
+    lines: string[]
+    active: boolean
+    wordMs: number
+    pauseMs: number
+    lineGapMs: number
+    loop: boolean
+    bufferSize: number
+    reducedMotion: boolean
+}): {
+    committed: FeedEntry[]
+    partial: string
+    partialId: number
+    phase: "streaming" | "idle"
+} {
+    const buildPrecommit = (): FeedEntry[] =>
+        lines.map((text, i) => ({ id: i, text })).slice(-bufferSize)
+
+    const [committed, setCommitted] = useState<FeedEntry[]>(() =>
+        reducedMotion ? buildPrecommit() : []
+    )
+    const [lineIndex, setLineIndex] = useState(() =>
+        reducedMotion ? lines.length : 0
+    )
+
+    useEffect(() => {
+        startTransition(() => {
+            if (reducedMotion) {
+                setCommitted(buildPrecommit())
+                setLineIndex(lines.length)
+            } else {
+                setCommitted([])
+                setLineIndex(0)
+            }
+        })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [lines, reducedMotion, loop])
+
+    const total = lines.length
+    const currentLine =
+        total > 0
+            ? loop
+                ? lines[lineIndex % total]
+                : (lines[lineIndex] ?? "")
+            : ""
+    const isStreaming = total > 0 && (loop || lineIndex < total)
+
+    const { revealed, done } = useWordReveal(
+        currentLine,
+        active && isStreaming && !reducedMotion,
+        wordMs,
+        pauseMs,
+        reducedMotion
+    )
+
+    useEffect(() => {
+        if (reducedMotion || !active) return
+        if (!isStreaming) return
+        if (!done) return
+        const timer = window.setTimeout(() => {
+            startTransition(() => {
+                setCommitted((prev) =>
+                    [...prev, { id: lineIndex, text: currentLine }].slice(
+                        -bufferSize
+                    )
+                )
+                setLineIndex((i) => i + 1)
+            })
+        }, lineGapMs)
+        return () => clearTimeout(timer)
+    }, [
+        done,
+        active,
+        lineIndex,
+        isStreaming,
+        currentLine,
+        lineGapMs,
+        bufferSize,
+        reducedMotion,
+    ])
+
+    const phase: "streaming" | "idle" = isStreaming ? "streaming" : "idle"
+    const partial = phase === "idle" || reducedMotion ? "" : revealed
+
+    return { committed, partial, partialId: lineIndex, phase }
+}
+
 // ── Utilities ───────────────────────────────────────────────────────────────
+
+function normalizeGlass(v: number | undefined, fallback: number): number {
+    if (v === undefined || v === null || Number.isNaN(v)) return fallback
+    return v > 1 ? v / 100 : v
+}
 
 function withAlpha(color: string, alpha: number): string {
     const rgbaMatch = color.match(
@@ -455,6 +616,47 @@ function Waveform({
     )
 }
 
+function FeedLine({
+    text,
+    distance,
+    isPartial,
+    fadeStrength,
+    partialDim,
+    primaryOpacity,
+    canAnimate,
+    style,
+}: {
+    text: string
+    distance: number
+    isPartial: boolean
+    fadeStrength: number
+    partialDim: number
+    primaryOpacity: number
+    canAnimate: boolean
+    style?: React.CSSProperties
+}) {
+    const baseOpacity = primaryOpacity / 100
+    const targetOpacity = isPartial
+        ? baseOpacity * partialDim
+        : Math.max(0.12, baseOpacity * (1 - distance * fadeStrength))
+    const blurPx = isPartial ? 0 : Math.min(2.4, distance * 0.5)
+    const filter = blurPx > 0 ? `blur(${blurPx.toFixed(2)}px)` : "none"
+    return (
+        <motion.div
+            layout
+            initial={canAnimate ? { opacity: 0, y: 6 } : false}
+            animate={{ opacity: targetOpacity, y: 0, filter }}
+            transition={{ duration: 0.32, ease }}
+            style={{
+                fontWeight: isPartial ? 400 : 500,
+                ...style,
+            }}
+        >
+            {text}
+        </motion.div>
+    )
+}
+
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export default function ListeningUI(props: Props) {
@@ -464,6 +666,7 @@ export default function ListeningUI(props: Props) {
     const typography = props.typography ?? {}
     const layout = props.layout ?? {}
     const animation = props.animation ?? {}
+    const feed = props.feed ?? {}
 
     const variant = props.variant ?? "minimal"
 
@@ -500,12 +703,25 @@ export default function ListeningUI(props: Props) {
     const borderWidth = appearance.borderWidth ?? props.border?.width ?? 1
     const blurEnabled = appearance.glassEnabled ?? props.blur?.enabled ?? false
     const blurAmount = appearance.glassAmount ?? props.blur?.amount ?? 16
-    const glassHighlight =
-        appearance.glassHighlight ?? props.blur?.highlight ?? 0.08
+    const glassHighlight = normalizeGlass(
+        appearance.glassHighlight,
+        props.blur?.highlight ?? 0.08
+    )
     const glassNoise = appearance.glassNoise ?? props.blur?.noise ?? true
-    const glassShadow = appearance.glassShadow ?? props.blur?.shadow ?? 0.08
-    const glassOpacity =
-        appearance.glassOpacity ?? props.blur?.opacity ?? 0.8
+    const glassShadow = normalizeGlass(
+        appearance.glassShadow,
+        props.blur?.shadow ?? 0.08
+    )
+    const glassOpacity = normalizeGlass(
+        appearance.glassOpacity,
+        props.blur?.opacity ?? 0.8
+    )
+    // ListeningUI has more open negative space than MetricUI, so the same
+    // alpha can read visually lighter. Nudge the glass fill slightly to keep
+    // both components feeling aligned at matching settings.
+    const surfaceGlassOpacity = blurEnabled
+        ? Math.min(1, glassOpacity + 0.06)
+        : glassOpacity
 
     const font = typography.font ?? props.font
     const labelFont = typography.labelFont ?? props.labelFont
@@ -518,7 +734,7 @@ export default function ListeningUI(props: Props) {
     const paddingY = layout.paddingY ?? props.padding?.y ?? 20
     const gap = layout.gap ?? props.gap ?? 0
     const textGap = layout.textGap ?? props.textGap ?? 2
-    const borderRadius = layout.borderRadius ?? props.borderRadius ?? 8
+    const borderRadius = layout.borderRadius ?? props.borderRadius ?? 14
     const iconBorderRadius =
         layout.iconBorderRadius ?? props.iconBorderRadius ?? Math.min(12, borderRadius)
     const iconKind = layout.iconKind ?? props.iconKind ?? "mic"
@@ -530,6 +746,15 @@ export default function ListeningUI(props: Props) {
         animation.trigger ?? props.animationTrigger ?? "inView"
     const animationDuration =
         animation.duration ?? props.animationDuration ?? 450
+
+    const feedWordMs = feed.wordMs ?? 90
+    const feedPauseMs = feed.pauseMs ?? 280
+    const feedLineGapMs = feed.lineGapMs ?? 600
+    const feedMaxVisible = feed.maxVisible ?? 5
+    const feedPartialDim = feed.partialDim ?? 0.7
+    const feedFadeStrength = feed.fadeStrength ?? 0.22
+    const feedLoop = feed.loop ?? true
+
     const externalStyle = props.style
 
     const isStatic = useIsStaticRenderer()
@@ -570,9 +795,24 @@ export default function ListeningUI(props: Props) {
         reducedMotion || isStatic || !autoCycle
     )
 
+    const feedLines = useMemo(
+        () => (autoCycle ? transcriptItems : transcriptItems.slice(0, 1)),
+        [autoCycle, transcriptItems]
+    )
+    const feedStream = useFeedStream({
+        lines: feedLines,
+        active: cycleActive,
+        wordMs: feedWordMs,
+        pauseMs: feedPauseMs,
+        lineGapMs: feedLineGapMs,
+        loop: feedLoop && autoCycle,
+        bufferSize: feedMaxVisible + 2,
+        reducedMotion: reducedMotion || isStatic || !autoCycle,
+    })
+
     const fontCSS = toFontStyle(font)
     const labelFontCSS = toFontStyle(labelFont)
-    const resolvedBorderColor = borderColor || withAlpha(textColor, 0.06)
+    const resolvedBorderColor = borderColor || withAlpha(textColor, 0.08)
 
     const staggerContainer = useMemo(
         () => makeStaggerContainer(animationDuration),
@@ -611,6 +851,12 @@ export default function ListeningUI(props: Props) {
     const isPanel = variant === "panel"
     const isCentered = variant === "centered"
     const isIcon = variant === "icon"
+    const cardBoxShadow = [
+        showBorder ? `inset 0 1px 0 ${withAlpha(textColor, 0.04)}` : null,
+        blurEnabled ? `0 8px 32px rgba(0, 0, 0, ${glassShadow})` : null,
+    ]
+        .filter(Boolean)
+        .join(", ")
 
     const cardStyle: React.CSSProperties = {
         display: "flex",
@@ -623,7 +869,7 @@ export default function ListeningUI(props: Props) {
         gap: gap || (isPanel ? 10 : isCentered ? 10 : 14),
         borderRadius,
         backgroundColor: blurEnabled
-            ? withAlpha(backgroundColor, glassOpacity)
+            ? withAlpha(backgroundColor, surfaceGlassOpacity)
             : backgroundColor,
         boxSizing: "border-box",
         overflow: "hidden",
@@ -634,7 +880,9 @@ export default function ListeningUI(props: Props) {
         ...(blurEnabled && {
             backdropFilter: `blur(${blurAmount}px)`,
             WebkitBackdropFilter: `blur(${blurAmount}px)`,
-            boxShadow: `0 8px 32px rgba(0, 0, 0, ${glassShadow})`,
+        }),
+        ...(cardBoxShadow && {
+            boxShadow: cardBoxShadow,
         }),
         ...externalStyle,
     }
@@ -731,74 +979,83 @@ export default function ListeningUI(props: Props) {
     const caretActive =
         canAnimate && revealedTranscript.length < activeTranscript.length
     const showTitle = variant !== "icon" && title.trim().length > 0
-    const avatar = (
-        <MicAvatar
-            size={avatarSize}
-            accentColor={accentColor}
-            textColor={textColor}
-            iconSize={iconSize}
-            borderRadius={iconBorderRadius}
-            showBackground={showIconBackground}
-            active={cycleActive}
-            reducedMotion={reducedMotion || isStatic}
-        />
-    )
+    const iconBadgeStyle: React.CSSProperties = {
+        width: avatarSize,
+        height: avatarSize,
+        borderRadius: iconBorderRadius,
+        backgroundColor: showIconBackground
+            ? blurEnabled
+                ? withAlpha(
+                      backgroundColor,
+                      Math.max(0.18, surfaceGlassOpacity * 0.42)
+                  )
+                : withAlpha(accentColor, 0.08)
+            : "transparent",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        position: "relative",
+        overflow: "hidden",
+        ...(blurEnabled &&
+            showIconBackground && {
+                backdropFilter: `blur(${Math.max(8, blurAmount * 0.6)}px)`,
+                WebkitBackdropFilter: `blur(${Math.max(8, blurAmount * 0.6)}px)`,
+                boxShadow: [
+                    `inset 0 0.5px 0 ${withAlpha("#ffffff", glassHighlight * 2.2)}`,
+                    `0 8px 24px rgba(0, 0, 0, ${glassShadow * 0.75})`,
+                ].join(", "),
+                border: `1px solid ${withAlpha("#ffffff", glassHighlight * 1.3)}`,
+            }),
+    }
 
-    const waveformBadge = (
-        <div
-            style={{
-                width: avatarSize,
-                height: avatarSize,
-                borderRadius: iconBorderRadius,
-                backgroundColor: showIconBackground
-                    ? blurEnabled
-                        ? withAlpha(backgroundColor, Math.max(0.18, glassOpacity * 0.42))
-                        : withAlpha(accentColor, 0.08)
-                    : "transparent",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-                position: "relative",
-                overflow: "hidden",
-                ...(blurEnabled &&
-                    showIconBackground && {
-                    backdropFilter: `blur(${Math.max(8, blurAmount * 0.6)}px)`,
-                    WebkitBackdropFilter: `blur(${Math.max(8, blurAmount * 0.6)}px)`,
-                    boxShadow: [
-                        `inset 0 0.5px 0 ${withAlpha("#ffffff", glassHighlight * 2.2)}`,
-                        `0 8px 24px rgba(0, 0, 0, ${glassShadow * 0.75})`,
-                    ].join(", "),
-                    border: `1px solid ${withAlpha("#ffffff", glassHighlight * 1.3)}`,
-                }),
-            }}
-        >
-            {blurEnabled && showIconBackground && (
-                <>
+    const iconBadgeOverlay =
+        blurEnabled && showIconBackground ? (
+            <>
+                <div
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        borderRadius: iconBorderRadius,
+                        background: `linear-gradient(180deg, ${withAlpha("#ffffff", glassHighlight * 1.8)} 0%, transparent 55%)`,
+                        pointerEvents: "none",
+                    }}
+                />
+                {glassNoise && (
                     <div
                         style={{
                             position: "absolute",
                             inset: 0,
                             borderRadius: iconBorderRadius,
-                            background: `linear-gradient(180deg, ${withAlpha("#ffffff", glassHighlight * 1.8)} 0%, transparent 55%)`,
+                            opacity: 0.03,
+                            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+                            backgroundSize: "128px 128px",
                             pointerEvents: "none",
                         }}
                     />
-                    {glassNoise && (
-                        <div
-                            style={{
-                                position: "absolute",
-                                inset: 0,
-                                borderRadius: iconBorderRadius,
-                                opacity: 0.03,
-                                backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-                                backgroundSize: "128px 128px",
-                                pointerEvents: "none",
-                            }}
-                        />
-                    )}
-                </>
-            )}
+                )}
+            </>
+        ) : null
+
+    const avatar = (
+        <div style={iconBadgeStyle}>
+            {iconBadgeOverlay}
+            <MicAvatar
+                size={avatarSize}
+                accentColor={accentColor}
+                textColor={textColor}
+                iconSize={iconSize}
+                borderRadius={iconBorderRadius}
+                showBackground={false}
+                active={cycleActive}
+                reducedMotion={reducedMotion || isStatic}
+            />
+        </div>
+    )
+
+    const waveformBadge = (
+        <div style={iconBadgeStyle}>
+            {iconBadgeOverlay}
             <Waveform
                 textColor={textColor}
                 height={Math.min(waveformHeight, avatarSize - 12)}
@@ -1015,6 +1272,21 @@ export default function ListeningUI(props: Props) {
         </Item>
     )
 
+    const feedLineStyle: React.CSSProperties = {
+        fontSize: "1em",
+        color: textColor,
+        lineHeight: 1.35,
+        letterSpacing: "-0.005em",
+        margin: 0,
+        wordBreak: "break-word",
+        overflowWrap: "anywhere",
+        ...fontCSS,
+    }
+    const visibleCommitted = feedStream.committed.slice(-feedMaxVisible)
+    const partialOffset = feedStream.partial ? 1 : 0
+    const feedMask =
+        "linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%)"
+
     const panelLayout = (
         <>
             <Item
@@ -1042,28 +1314,63 @@ export default function ListeningUI(props: Props) {
                 )}
             </Item>
             {showTranscript && (
-                <Item
+                <div
                     style={{
                         flex: 1,
                         minWidth: 0,
-                        display: "flex",
-                        alignItems: "flex-start",
+                        minHeight: 0,
+                        overflow: "hidden",
                         marginTop: 4,
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "flex-end",
+                        WebkitMaskImage: feedMask,
+                        maskImage: feedMask,
                     }}
                 >
-                    {transcriptParagraph}
-                </Item>
+                    <div
+                        style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            justifyContent: "flex-end",
+                            gap: 6,
+                            width: "100%",
+                        }}
+                    >
+                        {visibleCommitted.map((entry, i) => {
+                            const reverseIndex =
+                                visibleCommitted.length - 1 - i
+                            const distance = reverseIndex + partialOffset
+                            return (
+                                <FeedLine
+                                    key={`line-${entry.id}`}
+                                    text={entry.text}
+                                    distance={distance}
+                                    isPartial={false}
+                                    fadeStrength={feedFadeStrength}
+                                    partialDim={feedPartialDim}
+                                    primaryOpacity={primaryOpacity}
+                                    canAnimate={canAnimate}
+                                    style={feedLineStyle}
+                                />
+                            )
+                        })}
+                        {feedStream.partial && (
+                            <FeedLine
+                                key={`line-${feedStream.partialId}`}
+                                text={feedStream.partial}
+                                distance={0}
+                                isPartial={true}
+                                fadeStrength={feedFadeStrength}
+                                partialDim={feedPartialDim}
+                                primaryOpacity={primaryOpacity}
+                                canAnimate={canAnimate}
+                                style={feedLineStyle}
+                            />
+                        )}
+                    </div>
+                </div>
             )}
-            <Item style={{ flexShrink: 0, marginTop: 6 }}>
-                <Waveform
-                    textColor={textColor}
-                    height={waveformHeight}
-                    width="100%"
-                    active={cycleActive}
-                    reducedMotion={reducedMotion || isStatic}
-                    barCount={11}
-                />
-            </Item>
         </>
     )
 
@@ -1116,13 +1423,13 @@ const isCycleEnabled = (p: any) =>
     p.enabled ?? p.cycle?.enabled ?? p.autoCycle ?? true
 const hasWaveform = (p: any) =>
     p.variant === "waveform" ||
-    p.variant === "panel" ||
     (p.layout?.iconKind ?? p.iconKind) === "waveform"
 const supportsIconKind = (p: any) =>
     p.variant === "icon" ||
     p.variant === "minimal" ||
     p.variant === "centered" ||
     p.variant === undefined
+const isPanelVariant = (p: any) => p.variant === "panel"
 const hideLegacy = () => true
 
 addPropertyControls(ListeningUI, {
@@ -1184,7 +1491,7 @@ addPropertyControls(ListeningUI, {
         defaultValue:
             "Schedule a follow-up with the product team next Tuesday.|Summarize the last three support calls.|Draft a reply and note the blockers from today.",
         displayTextArea: true,
-        description: "Separate with |",
+        description: "Separate with | (panel: feed lines)",
         hidden: (p: any) => !isCycleEnabled(p),
     },
     statuses: {
@@ -1219,7 +1526,7 @@ addPropertyControls(ListeningUI, {
     appearance: {
         type: ControlType.Object,
         title: "Appearance",
-        section: "Style",
+        section: "Appearance",
         controls: {
             backgroundColor: {
                 type: ControlType.Color,
@@ -1238,7 +1545,7 @@ addPropertyControls(ListeningUI, {
             },
             iconBackground: {
                 type: ControlType.Boolean,
-                title: "Icon BG",
+                title: "Icon Background",
                 defaultValue: true,
             },
             borderShow: {
@@ -1248,13 +1555,13 @@ addPropertyControls(ListeningUI, {
             },
             borderColor: {
                 type: ControlType.Color,
-                title: "Border Col",
+                title: "Border Color",
                 defaultValue: "",
                 hidden: (p: any) => !isBorderEnabled(p),
             },
             borderWidth: {
                 type: ControlType.Number,
-                title: "Border W",
+                title: "Border Width",
                 defaultValue: 1,
                 min: 0,
                 max: 4,
@@ -1280,10 +1587,11 @@ addPropertyControls(ListeningUI, {
             glassHighlight: {
                 type: ControlType.Number,
                 title: "Highlight",
-                defaultValue: 0.08,
+                defaultValue: 8,
                 min: 0,
-                max: 0.4,
-                step: 0.02,
+                max: 40,
+                step: 2,
+                unit: "%",
                 hidden: (p: any) => !isGlassEnabled(p),
             },
             glassNoise: {
@@ -1295,19 +1603,21 @@ addPropertyControls(ListeningUI, {
             glassShadow: {
                 type: ControlType.Number,
                 title: "Shadow",
-                defaultValue: 0.08,
+                defaultValue: 8,
                 min: 0,
-                max: 0.4,
-                step: 0.02,
+                max: 40,
+                step: 2,
+                unit: "%",
                 hidden: (p: any) => !isGlassEnabled(p),
             },
             glassOpacity: {
                 type: ControlType.Number,
-                title: "BG Opacity",
-                defaultValue: 0.8,
-                min: 0.1,
-                max: 1,
-                step: 0.05,
+                title: "Glass Opacity",
+                defaultValue: 80,
+                min: 0,
+                max: 100,
+                step: 5,
+                unit: "%",
                 hidden: (p: any) => !isGlassEnabled(p),
             },
         },
@@ -1315,7 +1625,7 @@ addPropertyControls(ListeningUI, {
     typography: {
         type: ControlType.Object,
         title: "Typography",
-        section: "Style",
+        section: "Typography",
         controls: {
             font: {
                 type: ControlType.Font,
@@ -1329,7 +1639,7 @@ addPropertyControls(ListeningUI, {
             },
             primaryOpacity: {
                 type: ControlType.Number,
-                title: "Primary Op",
+                title: "Primary Opacity",
                 defaultValue: 100,
                 min: 0,
                 max: 100,
@@ -1338,12 +1648,82 @@ addPropertyControls(ListeningUI, {
             },
             secondaryOpacity: {
                 type: ControlType.Number,
-                title: "Secondary Op",
+                title: "Secondary Opacity",
                 defaultValue: 50,
                 min: 0,
                 max: 100,
                 step: 5,
                 unit: "%",
+            },
+        },
+    },
+    feed: {
+        type: ControlType.Object,
+        title: "Feed",
+        section: "Style",
+        controls: {
+            loop: {
+                type: ControlType.Boolean,
+                title: "Loop",
+                defaultValue: true,
+                hidden: (p: any) => !isPanelVariant(p),
+            },
+            wordMs: {
+                type: ControlType.Number,
+                title: "Word Speed",
+                defaultValue: 90,
+                min: 30,
+                max: 300,
+                step: 5,
+                unit: "ms",
+                hidden: (p: any) => !isPanelVariant(p),
+            },
+            pauseMs: {
+                type: ControlType.Number,
+                title: "Pause",
+                defaultValue: 280,
+                min: 0,
+                max: 1200,
+                step: 20,
+                unit: "ms",
+                hidden: (p: any) => !isPanelVariant(p),
+            },
+            lineGapMs: {
+                type: ControlType.Number,
+                title: "Line Gap",
+                defaultValue: 600,
+                min: 0,
+                max: 3000,
+                step: 50,
+                unit: "ms",
+                hidden: (p: any) => !isPanelVariant(p),
+            },
+            maxVisible: {
+                type: ControlType.Number,
+                title: "Visible Lines",
+                defaultValue: 5,
+                min: 2,
+                max: 12,
+                step: 1,
+                hidden: (p: any) => !isPanelVariant(p),
+            },
+            partialDim: {
+                type: ControlType.Number,
+                title: "Partial Op",
+                defaultValue: 0.7,
+                min: 0.3,
+                max: 1,
+                step: 0.05,
+                hidden: (p: any) => !isPanelVariant(p),
+            },
+            fadeStrength: {
+                type: ControlType.Number,
+                title: "Line Fade",
+                defaultValue: 0.22,
+                min: 0,
+                max: 0.5,
+                step: 0.02,
+                hidden: (p: any) => !isPanelVariant(p),
             },
         },
     },
@@ -1354,7 +1734,7 @@ addPropertyControls(ListeningUI, {
         controls: {
             paddingX: {
                 type: ControlType.Number,
-                title: "Pad X",
+                title: "Padding X",
                 defaultValue: 20,
                 min: 0,
                 max: 64,
@@ -1363,7 +1743,7 @@ addPropertyControls(ListeningUI, {
             },
             paddingY: {
                 type: ControlType.Number,
-                title: "Pad Y",
+                title: "Padding Y",
                 defaultValue: 20,
                 min: 0,
                 max: 64,
@@ -1390,8 +1770,8 @@ addPropertyControls(ListeningUI, {
             },
             borderRadius: {
                 type: ControlType.Number,
-                title: "Radius",
-                defaultValue: 8,
+                title: "Border Radius",
+                defaultValue: 14,
                 min: 0,
                 max: 200,
                 step: 2,
@@ -1399,7 +1779,7 @@ addPropertyControls(ListeningUI, {
             },
             iconBorderRadius: {
                 type: ControlType.Number,
-                title: "Icon Rad",
+                title: "Icon Radius",
                 defaultValue: 8,
                 min: 0,
                 max: 200,
@@ -1434,7 +1814,7 @@ addPropertyControls(ListeningUI, {
             },
             waveformHeight: {
                 type: ControlType.Number,
-                title: "Wave H",
+                title: "Wave Height",
                 defaultValue: 28,
                 min: 8,
                 max: 60,
@@ -1447,7 +1827,7 @@ addPropertyControls(ListeningUI, {
     animation: {
         type: ControlType.Object,
         title: "Animation",
-        section: "Advanced",
+        section: "Animation",
         controls: {
             trigger: {
                 type: ControlType.Enum,

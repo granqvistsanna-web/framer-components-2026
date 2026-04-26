@@ -448,31 +448,88 @@ function Avatar({
     initials,
     size,
     accentColor,
+    glass,
 }: {
     url?: string
     initials?: string
     size: number
     accentColor: string
+    glass?: {
+        blur: number
+        highlight: number
+        noise: boolean
+        shadow: number
+        opacity: number
+        backgroundColor: string
+        textColor: string
+    }
 }) {
     const [imgError, setImgError] = useState(false)
     const showImage = url && !imgError
+    const glassActive = !!glass && !showImage
+    const radius = size * 0.25
+
+    const surfaceColor = glassActive
+        ? withAlpha(
+              glass!.backgroundColor,
+              Math.max(0.18, glass!.opacity * 0.42)
+          )
+        : showImage
+          ? "transparent"
+          : withAlpha(accentColor, 0.12)
+
+    const initialsColor = glassActive ? glass!.textColor : accentColor
 
     return (
         <div
             style={{
                 width: size,
                 height: size,
-                borderRadius: size * 0.25,
+                borderRadius: radius,
                 flexShrink: 0,
-                backgroundColor: showImage
-                    ? "transparent"
-                    : withAlpha(accentColor, 0.12),
+                backgroundColor: surfaceColor,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 overflow: "hidden",
+                position: "relative",
+                ...(glassActive && {
+                    backdropFilter: `blur(${Math.max(8, glass!.blur * 0.6)}px)`,
+                    WebkitBackdropFilter: `blur(${Math.max(8, glass!.blur * 0.6)}px)`,
+                    boxShadow: [
+                        `inset 0 0.5px 0 ${withAlpha("#ffffff", glass!.highlight * 2.2)}`,
+                        `0 8px 24px rgba(0, 0, 0, ${glass!.shadow * 0.75})`,
+                    ].join(", "),
+                    border: `1px solid ${withAlpha("#ffffff", glass!.highlight * 1.3)}`,
+                }),
             }}
         >
+            {glassActive && (
+                <>
+                    <div
+                        style={{
+                            position: "absolute",
+                            inset: 0,
+                            borderRadius: radius,
+                            background: `linear-gradient(180deg, ${withAlpha("#ffffff", glass!.highlight * 1.8)} 0%, transparent 55%)`,
+                            pointerEvents: "none",
+                        }}
+                    />
+                    {glass!.noise && (
+                        <div
+                            style={{
+                                position: "absolute",
+                                inset: 0,
+                                borderRadius: radius,
+                                opacity: 0.03,
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+                                backgroundSize: "128px 128px",
+                                pointerEvents: "none",
+                            }}
+                        />
+                    )}
+                </>
+            )}
             {showImage ? (
                 <img
                     src={url}
@@ -483,6 +540,7 @@ function Avatar({
                         height: "100%",
                         objectFit: "cover",
                         display: "block",
+                        position: "relative",
                     }}
                 />
             ) : initials ? (
@@ -490,10 +548,11 @@ function Avatar({
                     style={{
                         fontSize: size * 0.38,
                         fontWeight: 600,
-                        color: accentColor,
+                        color: initialsColor,
                         letterSpacing: "0.02em",
                         lineHeight: 1,
                         userSelect: "none",
+                        position: "relative",
                     }}
                 >
                     {initials}
@@ -508,11 +567,13 @@ function OverlappingAvatars({
     url2,
     size,
     accentColor,
+    glass,
 }: {
     url1?: string
     url2?: string
     size: number
     accentColor: string
+    glass?: React.ComponentProps<typeof Avatar>["glass"]
 }) {
     const overlap = size * 0.35
     return (
@@ -526,7 +587,7 @@ function OverlappingAvatars({
             }}
         >
             <div style={{ position: "relative", zIndex: 1 }}>
-                <Avatar url={url1} size={size} accentColor={accentColor} />
+                <Avatar url={url1} size={size} accentColor={accentColor} glass={glass} />
             </div>
             <div
                 style={{
@@ -535,7 +596,7 @@ function OverlappingAvatars({
                     marginLeft: -overlap,
                 }}
             >
-                <Avatar url={url2} size={size} accentColor={accentColor} />
+                <Avatar url={url2} size={size} accentColor={accentColor} glass={glass} />
             </div>
         </div>
     )
@@ -604,6 +665,21 @@ export default function MessageUI(props: Props) {
     const glassShadow = appearance.glassShadow ?? props.blur?.shadow ?? 0.08
     const glassOpacity =
         appearance.glassOpacity ?? props.blur?.opacity ?? 0.8
+    const surfaceGlassOpacity = blurEnabled
+        ? Math.min(1, glassOpacity + 0.06)
+        : glassOpacity
+
+    const avatarGlass = blurEnabled
+        ? {
+              blur: blurAmount,
+              highlight: glassHighlight,
+              noise: glassNoise,
+              shadow: glassShadow,
+              opacity: surfaceGlassOpacity,
+              backgroundColor,
+              textColor,
+          }
+        : undefined
 
     const isStatic = useIsStaticRenderer()
     const reducedMotion = useReducedMotion()
@@ -710,6 +786,12 @@ export default function MessageUI(props: Props) {
     const fontCSS = toFontStyle(font)
     const labelFontCSS = toFontStyle(labelFont)
     const resolvedBorderColor = borderColor || withAlpha(textColor, 0.08)
+    const cardBoxShadow = [
+        showBorder ? `inset 0 1px 0 ${withAlpha(textColor, 0.04)}` : null,
+        blurEnabled ? `0 8px 32px rgba(0, 0, 0, ${glassShadow})` : null,
+    ]
+        .filter(Boolean)
+        .join(", ")
 
     const cardStyle: React.CSSProperties = {
         display: "flex",
@@ -723,7 +805,7 @@ export default function MessageUI(props: Props) {
         gap,
         borderRadius,
         backgroundColor: blurEnabled
-            ? withAlpha(backgroundColor, glassOpacity)
+            ? withAlpha(backgroundColor, surfaceGlassOpacity)
             : backgroundColor,
         boxSizing: "border-box",
         overflow: "hidden",
@@ -734,7 +816,9 @@ export default function MessageUI(props: Props) {
         ...(blurEnabled && {
             backdropFilter: `blur(${blurAmount}px)`,
             WebkitBackdropFilter: `blur(${blurAmount}px)`,
-            boxShadow: `0 8px 32px rgba(0, 0, 0, ${glassShadow})`,
+        }),
+        ...(cardBoxShadow && {
+            boxShadow: cardBoxShadow,
         }),
         ...externalStyle,
     }
@@ -788,6 +872,7 @@ export default function MessageUI(props: Props) {
                     url2={avatarUrl2}
                     size={avatarSize}
                     accentColor={accentColor}
+                    glass={avatarGlass}
                 />
             ) : (
                 <Avatar
@@ -795,6 +880,7 @@ export default function MessageUI(props: Props) {
                     initials={initials}
                     size={avatarSize}
                     accentColor={accentColor}
+                    glass={avatarGlass}
                 />
             )
 
@@ -1073,6 +1159,7 @@ export default function MessageUI(props: Props) {
                             initials={initials}
                             size={avatarSize}
                             accentColor={accentColor}
+                            glass={avatarGlass}
                         />
                         <p style={nameStyle}>{senderName}</p>
                     </motion.div>
@@ -1089,6 +1176,7 @@ export default function MessageUI(props: Props) {
                             initials={initials}
                             size={avatarSize}
                             accentColor={accentColor}
+                            glass={avatarGlass}
                         />
                         <p style={nameStyle}>{senderName}</p>
                     </div>

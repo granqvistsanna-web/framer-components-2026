@@ -1,8 +1,8 @@
 /**
- * @id 16
- * #16 Fluid Pixel Text
+ * @id 72
+ * #72 Fluid Pixel Text 3D
  */
-// Fluid Pixel Text
+// Fluid Pixel Text 3D
 // @framerSupportedLayoutWidth any
 // @framerSupportedLayoutHeight any-prefer-fixed
 import React, { useEffect, useRef, useState, useCallback } from "react"
@@ -27,6 +27,8 @@ interface Particle {
   originY: number
   vx: number
   vy: number
+  z: number
+  vz: number
   color: string
   size: number
   returnScale: number
@@ -41,11 +43,14 @@ interface Props {
   repulsionStrength?: number
   swirl?: number
   elasticity?: number
+  depth3D?: number
+  parallax?: number
+  shadow3D?: boolean
   fadeIn?: boolean
   fadeInDuration?: number
 }
 
-function FluidPixelText(props: Props) {
+function FluidPixelText3D(props: Props) {
   const {
     image = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYxNyIgaGVpZ2h0PSIxODgiIHZpZXdCb3g9IjAgMCAxNjE3IDE4OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTS02LjkyMzcxZS0wNSAxODIuOTc5VjQuMDg5MDFIMTM4LjAwMVY1NS43MTE2SDY5LjI1NTlWNzAuNTMzOUgxMzIuODlWMTE1LjAwMUg2OS4yNTU5VjE4Mi45NzlILTYuOTIzNzFlLTA1Wk0xNDUuODE3IDE4Mi45NzlWNC4wODkwMUgyMTUuMDczVjEyOS41NjhIMjgxLjI2MlYxODIuOTc5SDE0NS44MTdaTTM2NS40MTUgMTg3LjA2OEMzMTAuOTgxIDE4Ny4wNjggMjgzLjEyNSAxNjEuMDAxIDI4My4xMjUgMTA5LjM3OVY0LjA4OTAxSDM1Mi4zODFWMTEyLjk1NkMzNTIuMzgxIDEyMi4xNTYgMzU2LjcyNiAxMjguNTQ1IDM2NS40MTUgMTI4LjU0NUMzNzQuMTA0IDEyOC41NDUgMzc4LjQ0OCAxMjIuMTU2IDM3OC40NDggMTEyLjk1NlY0LjA4OTAxSDQ0Ny43MDRWMTA5LjM3OUM0NDcuNzA0IDE2MS4wMDEgNDE5Ljg0OCAxODcuMDY4IDM2NS40MTUgMTg3LjA2OFpNNDU4LjkxNSAxODIuOTc5VjQuMDg5MDFINTI4LjE3MVYxODIuOTc5SDQ1OC45MTVaTTU0MC41OTMgMTgyLjk3OVY0LjA4OTAxSDYxMi40MDVDNjc5LjEwNSA0LjA4OTAxIDcwNy4yMTYgMzMuOTg5MiA3MDcuMjE2IDkyLjI1NjJDNzA3LjIxNiAxNTIuMzEyIDY3Ni4wMzggMTgyLjk3OSA2MDYuMDE2IDE4Mi45NzlINTQwLjU5M1pNNjEzLjE3MSAxMzAuMDc5QzYzMi4wODMgMTMwLjA3OSA2MzcuNDQ5IDExMy45NzkgNjM3LjQ0OSA5Mi4wMDA3QzYzNy40NDkgNzMuMDg5NCA2MzMuNjE2IDU2Ljk4OTMgNjE1Ljk4MiA1Ni45ODkzSDYwOS44NDlWMTMwLjA3OUg2MTMuMTcxWk03NTEuMzY4IDE4Mi45NzlWNC4wODkwMUg4NDIuNjAyQzg4OS44OCA0LjA4OTAxIDkxMy4xMzUgMjcuNjAwMyA5MTMuMTM1IDY0LjE0NDlDOTEzLjEzNSAxMDEuMjAxIDg4Ny4zMjQgMTI1LjczNCA4NDEuODM1IDEyNS43MzRIODIwLjYyNFYxODIuOTc5SDc1MS4zNjhaTTgyNy4yNjggODMuNTY3M0M4NDAuMDQ2IDgzLjU2NzMgODQ1LjQxMyA3Ni45MjI4IDg0NS40MTMgNjcuNDY3MkM4NDUuNDEzIDU3LjI0NDkgODQxLjMyNCA1MS42MjI2IDgyNy43NzkgNTEuNjIyNkg4MjAuNjI0VjgzLjU2NzNIODI3LjI2OFpNOTE4LjY0OCAxODIuOTc5VjQuMDg5MDFIOTg3LjkwNFYxODIuOTc5SDkxOC42NDhaTTk4OS44NDkgMTgyLjk3OUwxMDI4Ljk1IDg5LjcwMDdMOTkwLjM2IDQuMDg5MDFIMTA2Ny4yOEwxMDgxLjA0IDUyLjM4OTNMMTA5NS42NSA0LjA4OTAxSDExNzUuMTNMMTEzNi41NCA4OS4xODk1TDExNzYuOTIgMTgyLjk3OUgxMDk2LjQyTDEwODAuMzIgMTMyLjg5TDEwNjQuNDcgMTgyLjk3OUg5ODkuODQ5Wk0xMjQ3LjYgMTMxLjM1NkgxMzE5LjE2VjE4Mi45NzlIMTE3OC4wOVY0LjA4OTAxSDEzMTcuMzdWNTUuNzExNkgxMjQ3LjZWNzEuMDQ1SDEzMTIuMjZWMTEyLjcwMUgxMjQ3LjZWMTMxLjM1NlpNMTMyOC40IDE4Mi45NzlWNC4wODkwMUgxMzk3LjY1VjEyOS41NjhIMTQ2My44NFYxODIuOTc5SDEzMjguNFpNMTUzOC43NyAxODcuMDY4QzE1MDcuMDggMTg3LjA2OCAxNDgyLjU0IDE3Ny42MTIgMTQ2Ni4xOSAxNjYuMTEyVjExMi40NDVDMTQ3OS40OCAxMjIuNjY4IDE1MDUuNTQgMTMxLjM1NiAxNTI3LjI3IDEzMS4zNTZDMTUzNy40OSAxMzEuMzU2IDE1NDMuMTEgMTI5LjMxMiAxNTQzLjExIDEyNC40NTZDMTU0My4xMSAxMjAuMTEyIDE1NDEuNTggMTE3LjgxMiAxNTMzLjE0IDExNi4yNzlMMTUxNC4yMyAxMTMuMjEyQzE0ODIuMDMgMTA3Ljg0NSAxNDY0LjQgOTMuNzg5NiAxNDY0LjQgNjIuMzU2QzE0NjQuNCAyNi44MzM2IDE0ODcuOTEgMC4wMDAxMDUyOTUgMTU0My44OCAwLjAwMDEwNTI5NUMxNTc3Ljg3IDAuMDAwMTA1Mjk1IDE1OTcuNTQgMTAuNzMzNSAxNjA3LjI1IDE3LjYzMzVWNjguNzQ1QzE1OTYuMjcgNjEuNTg5NCAxNTc4LjM4IDU1LjQ1NiAxNTU1LjYzIDU1LjQ1NkMxNTQzLjM3IDU1LjQ1NiAxNTM3LjIzIDU3LjUwMDUgMTUzNy4yMyA2Mi42MTE2QzE1MzcuMjMgNjYuMTg5NCAxNTM4Ljc3IDY3Ljk3ODMgMTU0Ny4yIDY5LjI1NjFMMTU2Ni44OCA3MS41NTYxQzE1OTcuNTQgNzUuMzg5NSAxNjE2LjIgODcuMTQ1MSAxNjE2LjIgMTIxLjM5QzE2MTYuMiAxNjMuNTU3IDE1ODQuMjUgMTg3LjA2OCAxNTM4Ljc3IDE4Ny4wNjhaIiBmaWxsPSJibGFjayIvPgo8L3N2Zz4K",
     particleSize = 7,
@@ -55,6 +60,9 @@ function FluidPixelText(props: Props) {
     repulsionStrength = 4,
     swirl = 0.05,
     elasticity = 0.5,
+    depth3D = 0.5,
+    parallax = 0.3,
+    shadow3D = true,
     fadeIn = true,
     fadeInDuration = 0.6,
   } = props
@@ -130,7 +138,6 @@ function FluidPixelText(props: Props) {
       try {
         idata = octx.getImageData(0, 0, imgW, imgH)
       } catch {
-        // Tainted canvas (CORS) — surface failure instead of rendering blank
         setError(true)
         return
       }
@@ -160,7 +167,6 @@ function FluidPixelText(props: Props) {
             }
           }
           if (maxAlpha > 10) {
-            // Preserve sampled alpha so anti-aliased source edges stay soft
             const a = maxAlpha / 255
             particles.push({
               x: x + pad,
@@ -169,9 +175,10 @@ function FluidPixelText(props: Props) {
               originY: y + pad,
               vx: 0,
               vy: 0,
+              z: 0,
+              vz: 0,
               color: `rgba(${d[bestIdx]},${d[bestIdx + 1]},${d[bestIdx + 2]},${a})`,
               size: step,
-              // Per-particle return stagger — breaks uniform collapse into shimmer
               returnScale: 0.75 + Math.random() * 0.5,
             })
           }
@@ -187,7 +194,6 @@ function FluidPixelText(props: Props) {
   const buildFnRef = useRef(buildParticles)
   buildFnRef.current = buildParticles
 
-  // Load image via DOM sizer — one source of truth for layout + pixel data
   useEffect(() => {
     const img = sizerImgRef.current
     const container = containerRef.current
@@ -214,7 +220,6 @@ function FluidPixelText(props: Props) {
       imgRef.current = img
       const cw = container.clientWidth
       const ch = container.clientHeight
-      // Defer to ResizeObserver if container hasn't laid out yet
       if (cw === 0 && ch === 0) return
       buildFnRef.current(img, cw, ch)
     }
@@ -238,7 +243,6 @@ function FluidPixelText(props: Props) {
     }
   }, [image])
 
-  // Rebuild particles when particleSize/dispersionRadius changes
   useEffect(() => {
     const img = imgRef.current
     const container = containerRef.current
@@ -247,7 +251,6 @@ function FluidPixelText(props: Props) {
     }
   }, [buildParticles])
 
-  // Resize observer — CSS scales canvas smoothly between rebuilds via object-fit
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -279,7 +282,6 @@ function FluidPixelText(props: Props) {
     const ctx = ctxRef.current
     if (!ctx) return
 
-    // Delta-time normalization — physics stays constant across 60/120/144Hz
     const now = performance.now()
     const prevTime = lastFrameTimeRef.current
     const dt = prevTime ? now - prevTime : TARGET_FRAME_MS
@@ -297,7 +299,6 @@ function FluidPixelText(props: Props) {
     const mvx = mouseRef.current.vx
     const mvy = mouseRef.current.vy
     const mouseSpeed = Math.sqrt(mvx * mvx + mvy * mvy)
-    // Soft falloff replaces hard gate — slow swipes still register
     const mouseInfluence = Math.max(
       0,
       Math.min(
@@ -314,7 +315,8 @@ function FluidPixelText(props: Props) {
     const pushK = scaledStrength * 0.2 * dtFactor
     const spreadK = scaledStrength * 0.08 * dtFactor
     const swirlK = scaledStrength * swirl * 0.2 * dtFactor
-    // Squared "near home" range — damping tapers inside this to allow overshoot
+    // Z impulse scales with pixel density so pop feels consistent across DPRs
+    const zPushK = scaledStrength * 0.15 * depth3D * dtFactor
     const relaxRange = scaledRadius * 0.35
     const relaxRange2 = relaxRange * relaxRange
 
@@ -338,14 +340,16 @@ function FluidPixelText(props: Props) {
 
         p.vx += sinA * f * swirlK
         p.vy -= cosA * f * swirlK
+
+        // Near-hits pop forward; grazing hits sink slightly — reads as tilt
+        p.vz += (f - 0.3) * zPushK
       }
 
-      // Per-particle stagger on restorative force — pixels re-form as shimmer
       p.vx += (p.originX - p.x) * returnF * p.returnScale
       p.vy += (p.originY - p.y) * returnF * p.returnScale
+      // Z tracks back to the plane at the same rate — no drift at rest
+      p.vz += (0 - p.z) * returnF * p.returnScale
 
-      // Elasticity: taper friction near origin so spring force wins for a
-      // brief overshoot. Squared distance avoids a sqrt per particle.
       const hx = p.x - p.originX
       const hy = p.y - p.originY
       const homeDist2 = hx * hx + hy * hy
@@ -354,58 +358,97 @@ function FluidPixelText(props: Props) {
       const settleF = frictionF + (1 - frictionF) * nearHome * elasticity
       p.vx *= settleF
       p.vy *= settleF
+      p.vz *= settleF
 
       p.vx = Math.max(-maxVel, Math.min(maxVel, p.vx))
       p.vy = Math.max(-maxVel, Math.min(maxVel, p.vy))
+      p.vz = Math.max(-maxVel, Math.min(maxVel, p.vz))
 
       p.x += p.vx * dtFactor
       p.y += p.vy * dtFactor
+      p.z += p.vz * dtFactor
 
       const drift = Math.abs(p.x - p.originX) + Math.abs(p.y - p.originY)
-      if (drift > p.size) {
+      // Clear origin also when z is non-trivial — otherwise the baseline
+      // drawImage shows through under the perspective-scaled render
+      if (drift > p.size || Math.abs(p.z) > 0.2) {
         ctx.clearRect(p.originX, p.originY, p.size, p.size)
       }
     })
 
-    // Decay only when pointer is stationary or off-canvas — preserves full
-    // velocity during active drags where pointer events arrive every frame
     if (now - lastPointerTimeRef.current > POINTER_IDLE_DECAY_MS) {
       const mouseDecayF = Math.pow(MOUSE_VELOCITY_DECAY, dtFactor)
       mouseRef.current.vx *= mouseDecayF
       mouseRef.current.vy *= mouseDecayF
     }
 
+    // Perspective tuning: z is in radius-normalized units, so values typically
+    // fall in [-1, 2]. Keep multipliers low for "slight" 3D — larger values
+    // shear the text apart at the edges.
+    const cx = c.width / 2
+    const cy = c.height / 2
+    const scaleK = 0.12 * depth3D
+    const parallaxK = 0.04 * depth3D * parallax
+    const canShadow = shadow3D && depth3D > 0
+
     const originalAlpha = ctx.globalAlpha
     particlesRef.current.forEach((p) => {
       const drift = Math.abs(p.x - p.originX) + Math.abs(p.y - p.originY)
-      if (drift > 0.3) {
-        ctx.fillStyle = p.color
-        ctx.fillRect(p.x, p.y, p.size, p.size)
+      const lifted = Math.abs(p.z) > 0.05
+      if (drift <= 0.3 && !lifted) return
 
-        const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy)
-        if (speed > 1.5) {
-          const trailLen = Math.min(speed * 0.7, p.size * 5)
-          const nx = -p.vx / speed
-          const ny = -p.vy / speed
-          const steps = Math.min(Math.ceil(trailLen / p.size), 4)
-          const stepDist = trailLen / steps
-          // Alpha-faded trail reads as motion blur, not stamped copies
-          for (let s = 1; s <= steps; s++) {
-            ctx.globalAlpha = originalAlpha * (1 - s / (steps + 1))
-            ctx.fillRect(
-              p.x + nx * stepDist * s,
-              p.y + ny * stepDist * s,
-              p.size,
-              p.size
-            )
-          }
-          ctx.globalAlpha = originalAlpha
+      const zScale = 1 + p.z * scaleK
+      const rSize = Math.max(1, p.size * zScale)
+      const sizeDelta = (rSize - p.size) / 2
+      const px = (p.x - cx) * p.z * parallaxK
+      const py = (p.y - cy) * p.z * parallaxK
+      const rx = p.x - sizeDelta + px
+      const ry = p.y - sizeDelta + py
+
+      if (canShadow && p.z > 0.3) {
+        // Soft drop shadow only for lifted particles — depth cue without
+        // doubling fillRect cost on the whole field
+        const sAlpha = Math.min(0.22, p.z * 0.14) * depth3D
+        const sOff = p.size * 0.35 * p.z
+        ctx.fillStyle = `rgba(0,0,0,${sAlpha})`
+        ctx.fillRect(rx + sOff, ry + sOff, rSize, rSize)
+      }
+
+      ctx.fillStyle = p.color
+      ctx.fillRect(rx, ry, rSize, rSize)
+
+      const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy)
+      if (speed > 1.5) {
+        const trailLen = Math.min(speed * 0.7, p.size * 5)
+        const nx = -p.vx / speed
+        const ny = -p.vy / speed
+        const steps = Math.min(Math.ceil(trailLen / p.size), 4)
+        const stepDist = trailLen / steps
+        for (let s = 1; s <= steps; s++) {
+          ctx.globalAlpha = originalAlpha * (1 - s / (steps + 1))
+          ctx.fillRect(
+            rx + nx * stepDist * s,
+            ry + ny * stepDist * s,
+            rSize,
+            rSize
+          )
         }
+        ctx.globalAlpha = originalAlpha
       }
     })
 
     rafRef.current = requestAnimationFrame(loop)
-  }, [dispersionRadius, returnSpeed, friction, repulsionStrength, swirl, elasticity])
+  }, [
+    dispersionRadius,
+    returnSpeed,
+    friction,
+    repulsionStrength,
+    swirl,
+    elasticity,
+    depth3D,
+    parallax,
+    shadow3D,
+  ])
 
   useEffect(() => {
     if (!loaded) return
@@ -432,8 +475,6 @@ function FluidPixelText(props: Props) {
     const dt = lastT ? now - lastT : TARGET_FRAME_MS
     lastPointerTimeRef.current = now
 
-    // Time-normalize velocity so event-rate differences don't change feel.
-    // Clamp raw delta to suppress teleport spikes (window switch, cursor warp).
     const isReentry = prev.x < -9000 || dt > POINTER_STALE_MS
     const timeScale = TARGET_FRAME_MS / Math.max(dt, 1)
     const smooth = 0.5
@@ -457,7 +498,6 @@ function FluidPixelText(props: Props) {
   }, [])
 
   const onPointerLeave = useCallback(() => {
-    // Move off-canvas but let velocity trail off naturally via loop decay
     mouseRef.current.x = -9999
     mouseRef.current.y = -9999
     lastPointerTimeRef.current = 0
@@ -477,7 +517,6 @@ function FluidPixelText(props: Props) {
         minHeight: MIN_CONTAINER_HEIGHT,
       }}
     >
-      {/* Flow-participating sizer — gives component intrinsic aspect + drives fluid scaling */}
       <img
         ref={sizerImgRef}
         src={image}
@@ -495,8 +534,6 @@ function FluidPixelText(props: Props) {
           userSelect: "none",
         }}
       />
-      {/* Canvas fills container + bleed. Explicit width/height required: canvas is a
-          replaced element, so auto width resolves to intrinsic (not left+right insets). */}
       <canvas
         ref={canvasRef}
         width={dims.w}
@@ -535,9 +572,9 @@ function FluidPixelText(props: Props) {
   )
 }
 
-FluidPixelText.displayName = "Fluid Pixel Text"
+FluidPixelText3D.displayName = "Fluid Pixel Text 3D"
 
-addPropertyControls(FluidPixelText, {
+addPropertyControls(FluidPixelText3D, {
   image: {
     type: ControlType.File,
     title: "Image",
@@ -604,6 +641,31 @@ addPropertyControls(FluidPixelText, {
     step: 0.05,
     description: "Higher = particles bounce into place",
   },
+  depth3D: {
+    type: ControlType.Number,
+    title: "3D Depth",
+    defaultValue: 0.5,
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    description: "Perspective pop when particles are pushed",
+  },
+  parallax: {
+    type: ControlType.Number,
+    title: "Parallax",
+    defaultValue: 0.3,
+    min: 0,
+    max: 1,
+    step: 0.05,
+    description: "Edge particles shift more with depth",
+    hidden: (props: Props) => !props.depth3D,
+  },
+  shadow3D: {
+    type: ControlType.Boolean,
+    title: "Drop Shadow",
+    defaultValue: true,
+    hidden: (props: Props) => !props.depth3D,
+  },
   fadeIn: {
     type: ControlType.Boolean,
     title: "Fade In",
@@ -621,4 +683,4 @@ addPropertyControls(FluidPixelText, {
   },
 })
 
-export default FluidPixelText
+export default FluidPixelText3D

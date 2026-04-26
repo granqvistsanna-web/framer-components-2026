@@ -438,6 +438,7 @@ function AvatarBadge({
     borderRadius,
     icon,
     animated,
+    glass,
 }: {
     imageUrl?: string
     initials?: string
@@ -446,9 +447,32 @@ function AvatarBadge({
     borderRadius: number
     icon?: React.ReactNode
     animated?: boolean
+    glass?: {
+        blur: number
+        highlight: number
+        noise: boolean
+        shadow: number
+        opacity: number
+        backgroundColor: string
+        textColor: string
+    }
 }) {
     const [imgError, setImgError] = useState(false)
     const showImage = imageUrl && !imgError
+    const glassActive = !!glass && !showImage
+
+    const surfaceColor = glassActive
+        ? withAlpha(
+              glass!.backgroundColor,
+              Math.max(0.18, glass!.opacity * 0.42)
+          )
+        : showImage
+          ? "transparent"
+          : accentColor
+
+    const initialsColor = glassActive
+        ? glass!.textColor
+        : contrastText(accentColor)
 
     return (
         <div
@@ -486,14 +510,49 @@ function AvatarBadge({
                     width: size,
                     height: size,
                     borderRadius,
-                    backgroundColor: showImage ? "transparent" : accentColor,
+                    backgroundColor: surfaceColor,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     overflow: "hidden",
                     position: "relative",
+                    ...(glassActive && {
+                        backdropFilter: `blur(${Math.max(8, glass!.blur * 0.6)}px)`,
+                        WebkitBackdropFilter: `blur(${Math.max(8, glass!.blur * 0.6)}px)`,
+                        boxShadow: [
+                            `inset 0 0.5px 0 ${withAlpha("#ffffff", glass!.highlight * 2.2)}`,
+                            `0 8px 24px rgba(0, 0, 0, ${glass!.shadow * 0.75})`,
+                        ].join(", "),
+                        border: `1px solid ${withAlpha("#ffffff", glass!.highlight * 1.3)}`,
+                    }),
                 }}
             >
+                {glassActive && (
+                    <>
+                        <div
+                            style={{
+                                position: "absolute",
+                                inset: 0,
+                                borderRadius,
+                                background: `linear-gradient(180deg, ${withAlpha("#ffffff", glass!.highlight * 1.8)} 0%, transparent 55%)`,
+                                pointerEvents: "none",
+                            }}
+                        />
+                        {glass!.noise && (
+                            <div
+                                style={{
+                                    position: "absolute",
+                                    inset: 0,
+                                    borderRadius,
+                                    opacity: 0.03,
+                                    backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+                                    backgroundSize: "128px 128px",
+                                    pointerEvents: "none",
+                                }}
+                            />
+                        )}
+                    </>
+                )}
                 {showImage ? (
                     <img
                         src={imageUrl}
@@ -506,19 +565,21 @@ function AvatarBadge({
                             height: "100%",
                             objectFit: "cover",
                             display: "block",
+                            position: "relative",
                         }}
                     />
                 ) : icon ? (
-                    icon
+                    <span style={{ position: "relative", display: "inline-flex" }}>{icon}</span>
                 ) : initials ? (
                     <span
                         style={{
-                            color: contrastText(accentColor),
+                            color: initialsColor,
                             fontSize: size * 0.38,
                             fontWeight: 600,
                             letterSpacing: "0.02em",
                             lineHeight: 1,
                             userSelect: "none",
+                            position: "relative",
                         }}
                     >
                         {initials.slice(0, 2).toUpperCase()}
@@ -595,6 +656,9 @@ export default function DetailUI(props: Props) {
     const glassShadow = appearance.glassShadow ?? props.blur?.shadow ?? 0.08
     const glassOpacity =
         appearance.glassOpacity ?? props.blur?.opacity ?? 0.8
+    const surfaceGlassOpacity = blurEnabled
+        ? Math.min(1, glassOpacity + 0.06)
+        : glassOpacity
     const paddingX = layout.paddingX ?? props.padding?.x ?? 20
     const paddingY = layout.paddingY ?? props.padding?.y ?? 20
     const showStatusDot =
@@ -676,6 +740,13 @@ export default function DetailUI(props: Props) {
 
     // ── Shared styles ───────────────────────────────────────────────────
 
+    const cardBoxShadow = [
+        showBorder ? `inset 0 1px 0 ${withAlpha(textColor, 0.04)}` : null,
+        blurEnabled ? `0 8px 32px rgba(0, 0, 0, ${glassShadow})` : null,
+    ]
+        .filter(Boolean)
+        .join(", ")
+
     const cardStyle: React.CSSProperties = {
         display: "flex",
         flexDirection: variant === "event" ? "column" : "row",
@@ -685,7 +756,7 @@ export default function DetailUI(props: Props) {
         padding: `${paddingY}px ${paddingX}px`,
         borderRadius,
         backgroundColor: blurEnabled
-            ? withAlpha(backgroundColor, glassOpacity)
+            ? withAlpha(backgroundColor, surfaceGlassOpacity)
             : backgroundColor,
         boxSizing: "border-box",
         overflow: "hidden",
@@ -697,7 +768,9 @@ export default function DetailUI(props: Props) {
         ...(blurEnabled && {
             backdropFilter: `blur(${blurAmount}px)`,
             WebkitBackdropFilter: `blur(${blurAmount}px)`,
-            boxShadow: `0 8px 32px rgba(0, 0, 0, ${glassShadow})`,
+        }),
+        ...(cardBoxShadow && {
+            boxShadow: cardBoxShadow,
         }),
         ...externalStyle,
     }
@@ -744,7 +817,7 @@ export default function DetailUI(props: Props) {
         : Math.min(12, borderRadius)
 
     const avatarIcon = (() => {
-        const c = contrastText(accentColor)
+        const c = blurEnabled ? textColor : contrastText(accentColor)
         switch (variant) {
             case "attachment": return <AttachmentIcon color={c} size={iconSize} />
             case "invoice": return <InvoiceIcon color={c} size={iconSize} />
@@ -757,6 +830,18 @@ export default function DetailUI(props: Props) {
             default: return <CompanyIcon color={c} size={iconSize} />
         }
     })()
+
+    const avatarGlass = blurEnabled
+        ? {
+              blur: blurAmount,
+              highlight: glassHighlight,
+              noise: glassNoise,
+              shadow: glassShadow,
+              opacity: surfaceGlassOpacity,
+              backgroundColor,
+              textColor,
+          }
+        : undefined
 
     const hasAnimatedAvatar = ["contact", "candidate"].includes(variant)
 
@@ -876,6 +961,7 @@ export default function DetailUI(props: Props) {
                 accentColor={accentColor}
                 borderRadius={iconBorderRadius}
                 icon={avatarIcon}
+                glass={avatarGlass}
             />
         )
 
@@ -1041,6 +1127,7 @@ export default function DetailUI(props: Props) {
                                 borderRadius={iconBorderRadius}
                                 icon={avatarIcon}
                                 animated={hasAnimatedAvatar && shouldAnimate}
+                                glass={avatarGlass}
                             />
                         </Item>
                         <Item style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: textGap }}>
@@ -1063,6 +1150,7 @@ export default function DetailUI(props: Props) {
                                 accentColor={accentColor}
                                 borderRadius={iconBorderRadius}
                                 icon={avatarIcon}
+                                glass={avatarGlass}
                             />
                         </Item>
                         <Item style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: textGap }}>
@@ -1086,6 +1174,7 @@ export default function DetailUI(props: Props) {
                                 accentColor={accentColor}
                                 borderRadius={iconBorderRadius}
                                 icon={avatarIcon}
+                                glass={avatarGlass}
                             />
                         </Item>
                         <Item style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
@@ -1106,6 +1195,7 @@ export default function DetailUI(props: Props) {
                                 accentColor={accentColor}
                                 borderRadius={iconBorderRadius}
                                 icon={avatarIcon}
+                                glass={avatarGlass}
                             />
                         </Item>
                         <Item style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: textGap }}>
@@ -1139,6 +1229,7 @@ export default function DetailUI(props: Props) {
                                 accentColor={accentColor}
                                 borderRadius={iconBorderRadius}
                                 icon={avatarIcon}
+                                glass={avatarGlass}
                             />
                         </Item>
                         <Item style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: textGap }}>
@@ -1165,6 +1256,7 @@ export default function DetailUI(props: Props) {
                                 borderRadius={iconBorderRadius}
                                 icon={avatarIcon}
                                 animated={hasAnimatedAvatar && shouldAnimate}
+                                glass={avatarGlass}
                             />
                         </Item>
                         <Item style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: textGap }}>
@@ -1213,6 +1305,7 @@ export default function DetailUI(props: Props) {
                                 accentColor={accentColor}
                                 borderRadius={iconBorderRadius}
                                 icon={avatarIcon}
+                                glass={avatarGlass}
                             />
                         </Item>
                         <Item style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: textGap }}>
@@ -1237,6 +1330,7 @@ export default function DetailUI(props: Props) {
                                 accentColor={accentColor}
                                 borderRadius={iconBorderRadius}
                                 icon={avatarIcon}
+                                glass={avatarGlass}
                             />
                         </Item>
                         <Item style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: textGap }}>

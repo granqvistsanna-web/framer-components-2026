@@ -321,6 +321,11 @@ function useCountUp(
 
 // ── Utilities ───────────────────────────────────────────────────────────────
 
+function normalizeGlass(v: number | undefined, fallback: number): number {
+    if (v === undefined || v === null || Number.isNaN(v)) return fallback
+    return v > 1 ? v / 100 : v
+}
+
 function withAlpha(color: string, alpha: number): string {
     // Handle rgba/rgb
     const rgbaMatch = color.match(
@@ -946,14 +951,14 @@ export default function MetricUI(props: Props) {
         appearanceGroup.glassEnabled ?? props.blur?.enabled ?? false
     const blurAmount =
         appearanceGroup.glassAmount ?? props.blur?.amount ?? 16
-    const glassHighlight =
-        appearanceGroup.glassHighlight ?? props.blur?.highlight ?? 0.08
+    const glassHighlight = normalizeGlass(appearanceGroup.glassHighlight, props.blur?.highlight ?? 0.08)
     const glassNoise =
         appearanceGroup.glassNoise ?? props.blur?.noise ?? true
-    const glassShadow =
-        appearanceGroup.glassShadow ?? props.blur?.shadow ?? 0.08
-    const glassOpacity =
-        appearanceGroup.glassOpacity ?? props.blur?.opacity ?? 0.8
+    const glassShadow = normalizeGlass(appearanceGroup.glassShadow, props.blur?.shadow ?? 0.08)
+    const glassOpacity = normalizeGlass(appearanceGroup.glassOpacity, props.blur?.opacity ?? 0.8)
+    const surfaceGlassOpacity = blurEnabled
+        ? Math.min(1, glassOpacity + 0.06)
+        : glassOpacity
 
     const font = typographyGroup.font ?? (typographyGroup as any).valueFont ?? props.font
     const labelFont = typographyGroup.labelFont ?? props.labelFont
@@ -969,8 +974,8 @@ export default function MetricUI(props: Props) {
         props.subtitleOpacity ??
         35
 
-    const paddingX = layout.paddingX ?? props.padding?.x ?? 24
-    const paddingY = layout.paddingY ?? props.padding?.y ?? 24
+    const paddingX = layout.paddingX ?? props.padding?.x ?? 20
+    const paddingY = layout.paddingY ?? props.padding?.y ?? 20
     const borderRadius = layout.borderRadius ?? props.borderRadius ?? 14
     const gap = layout.gap ?? props.gap ?? 0
     const textGap = layout.textGap ?? props.textGap ?? 4
@@ -1122,6 +1127,13 @@ export default function MetricUI(props: Props) {
     // Shared card style
     const resolvedBorderColor = borderColor || withAlpha(textColor, 0.08)
 
+    const cardBoxShadow = [
+        showBorder ? `inset 0 1px 0 ${withAlpha(textColor, 0.04)}` : null,
+        blurEnabled ? `0 8px 32px rgba(0, 0, 0, ${glassShadow})` : null,
+    ]
+        .filter(Boolean)
+        .join(", ")
+
     const cardStyle: React.CSSProperties = {
         display: "flex",
         flexDirection: "column",
@@ -1131,18 +1143,21 @@ export default function MetricUI(props: Props) {
         padding: `${paddingY}px ${paddingX}px`,
         gap: gap > 0 ? gap : undefined,
         borderRadius,
-        backgroundColor: blurEnabled ? withAlpha(backgroundColor, glassOpacity) : backgroundColor,
+        backgroundColor: blurEnabled
+            ? withAlpha(backgroundColor, surfaceGlassOpacity)
+            : backgroundColor,
         boxSizing: "border-box",
         overflow: "hidden",
         position: "relative",
         ...(showBorder && {
             border: `${borderWidth}px solid ${resolvedBorderColor}`,
-            boxShadow: `inset 0 1px 0 ${withAlpha(textColor, 0.04)}`,
         }),
         ...(blurEnabled && {
             backdropFilter: `blur(${blurAmount}px)`,
             WebkitBackdropFilter: `blur(${blurAmount}px)`,
-            boxShadow: `0 8px 32px rgba(0, 0, 0, ${glassShadow})`,
+        }),
+        ...(cardBoxShadow && {
+            boxShadow: cardBoxShadow,
         }),
     }
 
@@ -1624,7 +1639,7 @@ addPropertyControls(MetricUI, {
 
     label: {
         type: ControlType.String,
-        title: "Label",
+        title: "Title",
         defaultValue: "Monthly revenue",
         section: "Content",
     },
@@ -1771,7 +1786,7 @@ addPropertyControls(MetricUI, {
     },
     progressBarHeight: {
         type: ControlType.Number,
-        title: "Bar H",
+        title: "Bar Height",
         defaultValue: 12,
         min: 2,
         max: 32,
@@ -1781,7 +1796,7 @@ addPropertyControls(MetricUI, {
     },
     progressBarRadius: {
         type: ControlType.Number,
-        title: "Bar R",
+        title: "Bar Radius",
         defaultValue: 99,
         min: 0,
         max: 99,
@@ -1791,7 +1806,7 @@ addPropertyControls(MetricUI, {
     },
     progressRingSize: {
         type: ControlType.Number,
-        title: "Ring Size",
+        title: "Ring Diameter",
         defaultValue: 80,
         min: 40,
         max: 200,
@@ -1887,7 +1902,7 @@ addPropertyControls(MetricUI, {
     },
     cycleTrendDirection: {
         type: ControlType.SegmentedEnum,
-        title: "Trend Dir",
+        title: "Trend Direction",
         options: ["up", "down"],
         optionTitles: ["\u2191 Up", "\u2193 Down"],
         defaultValue: "up",
@@ -1944,7 +1959,7 @@ addPropertyControls(MetricUI, {
     appearance: {
         type: ControlType.Object,
         title: "Appearance",
-        section: "Style",
+        section: "Appearance",
         controls: {
             backgroundColor: {
                 type: ControlType.Color,
@@ -1968,13 +1983,13 @@ addPropertyControls(MetricUI, {
             },
             borderColor: {
                 type: ControlType.Color,
-                title: "Border Col",
+                title: "Border Color",
                 defaultValue: "",
                 hidden: (p: any) => !isBorderEnabled(p),
             },
             borderWidth: {
                 type: ControlType.Number,
-                title: "Border W",
+                title: "Border Width",
                 defaultValue: 1,
                 min: 0,
                 max: 4,
@@ -2000,10 +2015,11 @@ addPropertyControls(MetricUI, {
             glassHighlight: {
                 type: ControlType.Number,
                 title: "Highlight",
-                defaultValue: 0.08,
+                defaultValue: 8,
                 min: 0,
-                max: 0.4,
-                step: 0.02,
+                max: 40,
+                step: 2,
+                unit: "%",
                 hidden: (p: any) => !isGlassEnabled(p),
             },
             glassNoise: {
@@ -2015,19 +2031,21 @@ addPropertyControls(MetricUI, {
             glassShadow: {
                 type: ControlType.Number,
                 title: "Shadow",
-                defaultValue: 0.08,
+                defaultValue: 8,
                 min: 0,
-                max: 0.4,
-                step: 0.02,
+                max: 40,
+                step: 2,
+                unit: "%",
                 hidden: (p: any) => !isGlassEnabled(p),
             },
             glassOpacity: {
                 type: ControlType.Number,
-                title: "BG Opacity",
-                defaultValue: 0.8,
-                min: 0.1,
-                max: 1,
-                step: 0.05,
+                title: "Glass Opacity",
+                defaultValue: 80,
+                min: 0,
+                max: 100,
+                step: 5,
+                unit: "%",
                 hidden: (p: any) => !isGlassEnabled(p),
             },
         },
@@ -2038,7 +2056,7 @@ addPropertyControls(MetricUI, {
     typography: {
         type: ControlType.Object,
         title: "Typography",
-        section: "Style",
+        section: "Typography",
         controls: {
             font: {
                 type: ControlType.Font,
@@ -2057,7 +2075,7 @@ addPropertyControls(MetricUI, {
             },
             primaryOpacity: {
                 type: ControlType.Number,
-                title: "Primary Op",
+                title: "Primary Opacity",
                 defaultValue: 50,
                 min: 0,
                 max: 100,
@@ -2066,7 +2084,7 @@ addPropertyControls(MetricUI, {
             },
             secondaryOpacity: {
                 type: ControlType.Number,
-                title: "Secondary Op",
+                title: "Secondary Opacity",
                 defaultValue: 35,
                 min: 0,
                 max: 100,
@@ -2085,8 +2103,8 @@ addPropertyControls(MetricUI, {
         controls: {
             paddingX: {
                 type: ControlType.Number,
-                title: "Pad X",
-                defaultValue: 24,
+                title: "Padding X",
+                defaultValue: 20,
                 min: 0,
                 max: 64,
                 step: 2,
@@ -2094,8 +2112,8 @@ addPropertyControls(MetricUI, {
             },
             paddingY: {
                 type: ControlType.Number,
-                title: "Pad Y",
-                defaultValue: 24,
+                title: "Padding Y",
+                defaultValue: 20,
                 min: 0,
                 max: 64,
                 step: 2,
@@ -2121,7 +2139,7 @@ addPropertyControls(MetricUI, {
             },
             borderRadius: {
                 type: ControlType.Number,
-                title: "Radius",
+                title: "Border Radius",
                 defaultValue: 14,
                 min: 0,
                 max: 32,
@@ -2136,7 +2154,7 @@ addPropertyControls(MetricUI, {
     animation: {
         type: ControlType.Object,
         title: "Animation",
-        section: "Advanced",
+        section: "Animation",
         controls: {
             trigger: {
                 type: ControlType.Enum,
