@@ -743,6 +743,32 @@ export default function CMSSlider(props: CMSSliderProps) {
 
     const isInline = arrows.type === "Inline"
 
+    // When pagination sits at the top or bottom, the visual center of the
+    // cards is offset from the geometric center of the component. Shift
+    // vertically-centered arrows by half the pagination footprint so they
+    // align with the cards, not the whole component area.
+    const paginationVerticalShift = React.useMemo(() => {
+        if (dots.type === "None" || !showNav) return 0
+        if (isInline && arrows.show) return 0
+        let h = 0
+        if (dots.type === "Dots") h = dots.size + dots.padding * 2
+        else if (dots.type === "Progress") h = 4
+        else if (dots.type === "Numbers") h = 13 + dots.padding
+        const footprint = dots.inset + h
+        if (dots.alignment.includes("Bottom")) return -footprint / 2
+        if (dots.alignment.includes("Top")) return footprint / 2
+        return 0
+    }, [
+        dots.type,
+        dots.size,
+        dots.padding,
+        dots.inset,
+        dots.alignment,
+        showNav,
+        isInline,
+        arrows.show,
+    ])
+
     // Position style for an arrow container.
     // For Split, each arrow gets its own container anchored to its edge
     // (pass "prev"/"next"). For Grouped/Inline, one shared container holds
@@ -790,7 +816,9 @@ export default function CMSSlider(props: CMSSliderProps) {
             style.bottom = inset - offY
         } else {
             style.top = "50%"
-            transforms.push(`translateY(calc(-50% + ${offY}px))`)
+            transforms.push(
+                `translateY(calc(-50% + ${offY + paginationVerticalShift}px))`
+            )
         }
 
         if (transforms.length > 0) {

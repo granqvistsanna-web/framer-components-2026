@@ -133,6 +133,18 @@ function clamp(n: number, min: number, max: number) {
 }
 
 // ============================================
+// PLACEHOLDER IMAGES
+// ============================================
+
+const PLACEHOLDER_IMAGES = [
+    "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=1000&q=80",
+    "https://images.unsplash.com/photo-1495616811223-4d98c6e9c869?auto=format&fit=crop&w=1000&q=80",
+    "https://images.unsplash.com/photo-1444090542259-0af8fa96557e?auto=format&fit=crop&w=1000&q=80",
+    "https://images.unsplash.com/photo-1500964757637-c85e8a162699?auto=format&fit=crop&w=1000&q=80",
+    "https://images.unsplash.com/photo-1502082553048-f009c37129b9?auto=format&fit=crop&w=1000&q=80",
+]
+
+// ============================================
 // ICONS
 // ============================================
 
@@ -366,7 +378,9 @@ export default function CMSSliderPro(props: CMSSliderProps) {
     }, [itemCount, effectiveItems, navigation.step])
 
     const dotCount = maxIndex + 1
-    const showNav = isCanvas ? itemCount > 0 || !!content : itemCount > effectiveItems
+    const showNav = isCanvas
+        ? itemCount > 0 || !!effectiveContent
+        : itemCount > effectiveItems
 
     const showArrowsNow =
         arrows.show && showNav && (!arrows.fadeIn || isActive || isCanvas)
@@ -444,13 +458,38 @@ export default function CMSSliderPro(props: CMSSliderProps) {
     }, [dots.type, dots.tickShape, dots.size])
 
     // ============================================
+    // PLACEHOLDER (when no CMS connected)
+    // ============================================
+
+    const placeholderContent = React.useMemo(
+        () =>
+            Array.from({ length: 9 }).map((_, i) => (
+                <div
+                    key={i}
+                    style={{
+                        width: "100%",
+                        height: "100%",
+                        backgroundImage: `url(${PLACEHOLDER_IMAGES[i % PLACEHOLDER_IMAGES.length]})`,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                        backgroundColor: "#1a1a2e",
+                    }}
+                />
+            )),
+        []
+    )
+
+    const usingPlaceholder = !content
+    const effectiveContent = content || placeholderContent
+
+    // ============================================
     // CANVAS FIX: STRUCTURE NORMALIZATION
     // ============================================
 
     const normalizedContent = React.useMemo(() => {
-        if (!content) return null
+        if (!effectiveContent) return null
 
-        const childCount = React.Children.count(content)
+        const childCount = React.Children.count(effectiveContent)
 
         if (childCount > 1) {
             return (
@@ -463,12 +502,12 @@ export default function CMSSliderPro(props: CMSSliderProps) {
                         flexDirection: isVertical ? "column" : "row",
                     }}
                 >
-                    {content}
+                    {effectiveContent}
                 </div>
             )
         }
-        return content
-    }, [content, layout.gap, isVertical])
+        return effectiveContent
+    }, [effectiveContent, layout.gap, isVertical])
 
     // ============================================
     // SIZE + ITEM COUNT
@@ -518,7 +557,7 @@ export default function CMSSliderPro(props: CMSSliderProps) {
         const ro = new ResizeObserver(measure)
         ro.observe(container)
         return () => { ro.disconnect(); cancelAnimationFrame(rafId) }
-    }, [layout.padding, isCanvas, itemsPerView, isVertical, content])
+    }, [layout.padding, isCanvas, itemsPerView, isVertical, effectiveContent])
 
     // ============================================
     // LAYOUT CALCS
@@ -915,54 +954,6 @@ export default function CMSSliderPro(props: CMSSliderProps) {
     }
 
     // ============================================
-    // EMPTY STATE
-    // ============================================
-
-    if (!content) {
-        return (
-            <div
-                style={{
-                    width: "100%",
-                    height: "100%",
-                    minWidth: 200,
-                    minHeight: 200,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: "#EBEAF9",
-                    color: "#8855FF",
-                    fontFamily: "Inter, system-ui, sans-serif",
-                    textAlign: "center",
-                    padding: 12,
-                    boxSizing: "border-box",
-                    overflow: "hidden",
-                }}
-            >
-                <div
-                    style={{
-                        fontSize: 14,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                    }}
-                >
-                    Connect to Content
-                </div>
-                <div
-                    style={{
-                        fontSize: 12,
-                        color: "#9999AA",
-                        maxWidth: 200,
-                        lineHeight: 1.4,
-                    }}
-                >
-                    Add layers or components to make infinite slides.
-                </div>
-            </div>
-        )
-    }
-
-    // ============================================
     // CENTER FOCUS
     // ============================================
 
@@ -1114,9 +1105,8 @@ export default function CMSSliderPro(props: CMSSliderProps) {
                 position: "relative",
                 width: "100%",
                 height: "100%",
+                overflow: centerFocus.enabled ? "visible" : "hidden",
                 ...cssVars,
-                minWidth: 200,
-                minHeight: 200,
             }}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
@@ -1142,6 +1132,31 @@ export default function CMSSliderPro(props: CMSSliderProps) {
               }
             `}</style>
             {centerFocusCSS && <style>{centerFocusCSS}</style>}
+
+            {/* Placeholder hint — canvas only */}
+            {usingPlaceholder && isCanvas && (
+                <div
+                    style={{
+                        position: "absolute",
+                        top: 8,
+                        left: 8,
+                        zIndex: 11,
+                        padding: "4px 8px",
+                        background: "rgba(0,0,0,0.55)",
+                        backdropFilter: "blur(8px)",
+                        WebkitBackdropFilter: "blur(8px)",
+                        color: "#fff",
+                        fontFamily: "Inter, system-ui, sans-serif",
+                        fontSize: 11,
+                        fontWeight: 500,
+                        borderRadius: 6,
+                        pointerEvents: "none",
+                        letterSpacing: 0.2,
+                    }}
+                >
+                    Demo · Connect CMS
+                </div>
+            )}
 
             {/* Screen reader live region */}
             <div

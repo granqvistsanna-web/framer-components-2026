@@ -726,11 +726,21 @@ export default function FluidImage(props: FluidImageProps) {
 
     const objectFitValue = objectFit === "contain" ? 1 : objectFit === "fill" ? 2 : 0
 
+    const colorRgbs = React.useMemo(
+        () => ({
+            c1: parseColorToRgb01(effectColor1),
+            c2: parseColorToRgb01(effectColor2),
+            c3: parseColorToRgb01(effectColor3),
+            c4: parseColorToRgb01(effectColor4),
+        }),
+        [effectColor1, effectColor2, effectColor3, effectColor4]
+    )
+
     const stateRef = React.useRef<ShaderState>({
-        effectColor1Rgb: parseColorToRgb01(effectColor1),
-        effectColor2Rgb: parseColorToRgb01(effectColor2),
-        effectColor3Rgb: parseColorToRgb01(effectColor3),
-        effectColor4Rgb: parseColorToRgb01(effectColor4),
+        effectColor1Rgb: colorRgbs.c1,
+        effectColor2Rgb: colorRgbs.c2,
+        effectColor3Rgb: colorRgbs.c3,
+        effectColor4Rgb: colorRgbs.c4,
         showGradient,
         radius,
         strength,
@@ -747,10 +757,10 @@ export default function FluidImage(props: FluidImageProps) {
         objectFit: objectFitValue,
     })
     stateRef.current = {
-        effectColor1Rgb: parseColorToRgb01(effectColor1),
-        effectColor2Rgb: parseColorToRgb01(effectColor2),
-        effectColor3Rgb: parseColorToRgb01(effectColor3),
-        effectColor4Rgb: parseColorToRgb01(effectColor4),
+        effectColor1Rgb: colorRgbs.c1,
+        effectColor2Rgb: colorRgbs.c2,
+        effectColor3Rgb: colorRgbs.c3,
+        effectColor4Rgb: colorRgbs.c4,
         showGradient,
         radius,
         strength,
@@ -1435,6 +1445,8 @@ export default function FluidImage(props: FluidImageProps) {
                 style={{
                     width: "100%",
                     height: "100%",
+                    minWidth: 200,
+                    minHeight: 200,
                     position: "relative",
                     overflow: "visible",
                 }}
@@ -1459,6 +1471,8 @@ export default function FluidImage(props: FluidImageProps) {
             style={{
                 width: "100%",
                 height: "100%",
+                minWidth: 200,
+                minHeight: 200,
                 position: "relative",
                 overflow: "visible",
             }}

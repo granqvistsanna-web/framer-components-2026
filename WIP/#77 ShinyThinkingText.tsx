@@ -73,9 +73,9 @@ export default function ShinyThinkingText({
         display: "inline-block",
         whiteSpace: "nowrap",
         backgroundImage: gradient,
-        backgroundSize: "220% 100%",
-        backgroundRepeat: "no-repeat",
-        backgroundPosition: "0% 50%",
+        backgroundSize: "200% 100%",
+        backgroundRepeat: "repeat",
+        backgroundPosition: "100% 50%",
         WebkitBackgroundClip: "text",
         backgroundClip: "text",
         WebkitTextFillColor: "transparent",
@@ -99,7 +99,7 @@ export default function ShinyThinkingText({
                         ...font,
                         display: "inline-block",
                         whiteSpace: "nowrap",
-                        color: shineColor,
+                        color: baseColor,
                     }}
                 >
                     {safe[0]}
@@ -125,11 +125,11 @@ export default function ShinyThinkingText({
                 <motion.span
                     key={safeIndex}
                     style={textStyle}
-                    initial={{ y: "100%", opacity: 0, backgroundPositionX: "-120%" }}
+                    initial={{ y: "100%", opacity: 0, backgroundPositionX: "100%" }}
                     animate={{
                         y: "0%",
                         opacity: 1,
-                        backgroundPositionX: ["-120%", "120%"],
+                        backgroundPositionX: ["100%", "-100%"],
                     }}
                     exit={{ y: "-100%", opacity: 0 }}
                     transition={{
