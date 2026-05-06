@@ -335,9 +335,14 @@ export default function CMSSliderPro(props: CMSSliderProps) {
         }
 
         // Wait a frame for CMS content to render
-        const raf = requestAnimationFrame(extract)
-        // Re-extract if content changes
-        const mo = new MutationObserver(extract)
+        let raf = requestAnimationFrame(extract)
+        // Re-extract if content changes — coalesce bursts into one rAF tick
+        // so a single CMS update doesn't trigger the walker dozens of times.
+        const scheduleExtract = () => {
+            cancelAnimationFrame(raf)
+            raf = requestAnimationFrame(extract)
+        }
+        const mo = new MutationObserver(scheduleExtract)
         mo.observe(el, { childList: true, subtree: true, characterData: true })
         return () => {
             cancelAnimationFrame(raf)
@@ -376,6 +381,31 @@ export default function CMSSliderPro(props: CMSSliderProps) {
         }
         return Math.max(0, itemCount - effectiveItems)
     }, [itemCount, effectiveItems, navigation.step])
+
+    // ============================================
+    // PLACEHOLDER (when no CMS connected)
+    // ============================================
+
+    const placeholderContent = React.useMemo(
+        () =>
+            Array.from({ length: 9 }).map((_, i) => (
+                <div
+                    key={i}
+                    style={{
+                        width: "100%",
+                        height: "100%",
+                        backgroundImage: `url(${PLACEHOLDER_IMAGES[i % PLACEHOLDER_IMAGES.length]})`,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center",
+                        backgroundColor: "#1a1a2e",
+                    }}
+                />
+            )),
+        []
+    )
+
+    const usingPlaceholder = !content
+    const effectiveContent = content || placeholderContent
 
     const dotCount = maxIndex + 1
     const showNav = isCanvas
@@ -456,31 +486,6 @@ export default function CMSSliderPro(props: CMSSliderProps) {
             lineThickness,
         }
     }, [dots.type, dots.tickShape, dots.size])
-
-    // ============================================
-    // PLACEHOLDER (when no CMS connected)
-    // ============================================
-
-    const placeholderContent = React.useMemo(
-        () =>
-            Array.from({ length: 9 }).map((_, i) => (
-                <div
-                    key={i}
-                    style={{
-                        width: "100%",
-                        height: "100%",
-                        backgroundImage: `url(${PLACEHOLDER_IMAGES[i % PLACEHOLDER_IMAGES.length]})`,
-                        backgroundSize: "cover",
-                        backgroundPosition: "center",
-                        backgroundColor: "#1a1a2e",
-                    }}
-                />
-            )),
-        []
-    )
-
-    const usingPlaceholder = !content
-    const effectiveContent = content || placeholderContent
 
     // ============================================
     // CANVAS FIX: STRUCTURE NORMALIZATION
@@ -721,6 +726,26 @@ export default function CMSSliderPro(props: CMSSliderProps) {
         moved: false,
     })
 
+    // Click-suppress timer + listener tracked so unmount cleans them up.
+    const clickSuppressTimeoutRef = React.useRef<number | null>(null)
+    const clickSuppressListenerRef = React.useRef<((ev: Event) => void) | null>(
+        null
+    )
+    React.useEffect(() => {
+        return () => {
+            if (clickSuppressTimeoutRef.current != null) {
+                window.clearTimeout(clickSuppressTimeoutRef.current)
+            }
+            if (clickSuppressListenerRef.current) {
+                window.removeEventListener(
+                    "click",
+                    clickSuppressListenerRef.current,
+                    { capture: true } as any
+                )
+            }
+        }
+    }, [])
+
     const getCurrentTranslate = () => (isVertical ? y.get() : x.get())
 
     const onPointerDown = (e: React.PointerEvent) => {
@@ -818,17 +843,21 @@ export default function CMSSliderPro(props: CMSSliderProps) {
             ev.preventDefault()
             ev.stopPropagation()
         }
+        clickSuppressListenerRef.current = preventClick
         window.addEventListener("click", preventClick, {
             capture: true,
             once: true,
         })
-        setTimeout(
-            () =>
-                window.removeEventListener("click", preventClick, {
-                    capture: true,
-                } as any),
-            50
-        )
+        if (clickSuppressTimeoutRef.current != null) {
+            window.clearTimeout(clickSuppressTimeoutRef.current)
+        }
+        clickSuppressTimeoutRef.current = window.setTimeout(() => {
+            window.removeEventListener("click", preventClick, {
+                capture: true,
+            } as any)
+            clickSuppressListenerRef.current = null
+            clickSuppressTimeoutRef.current = null
+        }, 50)
     }
 
     // ============================================
@@ -857,6 +886,21 @@ export default function CMSSliderPro(props: CMSSliderProps) {
         flexShrink: 0,
     }
 
+    // Pagination is always bottom-anchored in this component, so vertically
+    // centered arrows shift up by half its footprint to align with the cards
+    // instead of the geometric center of the whole component area.
+    const paginationVerticalShift = React.useMemo(() => {
+        if (dots.type === "None" || !showNav) return 0
+        let h = 0
+        if (dots.type === "Dots") h = dots.size + dots.padding * 2
+        else if (dots.type === "Progress") h = 4
+        else if (dots.type === "Numbers") h = 13 + dots.padding
+        else if (dots.type === "Timeline")
+            h = Math.max(dots.size * 1.4 + 4, 24) + dots.padding * 2
+        const footprint = dots.inset + h
+        return -footprint / 2
+    }, [dots.type, dots.size, dots.padding, dots.inset, showNav])
+
     const getArrowContainerStyles = (): React.CSSProperties => {
         const isGroup = arrows.type === "Grouped"
         const align = arrows.alignment
@@ -864,6 +908,7 @@ export default function CMSSliderPro(props: CMSSliderProps) {
         const hInset = inset + sideInset
         const offX = arrows.offsetX
         const offY = arrows.offsetY
+        const vShift = paginationVerticalShift
 
         const style: React.CSSProperties = {
             position: "absolute",
@@ -895,9 +940,9 @@ export default function CMSSliderPro(props: CMSSliderProps) {
         } else {
             style.top = "50%"
             if (align.includes("Center Center")) {
-                style.transform = `translate(calc(-50% + ${offX}px), calc(-50% + ${offY}px))`
+                style.transform = `translate(calc(-50% + ${offX}px), calc(-50% + ${offY + vShift}px))`
             } else {
-                style.transform = `translateY(calc(-50% + ${offY}px))`
+                style.transform = `translateY(calc(-50% + ${offY + vShift}px))`
                 if (style.left === "50%")
                     style.transform += ` translateX(${offX}px)`
             }
@@ -910,7 +955,7 @@ export default function CMSSliderPro(props: CMSSliderProps) {
             style.justifyContent = "space-between"
             if (align.startsWith("Center")) {
                 style.top = "50%"
-                style.transform = `translateY(calc(-50% + ${offY}px))`
+                style.transform = `translateY(calc(-50% + ${offY + vShift}px))`
                 style.height = 0
                 style.overflow = "visible"
             }
@@ -1063,39 +1108,6 @@ export default function CMSSliderPro(props: CMSSliderProps) {
     `
 
     // ============================================
-    // STATIC RENDERER FALLBACK
-    // ============================================
-
-    if (isStatic) {
-        return (
-            <div
-                style={{
-                    position: "relative",
-                    width: "100%",
-                    height: "100%",
-                    overflow: "hidden",
-                    ...cssVars,
-                }}
-            >
-                <style>{css}</style>
-                <div
-                    className={trackClass}
-                    style={{
-                        display: "flex",
-                        flexDirection: isVertical ? "column" : "row",
-                        width: "100%",
-                        height: "100%",
-                        padding: layout.padding,
-                        boxSizing: "border-box",
-                    }}
-                >
-                    {normalizedContent}
-                </div>
-            </div>
-        )
-    }
-
-    // ============================================
     // RENDER
     // ============================================
 
@@ -1203,7 +1215,7 @@ export default function CMSSliderPro(props: CMSSliderProps) {
                     boxSizing: "border-box",
                 }}
             >
-                {isCanvas ? (
+                {isCanvas || isStatic ? (
                     <div
                         className={trackClass}
                         style={{
@@ -1233,7 +1245,6 @@ export default function CMSSliderPro(props: CMSSliderProps) {
                             y: isVertical ? y : undefined,
                         }}
                         role="group"
-                        aria-live="polite"
                     >
                         {normalizedContent}
                     </motion.div>

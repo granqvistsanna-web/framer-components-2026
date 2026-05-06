@@ -107,6 +107,16 @@ interface CenterFocusSettings {
     transitionSpeed: number
 }
 
+type AppearType = "None" | "Fade" | "Slide Up" | "Slide Down" | "Scale" | "Blur"
+
+interface AppearSettings {
+    type: AppearType
+    mode: "All Together" | "Stagger"
+    duration: number
+    distance: number
+    stagger: number
+}
+
 interface CMSSliderProps {
     content: React.ReactNode
     direction: "Left" | "Right" | "Up" | "Down"
@@ -117,6 +127,7 @@ interface CMSSliderProps {
     arrows: ArrowSettings
     dots: DotSettings
     centerFocus: CenterFocusSettings
+    appear: AppearSettings
     animationOptions: any
 }
 
@@ -235,6 +246,13 @@ const DEFAULT_CENTER_FOCUS: CenterFocusSettings = {
     inactiveOpacity: 0.5,
     transitionSpeed: 0.35,
 }
+const DEFAULT_APPEAR: AppearSettings = {
+    type: "Fade",
+    mode: "Stagger",
+    duration: 0.4,
+    distance: 24,
+    stagger: 0.06,
+}
 const DEFAULT_ANIMATION = { type: "spring", stiffness: 240, damping: 28, mass: 1 }
 
 export default function CMSSlider(props: CMSSliderProps) {
@@ -252,6 +270,7 @@ export default function CMSSlider(props: CMSSliderProps) {
     const arrows: ArrowSettings = { ...DEFAULT_ARROWS, ...(props.arrows || {}) }
     const dots: DotSettings = { ...DEFAULT_DOTS, ...(props.dots || {}) }
     const centerFocus: CenterFocusSettings = { ...DEFAULT_CENTER_FOCUS, ...(props.centerFocus || {}) }
+    const appear: AppearSettings = { ...DEFAULT_APPEAR, ...(props.appear || {}) }
     const animationOptions = props.animationOptions || DEFAULT_ANIMATION
 
     const { interval, pauseOnHover, loop, startAt } = playback
@@ -281,6 +300,10 @@ export default function CMSSlider(props: CMSSliderProps) {
 
     const isCanvas = RenderTarget.current() === RenderTarget.canvas
     const isStatic = useIsStaticRenderer()
+    // Canvas (Framer editor) and static renderer (SSG/thumbnails/social previews)
+    // both need the non-motion branch — motion values render unanimated and the
+    // drag/pointer handlers don't make sense outside the live preview.
+    const isFrozen = isCanvas || isStatic
     const containerRef = React.useRef<HTMLDivElement>(null)
     const reactId = React.useId()
     const instanceId = `cms-slider-${reactId.replace(/:/g, "-")}`
@@ -293,6 +316,7 @@ export default function CMSSlider(props: CMSSliderProps) {
     const [activeIndex, setActiveIndex] = React.useState(0)
     const [isHovered, setIsHovered] = React.useState(false)
     const [isFocused, setIsFocused] = React.useState(false)
+    const [isDragging, setIsDragging] = React.useState(false)
     const isActive = isHovered || isFocused
 
     const [reducedMotion, setReducedMotion] = React.useState(false)
@@ -344,7 +368,15 @@ export default function CMSSlider(props: CMSSliderProps) {
                         flexDirection: isVertical ? "column" : "row",
                     }}
                 >
-                    {content}
+                    {React.Children.map(content, (child, i) => (
+                        <div
+                            role="group"
+                            aria-roledescription="Slide"
+                            aria-label={`Slide ${i + 1} of ${childCount}`}
+                        >
+                            {child}
+                        </div>
+                    ))}
                 </div>
             )
         }
@@ -381,12 +413,37 @@ export default function CMSSlider(props: CMSSliderProps) {
                 )
 
                 let count = 0
+                let itemContainer: Element | null = null
                 const findItems = (el: Element) => {
-                    if (el.children.length >= 2)
-                        count = Math.max(count, el.children.length)
+                    if (el.children.length >= count && el.children.length >= 2) {
+                        count = el.children.length
+                        itemContainer = el
+                    }
                     Array.from(el.children).forEach(findItems)
                 }
                 findItems(container)
+
+                // Label CMS-rendered slides for screen readers. Only set when
+                // missing so synthetic role="group" wrappers (childCount > 1
+                // branch in normalizedContent) aren't overwritten.
+                if (itemContainer && !isCanvas) {
+                    const slides = Array.from(
+                        (itemContainer as Element).children
+                    )
+                    slides.forEach((child, i) => {
+                        if (!child.getAttribute("aria-roledescription")) {
+                            child.setAttribute("role", "group")
+                            child.setAttribute(
+                                "aria-roledescription",
+                                "Slide"
+                            )
+                        }
+                        child.setAttribute(
+                            "aria-label",
+                            `Slide ${i + 1} of ${slides.length}`
+                        )
+                    })
+                }
 
                 if (isCanvas) {
                     // On canvas, CMS repeats the first item to fill the view,
@@ -540,7 +597,9 @@ export default function CMSSlider(props: CMSSliderProps) {
     React.useEffect(() => {
         if (!navigation.keyboard || isCanvas) return
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (!isActive) return
+            // Only fire when the slider has focus — hovering shouldn't
+            // hijack page-level arrow scrolling.
+            if (!isFocused) return
             const tag = (e.target as HTMLElement)?.tagName?.toLowerCase()
             if (tag === "input" || tag === "textarea" || tag === "select") return
             if ((e.target as HTMLElement)?.isContentEditable) return
@@ -557,7 +616,7 @@ export default function CMSSlider(props: CMSSliderProps) {
         }
         window.addEventListener("keydown", handleKeyDown)
         return () => window.removeEventListener("keydown", handleKeyDown)
-    }, [navigation.keyboard, isCanvas, isActive, isVertical, goPrev, goNext])
+    }, [navigation.keyboard, isCanvas, isFocused, isVertical, goPrev, goNext])
 
     // ============================================
     // DRAG
@@ -580,6 +639,9 @@ export default function CMSSlider(props: CMSSliderProps) {
     )
     React.useEffect(() => {
         return () => {
+            if (controlsRef.current) {
+                controlsRef.current.stop()
+            }
             if (clickSuppressTimeoutRef.current != null) {
                 window.clearTimeout(clickSuppressTimeoutRef.current)
             }
@@ -612,6 +674,7 @@ export default function CMSSlider(props: CMSSliderProps) {
         dragRef.current.lastTime = now
         dragRef.current.velocity = 0
         dragRef.current.moved = false
+        setIsDragging(true)
         ;(e.currentTarget as any).setPointerCapture?.(e.pointerId)
     }
 
@@ -659,6 +722,7 @@ export default function CMSSlider(props: CMSSliderProps) {
     const onPointerUp = (e: React.PointerEvent) => {
         if (!dragRef.current.dragging) return
         dragRef.current.dragging = false
+        setIsDragging(false)
         ;(e.currentTarget as any).releasePointerCapture?.(e.pointerId)
 
         if (!dragRef.current.moved) return
@@ -1111,7 +1175,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                         borderRadius: dots.radius,
                         backdropFilter:
                             dots.blur > 0 ? `blur(${dots.blur}px)` : undefined,
-                        fontFamily: "Inter, system-ui, sans-serif",
+                        fontFamily: "inherit",
                         fontSize: 13,
                         fontWeight: 500,
                         color: dots.fill,
@@ -1152,7 +1216,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                     justifyContent: "center",
                     backgroundColor: "#EBEAF9",
                     color: "#8855FF",
-                    fontFamily: "Inter, system-ui, sans-serif",
+                    fontFamily: "inherit",
                     textAlign: "center",
                     padding: 12,
                     boxSizing: "border-box",
@@ -1224,7 +1288,16 @@ export default function CMSSlider(props: CMSSliderProps) {
         }
 
         return rules.join("\n")
-    }, [centerFocus, centerIndex, itemCount, trackClass])
+    }, [
+        centerFocus.enabled,
+        centerFocus.transitionSpeed,
+        centerFocus.inactiveOpacity,
+        centerFocus.inactiveScale,
+        centerFocus.activeScale,
+        centerIndex,
+        itemCount,
+        trackClass,
+    ])
 
     // ============================================
     // CSS VARS + CSS
@@ -1246,7 +1319,7 @@ export default function CMSSlider(props: CMSSliderProps) {
         "--slider-align": flexAlign,
     } as React.CSSProperties
 
-    const css = `
+    const css = React.useMemo(() => `
       .${trackClass} {
         will-change: transform;
         backface-visibility: hidden;
@@ -1301,7 +1374,114 @@ export default function CMSSlider(props: CMSSliderProps) {
         -webkit-user-drag: none !important;
         user-drag: none !important;
       }
-    `
+    `, [trackClass, isVertical, isFill])
+
+    // ============================================
+    // APPEAR EFFECT
+    // ============================================
+
+    // CSS-driven appear: same HTML on SSR/CSR, browser plays the animation
+    // on first paint, no JS opacity gate to get stuck. The animation also
+    // hides Framer's "scattered flash" under opacity:0 while it ramps up.
+    const appearAnimName = `cmsslider-appear-${instanceId}`
+
+    // Center focus uses !important on opacity/transform for items, which
+    // overrides CSS animations entirely (per CSS Animations spec). So when
+    // center focus is on, Stagger mode silently falls back to All Together —
+    // the outer container animates instead of items, and nothing conflicts.
+    const effectiveAppearMode: "All Together" | "Stagger" = centerFocus.enabled
+        ? "All Together"
+        : appear.mode
+
+    const appearKeyframes = React.useMemo(() => {
+        const t = appear.type
+        if (t === "None" || reducedMotion) return ""
+
+        const d = appear.distance
+        let from = "opacity: 0;"
+        // Reset only what `from` touched — leaves transform/filter alone
+        // when not used, so other rules keep their value.
+        let to = "opacity: 1;"
+        if (t === "Slide Up") {
+            from += ` transform: translateY(${d}px);`
+            to += ` transform: translateY(0);`
+        } else if (t === "Slide Down") {
+            from += ` transform: translateY(-${d}px);`
+            to += ` transform: translateY(0);`
+        } else if (t === "Scale") {
+            from += ` transform: scale(0.96);`
+            to += ` transform: scale(1);`
+        } else if (t === "Blur") {
+            from += ` filter: blur(10px);`
+            to += ` filter: none;`
+        }
+
+        return `@keyframes ${appearAnimName} {
+            from { ${from} }
+            to { ${to} }
+        }`
+    }, [appear.type, appear.distance, appearAnimName, reducedMotion])
+
+    const appearStyle: React.CSSProperties =
+        appear.type === "None" ||
+        reducedMotion ||
+        effectiveAppearMode !== "All Together"
+            ? {}
+            : {
+                  animation: `${appearAnimName} ${appear.duration}s cubic-bezier(0.32, 0.72, 0, 1) both`,
+              }
+
+    const itemAppearCSS = React.useMemo(() => {
+        if (
+            appear.type === "None" ||
+            effectiveAppearMode !== "Stagger" ||
+            reducedMotion
+        ) return ""
+
+        const STAGGER_CAP = 12
+        const cap = Math.min(itemCount > 0 ? itemCount : STAGGER_CAP, STAGGER_CAP)
+        const stagger = Math.max(0, appear.stagger)
+
+        const delayRules = Array.from({ length: cap })
+            .map(
+                (_, i) =>
+                    `.${trackClass} > * > *:nth-child(${i + 1}) { animation-delay: ${(
+                        i * stagger
+                    ).toFixed(3)}s; }`
+            )
+            .join("\n")
+
+        return `
+            .${trackClass} > * > * {
+                animation: ${appearAnimName} ${appear.duration}s cubic-bezier(0.32, 0.72, 0, 1) both;
+            }
+            ${delayRules}
+        `
+    }, [
+        appear.type,
+        effectiveAppearMode,
+        appear.duration,
+        appear.stagger,
+        reducedMotion,
+        itemCount,
+        trackClass,
+        appearAnimName,
+    ])
+
+    const styleSheet = React.useMemo(
+        () => `${css}
+          [data-cms-slider]:focus-visible {
+              outline: 2px solid currentColor;
+              outline-offset: -2px;
+          }
+          [data-cms-slider]:focus:not(:focus-visible) {
+              outline: none;
+          }
+          ${appearKeyframes}
+          ${itemAppearCSS}
+        `,
+        [css, appearKeyframes, itemAppearCSS]
+    )
 
     // ============================================
     // RENDER
@@ -1318,6 +1498,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                 minHeight: 200,
                 aspectRatio:
                     layout.aspectRatio > 0 ? layout.aspectRatio : undefined,
+                ...appearStyle,
             }}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
@@ -1333,15 +1514,7 @@ export default function CMSSlider(props: CMSSliderProps) {
             aria-roledescription="carousel"
             aria-label="Slider"
         >
-            <style>{css}{`
-              [data-cms-slider]:focus-visible {
-                  outline: 2px solid currentColor;
-                  outline-offset: -2px;
-              }
-              [data-cms-slider]:focus:not(:focus-visible) {
-                  outline: none;
-              }
-            `}</style>
+            <style>{styleSheet}</style>
             {centerFocusCSS && <style>{centerFocusCSS}</style>}
 
             {/* Screen reader live region */}
@@ -1371,7 +1544,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                     boxSizing: "border-box",
                 }}
             >
-                {isCanvas || isStatic ? (
+                {isFrozen ? (
                     <div
                         className={trackClass}
                         style={{
@@ -1394,13 +1567,16 @@ export default function CMSSlider(props: CMSSliderProps) {
                             flexDirection: isVertical ? "column" : "row",
                             width: "100%",
                             height: "100%",
-                            cursor: draggable ? "grab" : "default",
+                            cursor: draggable
+                                ? isDragging
+                                    ? "grabbing"
+                                    : "grab"
+                                : "default",
                             touchAction: isVertical ? "pan-x" : "pan-y",
                             userSelect: "none",
                             x: isVertical ? undefined : x,
                             y: isVertical ? y : undefined,
                         }}
-                        role="group"
                     >
                         {normalizedContent}
                     </motion.div>
@@ -1644,6 +1820,72 @@ addPropertyControls(CMSSlider, {
                 max: 1,
                 step: 0.05,
                 unit: "s",
+            },
+        },
+    },
+
+    appear: {
+        type: ControlType.Object,
+        title: "Appear",
+        controls: {
+            type: {
+                type: ControlType.Enum,
+                title: "Effect",
+                options: [
+                    "None",
+                    "Fade",
+                    "Slide Up",
+                    "Slide Down",
+                    "Scale",
+                    "Blur",
+                ],
+                defaultValue: "Fade",
+                description:
+                    "Animation when the slider first becomes ready.",
+            },
+            mode: {
+                type: ControlType.Enum,
+                title: "Mode",
+                options: ["Stagger", "All Together"],
+                optionTitles: ["Stagger", "All Together"],
+                defaultValue: "Stagger",
+                description:
+                    "Stagger cascades each card. All Together animates the whole slider.",
+                hidden: (p: AppearSettings) => p.type === "None",
+            },
+            stagger: {
+                type: ControlType.Number,
+                title: "Stagger",
+                defaultValue: 0.06,
+                min: 0,
+                max: 0.3,
+                step: 0.02,
+                unit: "s",
+                description: "Delay between each card.",
+                hidden: (p: AppearSettings) =>
+                    p.type === "None" || p.mode !== "Stagger",
+            },
+            duration: {
+                type: ControlType.Number,
+                title: "Duration",
+                defaultValue: 0.4,
+                min: 0.1,
+                max: 2,
+                step: 0.05,
+                unit: "s",
+                hidden: (p: AppearSettings) => p.type === "None",
+            },
+            distance: {
+                type: ControlType.Number,
+                title: "Distance",
+                defaultValue: 24,
+                min: 0,
+                max: 200,
+                step: 2,
+                unit: "px",
+                description: "Slide distance when using a Slide effect.",
+                hidden: (p: AppearSettings) =>
+                    p.type !== "Slide Up" && p.type !== "Slide Down",
             },
         },
     },

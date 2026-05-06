@@ -33,6 +33,7 @@ type PaneStyle = "solid" | "glass"
 interface Line {
     text: string
     tool: ToolKind
+    toolArg: string
     revisesPrev: boolean
     inlineEditFrom: string
     inlineEditTo: string
@@ -44,6 +45,7 @@ interface ContentGroup {
     holdMs: number
     holdAfterRevisionMs: number
     loop: boolean
+    loopMode: "Reset" | "Continuous"
     maxVisible: number
     showTimer: boolean
     showStatusBar: boolean
@@ -100,6 +102,7 @@ interface AnimationGroup {
     trigger: AnimationTrigger
     lineFadeMs: number
     blurMaxPx: number
+    typeMs: number
 }
 
 interface Props {
@@ -121,26 +124,28 @@ const MONO_STACK =
 const NOISE_BG = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`
 
 const DEFAULT_CHIP_COLORS: ChipColors = {
-    tool: "#3a8a5c",
-    read: "#4a7fb8",
-    think: "#8a6fb8",
-    write: "#b8893a",
-    search: "#3a9a9a",
-    web: "#a85a8c",
-    done: "#6a6a6a",
+    tool: "#6db990",
+    read: "#74a8d6",
+    think: "#b89ad9",
+    write: "#d6a35e",
+    search: "#66c4c4",
+    web: "#d68dba",
+    done: "#8f8f8f",
 }
 
 const DEFAULT_LINES: Line[] = [
     {
         text: 'parsing user intent → "wants snippet"',
         tool: "think",
+        toolArg: "",
         revisesPrev: false,
         inlineEditFrom: "",
         inlineEditTo: "",
     },
     {
-        text: "checking component library...",
+        text: "scanning for similar patterns",
         tool: "read",
+        toolArg: "components/",
         revisesPrev: false,
         inlineEditFrom: "",
         inlineEditTo: "",
@@ -148,6 +153,7 @@ const DEFAULT_LINES: Line[] = [
     {
         text: "3 candidate patterns found",
         tool: "",
+        toolArg: "",
         revisesPrev: false,
         inlineEditFrom: "",
         inlineEditTo: "",
@@ -155,6 +161,7 @@ const DEFAULT_LINES: Line[] = [
     {
         text: "weighing: terminal-style vs. card-style",
         tool: "think",
+        toolArg: "",
         revisesPrev: false,
         inlineEditFrom: "",
         inlineEditTo: "",
@@ -162,6 +169,7 @@ const DEFAULT_LINES: Line[] = [
     {
         text: "no, terminal-style is too obvious",
         tool: "",
+        toolArg: "",
         revisesPrev: true,
         inlineEditFrom: "",
         inlineEditTo: "",
@@ -169,6 +177,7 @@ const DEFAULT_LINES: Line[] = [
     {
         text: "try: card with reasoning trace",
         tool: "",
+        toolArg: "",
         revisesPrev: false,
         inlineEditFrom: "",
         inlineEditTo: "",
@@ -176,6 +185,7 @@ const DEFAULT_LINES: Line[] = [
     {
         text: "drafting",
         tool: "write",
+        toolArg: "ReasoningStreamUI.tsx",
         revisesPrev: false,
         inlineEditFrom: "",
         inlineEditTo: "",
@@ -219,13 +229,17 @@ function useStreamCycle({
     holdMs,
     holdAfterRevisionMs,
     loop,
+    loopMode,
     active,
+    typeMs,
 }: {
     lines: Line[]
     holdMs: number
     holdAfterRevisionMs: number
     loop: boolean
+    loopMode: "Reset" | "Continuous"
     active: boolean
+    typeMs: number
 }): number {
     const [revealedCount, setRevealedCount] = useState(1)
     const [settled, setSettled] = useState(false)
@@ -233,22 +247,30 @@ function useStreamCycle({
     useEffect(() => {
         if (!active || lines.length <= 0) return
         if (settled) return
-        if (revealedCount >= lines.length) {
+        // Reset loop: pause at the end, then snap back to line 1.
+        if (revealedCount >= lines.length && loop && loopMode === "Reset") {
             const id = window.setTimeout(() => {
-                if (loop) {
-                    setRevealedCount(1)
-                } else {
-                    setSettled(true)
-                }
+                setRevealedCount(1)
             }, holdMs)
             return () => clearTimeout(id)
         }
-        // hold longer when the just-revealed line revised the previous one,
-        // so the user sees the strike-through land before advancing
-        const justRevealed = lines[revealedCount - 1]
-        const hold = justRevealed?.revisesPrev
-            ? holdMs + holdAfterRevisionMs
-            : holdMs
+        // No loop: settle and stop after the last line holds.
+        if (revealedCount >= lines.length && !loop) {
+            const id = window.setTimeout(() => {
+                setSettled(true)
+            }, holdMs)
+            return () => clearTimeout(id)
+        }
+        // Mid-sequence (or continuous loop). Look up the just-revealed
+        // line via modulo so continuous mode keeps rolling past lines.length
+        // without ever resetting the visible window.
+        const justRevealed = lines[(revealedCount - 1) % lines.length]
+        const typingTime =
+            typeMs > 0 ? (justRevealed?.text.length ?? 0) * typeMs : 0
+        const hold =
+            (justRevealed?.revisesPrev
+                ? holdMs + holdAfterRevisionMs
+                : holdMs) + typingTime
         const id = window.setTimeout(() => {
             setRevealedCount((c) => c + 1)
         }, hold)
@@ -259,8 +281,10 @@ function useStreamCycle({
         holdMs,
         holdAfterRevisionMs,
         loop,
+        loopMode,
         lines,
         settled,
+        typeMs,
     ])
 
     return revealedCount
@@ -287,16 +311,28 @@ function withAlpha(color: string, alpha: number): string {
 }
 
 function tokenEstimate(lines: Line[], revealedCount: number): number {
-    let words = 0
-    for (let i = 0; i < Math.min(revealedCount, lines.length); i++) {
-        words += lines[i].text.trim().split(/\s+/).filter(Boolean).length
-    }
+    if (lines.length === 0) return 0
+    const wordsPerLine = lines.map(
+        (l) => l.text.trim().split(/\s+/).filter(Boolean).length
+    )
+    const cycleWords = wordsPerLine.reduce((a, b) => a + b, 0)
+    const fullCycles = Math.floor(revealedCount / lines.length)
+    const partial = revealedCount % lines.length
+    let words = fullCycles * cycleWords
+    for (let i = 0; i < partial; i++) words += wordsPerLine[i]
     return Math.round(words * 1.3)
 }
 
 function toolCount(lines: Line[], revealedCount: number): number {
-    let n = 0
-    for (let i = 0; i < Math.min(revealedCount, lines.length); i++) {
+    if (lines.length === 0) return 0
+    const cycleTools = lines.reduce(
+        (n, l) => n + (l.tool && l.tool.length > 0 ? 1 : 0),
+        0
+    )
+    const fullCycles = Math.floor(revealedCount / lines.length)
+    const partial = revealedCount % lines.length
+    let n = fullCycles * cycleTools
+    for (let i = 0; i < partial; i++) {
         if (lines[i].tool && lines[i].tool.length > 0) n++
     }
     return n
@@ -306,6 +342,7 @@ function normalizeLine(raw: Partial<Line> | undefined): Line {
     return {
         text: raw?.text ?? "",
         tool: (raw?.tool ?? "") as ToolKind,
+        toolArg: raw?.toolArg ?? "",
         revisesPrev: !!raw?.revisesPrev,
         inlineEditFrom: raw?.inlineEditFrom ?? "",
         inlineEditTo: raw?.inlineEditTo ?? "",
@@ -316,10 +353,12 @@ function normalizeLine(raw: Partial<Line> | undefined): Line {
 
 interface ToolChipProps {
     kind: ToolKind
+    arg: string
     color: string
+    argColor: string
 }
 
-function ToolChip({ kind, color }: ToolChipProps) {
+function ToolChip({ kind, arg, color, argColor }: ToolChipProps) {
     if (!kind) return null
     const dim = withAlpha(color, 0.42)
     return (
@@ -334,6 +373,12 @@ function ToolChip({ kind, color }: ToolChipProps) {
         >
             <span style={{ color: dim }}>[</span>
             {kind}
+            {arg && (
+                <>
+                    <span style={{ color: dim }}>: </span>
+                    <span style={{ color: argColor }}>{arg}</span>
+                </>
+            )}
             <span style={{ color: dim }}>]</span>
         </span>
     )
@@ -427,6 +472,7 @@ function StatusRow({
 interface InlineEditProps {
     parts: { before: string; from: string; to: string; after: string }
     color: string
+    accentColor: string
     holdAfterRevisionMs: number
     isActive: boolean
     shouldAnimate: boolean
@@ -439,6 +485,7 @@ interface InlineEditProps {
 function InlineEdit({
     parts,
     color,
+    accentColor,
     holdAfterRevisionMs,
     isActive,
     shouldAnimate,
@@ -490,7 +537,7 @@ function InlineEdit({
                         textDecoration: "line-through",
                         textDecorationColor:
                             editPhase === "striking"
-                                ? withAlpha(color, 0.7)
+                                ? withAlpha(accentColor, 0.7)
                                 : "transparent",
                         textDecorationThickness: 1,
                         transition: "text-decoration-color 220ms ease",
@@ -512,12 +559,14 @@ interface StreamLineProps {
     fontFamily: string
     fontSize: number
     color: string
+    accentColor: string
     currentOpacity: number
     dimOpacity: number
     blurMaxPx: number
     chipColors: ChipColors
     fadeMs: number
     holdAfterRevisionMs: number
+    typeMs: number
     reducedMotion: boolean
     shouldAnimate: boolean
 }
@@ -530,12 +579,14 @@ function StreamLine({
     fontFamily,
     fontSize,
     color,
+    accentColor,
     currentOpacity,
     dimOpacity,
     blurMaxPx,
     chipColors,
     fadeMs,
     holdAfterRevisionMs,
+    typeMs,
     reducedMotion,
     shouldAnimate,
 }: StreamLineProps) {
@@ -578,11 +629,53 @@ function StreamLine({
 
     const strikeColor = isStruck
         ? strikeReady
-            ? withAlpha(color, 0.55)
+            ? withAlpha(accentColor, 0.55)
             : "transparent"
         : "transparent"
 
     const toolColor = line.tool ? chipColors[line.tool] : ""
+
+    // Typewriter for the active line. Inactive lines (already revealed)
+    // skip straight to full text; struck lines never re-type.
+    const totalChars = line.text.length
+    const enableTypewriter =
+        isActive &&
+        !isStruck &&
+        typeMs > 0 &&
+        shouldAnimate &&
+        !reducedMotion
+    const [typedChars, setTypedChars] = useState(
+        enableTypewriter ? 0 : totalChars
+    )
+    useEffect(() => {
+        if (!enableTypewriter) {
+            setTypedChars(totalChars)
+            return
+        }
+        setTypedChars(0)
+        let cancelled = false
+        let id: number | null = null
+        const tick = () => {
+            if (cancelled) return
+            setTypedChars((c) => {
+                const next = c + 1
+                if (next < totalChars) {
+                    id = window.setTimeout(tick, typeMs)
+                }
+                return next
+            })
+        }
+        id = window.setTimeout(tick, typeMs)
+        return () => {
+            cancelled = true
+            if (id != null) window.clearTimeout(id)
+        }
+    }, [enableTypewriter, totalChars, typeMs, line.text])
+
+    const typingDone = typedChars >= totalChars
+    const visibleText = enableTypewriter
+        ? line.text.slice(0, typedChars)
+        : line.text
 
     const baseStyle: React.CSSProperties = {
         position: "relative",
@@ -606,46 +699,60 @@ function StreamLine({
 
     return (
         <p style={baseStyle}>
-            <ToolChip kind={line.tool} color={toolColor} />
+            <ToolChip
+                kind={line.tool}
+                arg={line.toolArg}
+                color={toolColor}
+                argColor={color}
+            />
             {line.revisesPrev && (
                 <span
                     style={{
                         marginRight: 6,
-                        color: withAlpha(color, 0.55),
+                        color: withAlpha(accentColor, 0.6),
                     }}
                 >
                     {"↳ "}
                 </span>
             )}
-            {editParts ? (
+            {editParts && typingDone ? (
                 <InlineEdit
                     parts={editParts}
                     color={color}
+                    accentColor={accentColor}
                     holdAfterRevisionMs={holdAfterRevisionMs}
                     isActive={isActive}
                     shouldAnimate={shouldAnimate}
                     reducedMotion={reducedMotion}
                 />
             ) : (
-                line.text
+                visibleText
             )}
             {isActive && !isStruck && shouldAnimate && !reducedMotion && (
                 <motion.span
                     aria-hidden
-                    animate={{ opacity: [0.9, 0.9, 0, 0, 0.9] }}
-                    transition={{
-                        duration: 1.05,
-                        times: [0, 0.48, 0.5, 0.98, 1],
-                        ease: "linear",
-                        repeat: Infinity,
-                    }}
+                    animate={
+                        typingDone
+                            ? { opacity: [0.9, 0.9, 0, 0, 0.9] }
+                            : { opacity: 1 }
+                    }
+                    transition={
+                        typingDone
+                            ? {
+                                  duration: 1.05,
+                                  times: [0, 0.48, 0.5, 0.98, 1],
+                                  ease: "linear",
+                                  repeat: Infinity,
+                              }
+                            : { duration: 0 }
+                    }
                     style={{
                         display: "inline-block",
                         marginLeft: 5,
                         width: "0.5em",
                         height: "0.95em",
                         verticalAlign: "-2px",
-                        backgroundColor: color,
+                        backgroundColor: accentColor,
                     }}
                 />
             )}
@@ -659,6 +766,7 @@ interface StatusBarProps {
     fontFamily: string
     fontSize: number
     color: string
+    accentColor: string
     label: string
 }
 
@@ -668,10 +776,11 @@ function StatusBar({
     fontFamily,
     fontSize,
     color,
+    accentColor,
     label,
 }: StatusBarProps) {
     const dim = withAlpha(color, 0.34)
-    const accent = withAlpha(color, 0.6)
+    const accent = withAlpha(accentColor, 0.7)
     const sepColor = withAlpha(color, 0.16)
     return (
         <div
@@ -722,6 +831,8 @@ export default function ReasoningStreamUI(props: Props) {
     const holdMs = content.holdMs ?? 1100
     const holdAfterRevisionMs = content.holdAfterRevisionMs ?? 600
     const loop = content.loop ?? true
+    const loopMode = content.loopMode ?? "Continuous"
+    const isContinuous = loop && loopMode === "Continuous"
     const maxVisible = content.maxVisible ?? 7
     const showTimer = content.showTimer ?? true
     const showStatusBar = content.showStatusBar ?? true
@@ -766,6 +877,7 @@ export default function ReasoningStreamUI(props: Props) {
     const animationTrigger = animation.trigger ?? "inView"
     const lineFadeMs = animation.lineFadeMs ?? 200
     const blurMaxPx = animation.blurMaxPx ?? 1.5
+    const typeMs = animation.typeMs ?? 18
 
     const externalStyle = props.style
 
@@ -795,20 +907,33 @@ export default function ReasoningStreamUI(props: Props) {
         holdMs,
         holdAfterRevisionMs,
         loop,
+        loopMode,
         active: shouldAnimate && !reducedMotion,
+        typeMs,
     })
 
-    // Static / reduced-motion / pre-trigger: show all lines at once
+    // Static / reduced-motion / pre-trigger: show all lines at once.
+    // Continuous loop: don't cap, let the virtual count grow forever.
     const revealedCount = !shouldAnimate
         ? lines.length
         : reducedMotion
           ? lines.length
-          : Math.min(cycleRevealed, lines.length)
+          : isContinuous
+            ? cycleRevealed
+            : Math.min(cycleRevealed, lines.length)
 
     // ── Visible window ──────────────────────────────────────────────────
+    // In continuous mode the window slides over a virtual list that wraps
+    // the source array, so lines keep rolling past lines.length without
+    // ever clearing.
 
     const visibleStart = Math.max(0, revealedCount - maxVisible)
-    const visibleLines = lines.slice(visibleStart, revealedCount)
+    const visibleLines = isContinuous
+        ? Array.from(
+              { length: revealedCount - visibleStart },
+              (_, i) => lines[(visibleStart + i) % lines.length]
+          )
+        : lines.slice(visibleStart, revealedCount)
     const lastIdx = revealedCount - 1
 
     // ── Timer ───────────────────────────────────────────────────────────
@@ -993,7 +1118,7 @@ export default function ReasoningStreamUI(props: Props) {
                 />
 
                 <div style={streamStyle}>
-                    <AnimatePresence initial={false}>
+                    <AnimatePresence initial={false} mode="popLayout">
                         {visibleLines.map((line, idx) => {
                             const lineIdx = visibleStart + idx
                             const isActive = lineIdx === lastIdx
@@ -1001,22 +1126,29 @@ export default function ReasoningStreamUI(props: Props) {
                             // A line is struck-through when the immediately
                             // following line was authored with revisesPrev: true
                             // and that following line has been revealed.
-                            const nextLine = lines[lineIdx + 1]
+                            // In continuous mode the lookup wraps so the
+                            // last line can be struck by the first line of
+                            // the next cycle if the user authored it that way.
+                            const nextLine = isContinuous
+                                ? lines[(lineIdx + 1) % lines.length]
+                                : lines[lineIdx + 1]
                             const isStruck =
                                 !!nextLine &&
                                 nextLine.revisesPrev === true &&
                                 lineIdx + 1 < revealedCount
+                            const animateLine = shouldAnimate && !reducedMotion
                             return (
                                 <motion.div
                                     key={`line-${lineIdx}`}
+                                    layout="position"
                                     initial={
-                                        shouldAnimate && !reducedMotion
-                                            ? { opacity: 0 }
+                                        animateLine
+                                            ? { opacity: 0, y: 6 }
                                             : false
                                     }
-                                    animate={{ opacity: 1 }}
+                                    animate={{ opacity: 1, y: 0 }}
                                     exit={
-                                        shouldAnimate && !reducedMotion
+                                        animateLine
                                             ? {
                                                   opacity: 0,
                                                   transition: {
@@ -1028,9 +1160,21 @@ export default function ReasoningStreamUI(props: Props) {
                                             : { opacity: 0 }
                                     }
                                     transition={{
-                                        duration: lineFadeMs / 1000,
-                                        ease,
+                                        opacity: {
+                                            duration: lineFadeMs / 1000,
+                                            ease,
+                                        },
+                                        y: {
+                                            duration:
+                                                (lineFadeMs + 80) / 1000,
+                                            ease,
+                                        },
+                                        layout: {
+                                            duration: 0.36,
+                                            ease,
+                                        },
                                     }}
+                                    style={{ willChange: "transform" }}
                                 >
                                     <StreamLine
                                         line={line}
@@ -1040,12 +1184,14 @@ export default function ReasoningStreamUI(props: Props) {
                                         fontFamily={monoFamily}
                                         fontSize={monoFontSize}
                                         color={textColor}
+                                        accentColor={accentColor}
                                         currentOpacity={currentOpacityPct / 100}
                                         dimOpacity={dimOpacityPct / 100}
                                         blurMaxPx={blurMaxPx}
                                         chipColors={chipColors}
                                         fadeMs={lineFadeMs}
                                         holdAfterRevisionMs={holdAfterRevisionMs}
+                                        typeMs={typeMs}
                                         reducedMotion={reducedMotion}
                                         shouldAnimate={shouldAnimate}
                                     />
@@ -1079,6 +1225,7 @@ export default function ReasoningStreamUI(props: Props) {
                             fontFamily={monoFamily}
                             fontSize={statusBarFontSize}
                             color={textColor}
+                            accentColor={accentColor}
                             label="reasoning"
                         />
                     </div>
@@ -1151,6 +1298,13 @@ addPropertyControls(ReasoningStreamUI, {
                             ],
                             defaultValue: "",
                         },
+                        toolArg: {
+                            type: ControlType.String,
+                            title: "Tool Arg",
+                            defaultValue: "",
+                            description:
+                                "Shown after the chip kind, e.g. file.tsx or a quoted query.",
+                        },
                         revisesPrev: {
                             type: ControlType.Boolean,
                             title: "Revises Prev",
@@ -1197,6 +1351,17 @@ addPropertyControls(ReasoningStreamUI, {
                 type: ControlType.Boolean,
                 title: "Loop",
                 defaultValue: true,
+            },
+            loopMode: {
+                type: ControlType.Enum,
+                title: "Loop Mode",
+                options: ["Reset", "Continuous"],
+                optionTitles: ["Reset", "Continuous"],
+                defaultValue: "Continuous",
+                description:
+                    "Continuous: lines keep rolling past the end without clearing. Reset: snaps back to the first line.",
+                hidden: (p: any) =>
+                    !(p.loop ?? p.content?.loop ?? true),
             },
             maxVisible: {
                 type: ControlType.Number,
@@ -1536,6 +1701,18 @@ addPropertyControls(ReasoningStreamUI, {
                 max: 4,
                 step: 0.1,
                 unit: "px",
+                hidden: (p: any) => isAnimationDisabled(p),
+            },
+            typeMs: {
+                type: ControlType.Number,
+                title: "Type Speed",
+                defaultValue: 18,
+                min: 0,
+                max: 80,
+                step: 1,
+                unit: "ms",
+                description:
+                    "Per-character typewriter for the active line. 0 = off.",
                 hidden: (p: any) => isAnimationDisabled(p),
             },
         },

@@ -2,6 +2,7 @@
 // see https://www.framer.com/docs/guides/handshake for more information.
 declare module "framer";
 declare module "https://framer.com/m/*";
+declare module "https://esm.sh/*";
 declare module "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js";
 declare module "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/RenderPass.js";
 declare module "https://unpkg.com/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js";

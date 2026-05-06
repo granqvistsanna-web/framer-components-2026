@@ -1,4 +1,12 @@
-// Social Share Buttons component with customizable platforms, styles, and hover effects
+/**
+ * Social Share Buttons
+ * Customizable share buttons for common platforms with hover effects, tooltips, and copy-link state.
+ *
+ * @framerSupportedLayoutWidth auto
+ * @framerSupportedLayoutHeight auto
+ * @framerIntrinsicWidth 320
+ * @framerIntrinsicHeight 48
+ */
 import React, {
     useState,
     useCallback,
@@ -23,7 +31,9 @@ interface SocialShareButtonsProps {
     message: string
     platforms: PlatformId[]
     iconStyle: "brand" | "monochrome" | "outline"
-    shape: "circle" | "rounded" | "square"
+    monochromeBackground: string
+    monochromeIconColor: string
+    borderRadius: number
     size: number
     gap: number
     hoverEffect: "scale" | "glow" | "slide" | "none"
@@ -34,12 +44,6 @@ interface SocialShareButtonsProps {
     customColors: Partial<Record<PlatformId, string>>
 }
 
-/**
- * Social Share Buttons
- *
- * @framerSupportedLayoutWidth auto
- * @framerSupportedLayoutHeight auto
- */
 export default function SocialShareButtons(props: SocialShareButtonsProps) {
     const {
         url = "",
@@ -53,7 +57,9 @@ export default function SocialShareButtons(props: SocialShareButtonsProps) {
             "copylink",
         ],
         iconStyle = "brand",
-        shape = "circle",
+        monochromeBackground = "#000000",
+        monochromeIconColor = "#FFFFFF",
+        borderRadius = 100,
         size = 40,
         gap = 8,
         hoverEffect = "scale",
@@ -190,8 +196,8 @@ export default function SocialShareButtons(props: SocialShareButtonsProps) {
             let borderColor = "transparent"
 
             if (iconStyle === "monochrome") {
-                backgroundColor = "#000000"
-                iconColor = "#FFFFFF"
+                backgroundColor = monochromeBackground
+                iconColor = monochromeIconColor
             } else if (iconStyle === "outline") {
                 backgroundColor = "transparent"
                 iconColor = baseColor
@@ -202,12 +208,7 @@ export default function SocialShareButtons(props: SocialShareButtonsProps) {
                 backgroundColor,
                 color: iconColor,
                 border: `2px solid ${borderColor}`,
-                borderRadius:
-                    shape === "circle"
-                        ? "50%"
-                        : shape === "rounded"
-                          ? "12px"
-                          : "0",
+                borderRadius: `${borderRadius}px`,
                 width: size,
                 height: size,
                 padding: 0,
@@ -224,7 +225,16 @@ export default function SocialShareButtons(props: SocialShareButtonsProps) {
                 outline: "none",
             }
         },
-        [iconStyle, shape, size, customColors, platformConfig, showShadows]
+        [
+            iconStyle,
+            monochromeBackground,
+            monochromeIconColor,
+            size,
+            borderRadius,
+            customColors,
+            platformConfig,
+            showShadows,
+        ]
     )
 
     const hoverVariants = useMemo(() => {
@@ -352,19 +362,48 @@ export default function SocialShareButtons(props: SocialShareButtonsProps) {
                 const isActive = activePlatform === platform
                 const isCopied = platform === "copylink" && copiedState
                 const tooltipId = `${tooltipIdBase}-${platform}`
-                const accentColor = customColors[platform] || config.color
+                const accentColor =
+                    iconStyle === "monochrome"
+                        ? monochromeIconColor
+                        : customColors[platform] || config.color
 
                 return (
-                    <div key={platform} style={{ position: "relative" }}>
+                    <div
+                        key={platform}
+                        style={{
+                            position: "relative",
+                            width: size,
+                            height: size,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flex: "0 0 auto",
+                        }}
+                    >
                         <AnimatePresence>
                             {hoverEffect === "glow" &&
                                 isActive &&
                                 !prefersReducedMotion && (
                                     <motion.div
                                         key="glow"
-                                        initial={{ opacity: 0, scale: 0.8 }}
-                                        animate={{ opacity: 1, scale: 1.2 }}
-                                        exit={{ opacity: 0, scale: 0.8 }}
+                                        initial={{
+                                            opacity: 0,
+                                            scale: 0.8,
+                                            x: "-50%",
+                                            y: "-50%",
+                                        }}
+                                        animate={{
+                                            opacity: 1,
+                                            scale: 1.2,
+                                            x: "-50%",
+                                            y: "-50%",
+                                        }}
+                                        exit={{
+                                            opacity: 0,
+                                            scale: 0.8,
+                                            x: "-50%",
+                                            y: "-50%",
+                                        }}
                                         transition={{
                                             type: "spring",
                                             stiffness: 300,
@@ -374,15 +413,9 @@ export default function SocialShareButtons(props: SocialShareButtonsProps) {
                                             position: "absolute",
                                             top: "50%",
                                             left: "50%",
-                                            transform: "translate(-50%, -50%)",
                                             width: size * 1.5,
                                             height: size * 1.5,
-                                            borderRadius:
-                                                shape === "circle"
-                                                    ? "50%"
-                                                    : shape === "rounded"
-                                                      ? "20px"
-                                                      : "8px",
+                                            borderRadius: `${borderRadius + 8}px`,
                                             background: `radial-gradient(circle, ${accentColor}40, ${accentColor}20, transparent)`,
                                             filter: "blur(8px)",
                                             zIndex: -1,
@@ -425,9 +458,24 @@ export default function SocialShareButtons(props: SocialShareButtonsProps) {
                                     key="tooltip"
                                     id={tooltipId}
                                     role="tooltip"
-                                    initial={{ opacity: 0, y: 6, scale: 0.92 }}
-                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                    exit={{ opacity: 0, y: 6, scale: 0.92 }}
+                                    initial={{
+                                        opacity: 0,
+                                        y: 6,
+                                        scale: 0.92,
+                                        x: "-50%",
+                                    }}
+                                    animate={{
+                                        opacity: 1,
+                                        y: 0,
+                                        scale: 1,
+                                        x: "-50%",
+                                    }}
+                                    exit={{
+                                        opacity: 0,
+                                        y: 6,
+                                        scale: 0.92,
+                                        x: "-50%",
+                                    }}
                                     transition={{
                                         type: "spring",
                                         stiffness: 500,
@@ -436,9 +484,9 @@ export default function SocialShareButtons(props: SocialShareButtonsProps) {
                                     }}
                                     style={{
                                         position: "absolute",
-                                        bottom: `${size + 8}px`,
+                                        bottom: "100%",
                                         left: "50%",
-                                        transform: "translateX(-50%)",
+                                        marginBottom: 8,
                                         backgroundColor: "rgba(0, 0, 0, 0.9)",
                                         color: "#FFFFFF",
                                         padding: "6px 10px",
@@ -526,13 +574,14 @@ addPropertyControls(SocialShareButtons, {
             "email",
             "copylink",
         ],
+        minCount: 1,
         maxCount: 6,
     },
     twitterIcon: {
         type: ControlType.Enum,
         title: "Twitter Icon",
         options: ["bird", "x"],
-        optionTitles: ["Bird Logo", "X Logo"],
+        optionTitles: ["Bird", "X"],
         defaultValue: "x",
         displaySegmentedControl: true,
         hidden: ({ platforms }) => !platforms?.includes("twitter"),
@@ -543,15 +592,27 @@ addPropertyControls(SocialShareButtons, {
         options: ["brand", "monochrome", "outline"],
         optionTitles: ["Brand", "Monochrome", "Outline"],
         defaultValue: "brand",
-        displaySegmentedControl: true,
     },
-    shape: {
-        type: ControlType.Enum,
-        title: "Shape",
-        options: ["circle", "rounded", "square"],
-        optionTitles: ["Circle", "Rounded", "Square"],
-        defaultValue: "circle",
-        displaySegmentedControl: true,
+    monochromeBackground: {
+        type: ControlType.Color,
+        title: "Background",
+        defaultValue: "#000000",
+        hidden: ({ iconStyle }) => iconStyle !== "monochrome",
+    },
+    monochromeIconColor: {
+        type: ControlType.Color,
+        title: "Icon Color",
+        defaultValue: "#FFFFFF",
+        hidden: ({ iconStyle }) => iconStyle !== "monochrome",
+    },
+    borderRadius: {
+        type: ControlType.Number,
+        title: "Radius",
+        defaultValue: 100,
+        min: 0,
+        max: 100,
+        step: 1,
+        unit: "px",
     },
     size: {
         type: ControlType.Number,
@@ -577,7 +638,6 @@ addPropertyControls(SocialShareButtons, {
         options: ["scale", "glow", "slide", "none"],
         optionTitles: ["Scale", "Glow", "Slide", "None"],
         defaultValue: "scale",
-        displaySegmentedControl: true,
     },
     alignment: {
         type: ControlType.Enum,
@@ -605,7 +665,6 @@ addPropertyControls(SocialShareButtons, {
         type: ControlType.Object,
         title: "Custom Colors",
         optional: true,
-        hidden: ({ iconStyle }) => iconStyle === "monochrome",
         controls: {
             twitter: {
                 type: ControlType.Color,

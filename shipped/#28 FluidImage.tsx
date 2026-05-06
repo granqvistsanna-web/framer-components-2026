@@ -1445,8 +1445,6 @@ export default function FluidImage(props: FluidImageProps) {
                 style={{
                     width: "100%",
                     height: "100%",
-                    minWidth: 200,
-                    minHeight: 200,
                     position: "relative",
                     overflow: "visible",
                 }}
@@ -1471,8 +1469,6 @@ export default function FluidImage(props: FluidImageProps) {
             style={{
                 width: "100%",
                 height: "100%",
-                minWidth: 200,
-                minHeight: 200,
                 position: "relative",
                 overflow: "visible",
             }}

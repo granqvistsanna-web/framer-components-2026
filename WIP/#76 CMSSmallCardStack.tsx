@@ -6,7 +6,7 @@
  * vertically to rotate it to the back of the stack.
  *
  * @framerDisableUnlink
- * @framerSupportedLayoutWidth any-prefer-fixed
+ * @framerSupportedLayoutWidth any
  * @framerSupportedLayoutHeight any
  * @framerIntrinsicWidth 480
  * @framerIntrinsicHeight 240
@@ -387,6 +387,8 @@ export default function CMSSmallCardStack(props: CMSSmallCardStackProps) {
             slide.style.opacity = String(opacity)
             slide.style.pointerEvents = isFront ? "auto" : "none"
             slide.style.willChange = "transform, filter, opacity"
+            slide.style.backfaceVisibility = "hidden"
+            ;(slide.style as any).webkitBackfaceVisibility = "hidden"
             slide.style.transformOrigin = "center center"
             slide.style.transform = `translate3d(0, ${translateY}px, 0) scale(${scale * frontScale})`
             slide.style.filter = `brightness(${brightness})`
@@ -627,7 +629,6 @@ export default function CMSSmallCardStack(props: CMSSmallCardStackProps) {
             mutationObserver.observe(track, {
                 childList: true,
                 subtree: true,
-                characterData: true,
             })
         }
 
@@ -697,6 +698,9 @@ export default function CMSSmallCardStack(props: CMSSmallCardStackProps) {
             const deltaY = event.clientY - dragStateRef.current.startY
             if (!dragStateRef.current.dragging && Math.abs(deltaY) > 4) {
                 dragStateRef.current.dragging = true
+                if (dragHostRef.current) {
+                    dragHostRef.current.style.cursor = "grabbing"
+                }
             }
 
             if (dragStateRef.current.dragging) {
@@ -735,6 +739,10 @@ export default function CMSSmallCardStack(props: CMSSmallCardStackProps) {
             dragStateRef.current.dragging = false
             dragStateRef.current.deltaY = 0
 
+            if (dragHostRef.current && draggable && slideCount > 1 && !isStatic) {
+                dragHostRef.current.style.cursor = "grab"
+            }
+
             if (event.currentTarget.hasPointerCapture(pointerId)) {
                 event.currentTarget.releasePointerCapture(pointerId)
             }
@@ -769,7 +777,7 @@ export default function CMSSmallCardStack(props: CMSSmallCardStackProps) {
 
             applyStackStyles()
         },
-        [applyStackStyles, goNext, motion.dragThreshold]
+        [applyStackStyles, draggable, goNext, isStatic, motion.dragThreshold, slideCount]
     )
 
     const onClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -805,6 +813,11 @@ export default function CMSSmallCardStack(props: CMSSmallCardStackProps) {
     )
 
     const styleText = `
+        [data-cms-small-card-stack-id="${stackId}"]:focus-visible {
+            outline: 2px solid currentColor;
+            outline-offset: 2px;
+            border-radius: 4px;
+        }
         [data-cms-small-card-stack-id="${stackId}"] [data-cms-small-card-stack-track] {
             position: relative;
             width: 100%;
@@ -826,22 +839,42 @@ export default function CMSSmallCardStack(props: CMSSmallCardStackProps) {
         }
     `
 
+    const srOnlyStyle: React.CSSProperties = {
+        position: "absolute",
+        width: 1,
+        height: 1,
+        padding: 0,
+        margin: -1,
+        overflow: "hidden",
+        clip: "rect(0,0,0,0)",
+        whiteSpace: "nowrap",
+        border: 0,
+    }
+
     return (
         <div
             data-cms-small-card-stack-id={stackId}
             role="region"
+            aria-roledescription="carousel"
             aria-label={ariaLabel}
             tabIndex={0}
             onKeyDown={onKeyDown}
             style={{
                 width: "100%",
                 height: "100%",
-                outline: "none",
+                minWidth: 240,
+                minHeight: layout.minHeight,
                 maxWidth: layout.maxWidth > 0 ? layout.maxWidth : undefined,
                 margin: layout.maxWidth > 0 ? "0 auto" : undefined,
             }}
         >
             <style>{styleText}</style>
+
+            <div aria-live="polite" aria-atomic="true" style={srOnlyStyle}>
+                {slideCount > 0
+                    ? `Slide ${activeIndex + 1} of ${slideCount}`
+                    : ""}
+            </div>
 
             <div
                 ref={dragHostRef}
@@ -887,13 +920,12 @@ export default function CMSSmallCardStack(props: CMSSmallCardStackProps) {
                             <div
                                 style={{
                                     minHeight: layout.minHeight,
-                                    border: "1px dashed rgba(255,255,255,0.35)",
+                                    border: "1px dashed currentColor",
                                     borderRadius: 12,
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
-                                    color: "rgba(255,255,255,0.8)",
-                                    background: "rgba(255,255,255,0.02)",
+                                    opacity: 0.55,
                                 }}
                             >
                                 Connect a Collection List
