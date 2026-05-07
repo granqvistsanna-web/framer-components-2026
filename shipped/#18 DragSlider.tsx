@@ -750,6 +750,7 @@ export default function DragSlider({
     } | null>(null)
 
     const autoScrollPausedRef = useRef(false)
+    const slideContentRefs = useRef<(HTMLDivElement | null)[]>([])
 
     const [engineReady, setEngineReady] = useState(false)
     const [sliderActive, setSliderActive] = useState(true)
@@ -757,6 +758,9 @@ export default function DragSlider({
     const [canNext, setCanNext] = useState(true)
     const [activeSnapIndex, setActiveSnapIndex] = useState(0)
     const [snapCount, setSnapCount] = useState(0)
+    const [slideNaturalSizes, setSlideNaturalSizes] = useState<
+        ({ w: number; h: number } | null)[]
+    >([])
 
     const containerWidth = useContainerWidth(rootRef)
     const reducedMotion = useReducedMotion()
@@ -814,6 +818,68 @@ export default function DragSlider({
         gap,
         visibleCards,
     ])
+
+    const slideScales = useMemo(() => {
+        if (!fitVisibleCards || slideWidth == null || slideWidth <= 0) {
+            return [] as number[]
+        }
+        return slideNaturalSizes.map((size) => {
+            if (!size || size.w <= 0) return 1
+            return Math.min(1, slideWidth / size.w)
+        })
+    }, [fitVisibleCards, slideWidth, slideNaturalSizes])
+
+    const naturalSizesSignature = useMemo(
+        () =>
+            slideNaturalSizes
+                .map((s) => (s ? `${Math.round(s.w)}x${Math.round(s.h)}` : "?"))
+                .join("|"),
+        [slideNaturalSizes]
+    )
+
+    useEffect(() => {
+        if (!fitVisibleCards) {
+            if (slideNaturalSizes.length > 0) setSlideNaturalSizes([])
+            return
+        }
+        if (typeof ResizeObserver === "undefined") return
+
+        const observers: ResizeObserver[] = []
+        slideContentRefs.current.forEach((el, index) => {
+            if (!el) return
+            const ro = new ResizeObserver((entries) => {
+                const entry = entries[0]
+                if (!entry) return
+                const w =
+                    entry.contentBoxSize?.[0]?.inlineSize ??
+                    entry.contentRect.width
+                const h =
+                    entry.contentBoxSize?.[0]?.blockSize ??
+                    entry.contentRect.height
+                if (w <= 0 || h <= 0) return
+                setSlideNaturalSizes((prev) => {
+                    const existing = prev[index]
+                    if (
+                        existing &&
+                        Math.abs(existing.w - w) < 0.5 &&
+                        Math.abs(existing.h - h) < 0.5
+                    ) {
+                        return prev
+                    }
+                    const next = prev.slice()
+                    while (next.length <= index) next.push(null)
+                    next[index] = { w, h }
+                    return next
+                })
+            })
+            ro.observe(el)
+            observers.push(ro)
+        })
+
+        return () => {
+            observers.forEach((ro) => ro.disconnect())
+        }
+    }, [fitVisibleCards, slidesSignature])
 
     const cssVars = useMemo(() => {
         return {
@@ -884,6 +950,14 @@ export default function DragSlider({
             ${scope} [data-gsap-slider-item] {
                 flex: none;
                 position: relative;
+            }
+            ${scope}[data-fit-visible="true"] [data-gsap-slider-item] {
+                overflow: hidden;
+                box-sizing: border-box;
+            }
+            ${scope}[data-fit-visible="true"] [data-gsap-slider-scaler] {
+                box-sizing: border-box;
+                pointer-events: auto;
             }
             ${scope}[data-slider-engine="native"] [data-gsap-slider-item] {
                 scroll-snap-align: start;
@@ -1164,6 +1238,7 @@ export default function DragSlider({
         dragResistance,
         draggableEnabled,
         tickerEnabled,
+        naturalSizesSignature,
     ])
 
     const animateTo = useCallback(
@@ -1596,6 +1671,93 @@ export default function DragSlider({
               }
             : undefined
 
+    const renderSlideItem = (
+        child: React.ReactNode,
+        index: number,
+        role: "primary" | "ticker-clone" | "autoplay-clone"
+    ) => {
+        const isPrimary = role === "primary"
+        const baseKey = isPrimary
+            ? React.isValidElement(child) && child.key != null
+                ? String(child.key)
+                : `slide-${index}`
+            : `${role}-${index}`
+
+        const cloneAttrs: Record<string, string> = {}
+        if (role === "ticker-clone") cloneAttrs["data-ticker-clone"] = ""
+        if (role === "autoplay-clone") cloneAttrs["data-autoplay-clone"] = ""
+
+        if (fitVisibleCards && slideWidth != null) {
+            const measured = slideNaturalSizes[index] ?? null
+            const scale =
+                isPrimary && slideScales[index] != null
+                    ? slideScales[index]
+                    : measured && measured.w > 0
+                      ? Math.min(1, slideWidth / measured.w)
+                      : 1
+            const slotHeight = measured ? measured.h * scale : undefined
+
+            return (
+                <div
+                    key={baseKey}
+                    data-gsap-slider-item=""
+                    aria-hidden={isPrimary ? undefined : "true"}
+                    {...cloneAttrs}
+                    style={{
+                        flex: "none",
+                        width: slideWidth,
+                        height: slotHeight,
+                        overflow: "hidden",
+                        position: "relative",
+                        ...(isPrimary
+                            ? ({ "--i": index } as React.CSSProperties)
+                            : null),
+                    }}
+                >
+                    <div
+                        ref={
+                            isPrimary
+                                ? (el) => {
+                                      slideContentRefs.current[index] = el
+                                  }
+                                : undefined
+                        }
+                        data-gsap-slider-scaler=""
+                        style={{
+                            width: measured ? measured.w : "max-content",
+                            height: measured ? measured.h : "auto",
+                            transform:
+                                measured && scale < 1
+                                    ? `scale(${scale})`
+                                    : undefined,
+                            transformOrigin: "top left",
+                            visibility: measured ? "visible" : "hidden",
+                        }}
+                    >
+                        {child}
+                    </div>
+                </div>
+            )
+        }
+
+        return (
+            <div
+                key={baseKey}
+                data-gsap-slider-item=""
+                aria-hidden={isPrimary ? undefined : "true"}
+                {...cloneAttrs}
+                style={{
+                    ...slideItemStyle,
+                    ...(isPrimary
+                        ? ({ "--i": index } as React.CSSProperties)
+                        : null),
+                }}
+            >
+                {child}
+            </div>
+        )
+    }
+
     const prevContent = isCustom ? prevIcon : isArrows ? <ArrowLeft /> : prevLabel
     const nextContent = isCustom ? nextIcon : isArrows ? <ArrowRight /> : nextLabel
 
@@ -1652,6 +1814,12 @@ export default function DragSlider({
                                 style={{
                                     flex: "none",
                                     ...slideItemStyle,
+                                    ...(fitVisibleCards && {
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        alignItems: "stretch",
+                                        alignSelf: "stretch",
+                                    }),
                                 }}
                             >
                                 {child}
@@ -1793,6 +1961,7 @@ export default function DragSlider({
             data-slider-engine={engineReady ? "gsap" : "native"}
             data-drag-disabled={!draggableEnabled ? "true" : undefined}
             data-ticker={tickerEnabled ? "true" : undefined}
+            data-fit-visible={fitVisibleCards ? "true" : undefined}
             data-overlay-hover={
                 overlayControls && controlHoverOnly ? "true" : undefined
             }
@@ -1946,47 +2115,17 @@ export default function DragSlider({
                 >
                     {slideNodes.length > 0 ? (
                         <>
-                            {slideNodes.map((child, index) => (
-                                <div
-                                    key={
-                                        React.isValidElement(child) &&
-                                        child.key != null
-                                            ? String(child.key)
-                                            : `slide-${index}`
-                                    }
-                                    data-gsap-slider-item=""
-                                    style={{
-                                        ...slideItemStyle,
-                                        "--i": index,
-                                    } as React.CSSProperties}
-                                >
-                                    {child}
-                                </div>
-                            ))}
+                            {slideNodes.map((child, index) =>
+                                renderSlideItem(child, index, "primary")
+                            )}
                             {tickerEnabled &&
-                                slideNodes.map((child, index) => (
-                                    <div
-                                        key={`clone-${index}`}
-                                        data-gsap-slider-item=""
-                                        data-ticker-clone=""
-                                        aria-hidden="true"
-                                        style={slideItemStyle}
-                                    >
-                                        {child}
-                                    </div>
-                                ))}
+                                slideNodes.map((child, index) =>
+                                    renderSlideItem(child, index, "ticker-clone")
+                                )}
                             {!tickerEnabled && autoplayEnabled && autoplay?.infinite &&
-                                slideNodes.map((child, index) => (
-                                    <div
-                                        key={`autoplay-clone-${index}`}
-                                        data-gsap-slider-item=""
-                                        data-autoplay-clone=""
-                                        aria-hidden="true"
-                                        style={slideItemStyle}
-                                    >
-                                        {child}
-                                    </div>
-                                ))}
+                                slideNodes.map((child, index) =>
+                                    renderSlideItem(child, index, "autoplay-clone")
+                                )}
                         </>
                     ) : (
                         <div data-gsap-slider-item="">
@@ -2235,8 +2374,8 @@ addPropertyControls(DragSlider, {
                 step: 1,
                 displayStepper: true,
                 defaultValue: 1,
-                hidden: (props: DragSliderProps) =>
-                    props.layout?.fitVisibleCards !== true,
+                hidden: (props: LayoutConfig) =>
+                    props.fitVisibleCards !== true,
                 description: "How many cards should fit fully inside the slider width.",
             },
         },
@@ -2305,8 +2444,8 @@ addPropertyControls(DragSlider, {
                 options: ["flex-start", "center", "flex-end"],
                 optionTitles: ["Start", "Center", "End"],
                 defaultValue: "center",
-                hidden: (props: DragSliderProps) =>
-                    props.controlLayout?.position === "overlay",
+                hidden: (props: ControlLayout) =>
+                    props.position === "overlay",
             },
             gap: {
                 type: ControlType.Number,
@@ -2317,8 +2456,8 @@ addPropertyControls(DragSlider, {
                 unit: "px",
                 displayStepper: true,
                 defaultValue: 16,
-                hidden: (props: DragSliderProps) =>
-                    props.controlLayout?.position === "overlay",
+                hidden: (props: ControlLayout) =>
+                    props.position === "overlay",
             },
             margin: {
                 type: ControlType.Number,
@@ -2329,8 +2468,8 @@ addPropertyControls(DragSlider, {
                 unit: "px",
                 displayStepper: true,
                 defaultValue: 0,
-                hidden: (props: DragSliderProps) =>
-                    props.controlLayout?.position === "overlay",
+                hidden: (props: ControlLayout) =>
+                    props.position === "overlay",
             },
             sideInset: {
                 type: ControlType.Number,
@@ -2341,15 +2480,15 @@ addPropertyControls(DragSlider, {
                 unit: "px",
                 displayStepper: true,
                 defaultValue: 16,
-                hidden: (props: DragSliderProps) =>
-                    props.controlLayout?.position !== "overlay",
+                hidden: (props: ControlLayout) =>
+                    props.position !== "overlay",
             },
             hoverOnly: {
                 type: ControlType.Boolean,
                 title: "Hover Only",
                 defaultValue: true,
-                hidden: (props: DragSliderProps) =>
-                    props.controlLayout?.position !== "overlay",
+                hidden: (props: ControlLayout) =>
+                    props.position !== "overlay",
             },
         },
     },

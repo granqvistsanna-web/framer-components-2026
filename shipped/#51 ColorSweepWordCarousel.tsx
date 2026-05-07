@@ -62,6 +62,14 @@ type Props = {
 const SWEEP_EASE: [number, number, number, number] = [0.2, 0, 0.3, 0.3]
 const GAP_MS = 70
 
+const SUPPORTS_OKLCH_INTERP =
+    typeof CSS !== "undefined" &&
+    typeof CSS.supports === "function" &&
+    CSS.supports(
+        "background",
+        "linear-gradient(in oklch 90deg, red, blue)"
+    )
+
 const PRESET_STOPS: Record<Exclude<ColorPreset, "custom">, string> = {
     spectrum:
         "#FF0099 35%, #FF0000 45%, #FF4F04 50%, #FFA600 55%, #F8F8F8 60%, #0056FF 65%",
@@ -126,7 +134,8 @@ function buildGradient(
         preset === "custom"
             ? buildCustomStops(customColors)
             : PRESET_STOPS[preset]
-    return `linear-gradient(in oklch ${deg}, ${textColor} 0%, ${textColor} 30%, ${stops}, #FFFFFF 70%, #FFFFFF 100%)`
+    const interp = SUPPORTS_OKLCH_INTERP ? "in oklch " : ""
+    return `linear-gradient(${interp}${deg}, ${textColor} 0%, ${textColor} 30%, ${stops}, #FFFFFF 70%, #FFFFFF 100%)`
 }
 
 // ── Font helper ─────────────────────────────────────────────────────────────
@@ -137,20 +146,13 @@ function toFontStyle(font?: any): React.CSSProperties {
     const fontWeight = font.fontWeight ?? font.weight
     const fontStyleVal = font.fontStyle ?? font.style
     const fontSize = font.fontSize ?? font.size
-    const lineHeightRaw = font.lineHeight
     const letterSpacing = font.letterSpacing
-
-    const computedLineHeight =
-        typeof lineHeightRaw === "number" && typeof fontSize === "number"
-            ? `${(lineHeightRaw / 100) * fontSize}px`
-            : lineHeightRaw
 
     return {
         fontFamily,
         fontStyle: fontStyleVal,
         fontWeight,
         fontSize,
-        lineHeight: computedLineHeight,
         letterSpacing,
     }
 }
@@ -193,6 +195,9 @@ export default function WordCarousel(props: Props) {
     const [appearDone, setAppearDone] = useState(false)
     const [cycleIdx, setCycleIdx] = useState(0)
     const [fadeOut, setFadeOut] = useState(false)
+    const [measuredWidths, setMeasuredWidths] = useState<Map<string, number>>(
+        new Map()
+    )
 
     // Wait for fonts so grid/measurement uses real metrics, not fallback
     const [fontsReady, setFontsReady] = useState(false)
@@ -226,7 +231,8 @@ export default function WordCarousel(props: Props) {
         setAppearDone(false)
         setCycleIdx(0)
         setFadeOut(false)
-    }, [text])
+        setMeasuredWidths(new Map())
+    }, [text, reducedMotion])
 
     // Appear timer — after all words have swept in + hold, mark done
     const totalAppearMs = Math.max(
@@ -243,7 +249,7 @@ export default function WordCarousel(props: Props) {
             totalAppearMs + holdMs
         )
         return () => window.clearTimeout(t)
-    }, [totalAppearMs, holdMs, text, reducedMotion])
+    }, [totalAppearMs, holdMs, reducedMotion])
 
     // Cycle timer — only after appear, only if there are cycling slots
     const hasCycles = useMemo(
@@ -300,9 +306,20 @@ export default function WordCarousel(props: Props) {
     // Measure cycling word widths for smooth-width transitions
     const needsSmooth = smoothWidth && !fixedCycleWidth
     const sizerRefs = useRef<Map<string, HTMLSpanElement>>(new Map())
-    const [measuredWidths, setMeasuredWidths] = useState<Map<string, number>>(
-        new Map()
-    )
+    const sizerRefSetters = useRef<
+        Map<string, (el: HTMLSpanElement | null) => void>
+    >(new Map())
+    const getSizerRef = (key: string) => {
+        let setter = sizerRefSetters.current.get(key)
+        if (!setter) {
+            setter = (el: HTMLSpanElement | null) => {
+                if (el) sizerRefs.current.set(key, el)
+                else sizerRefs.current.delete(key)
+            }
+            sizerRefSetters.current.set(key, setter)
+        }
+        return setter
+    }
     useLayoutEffect(() => {
         if (!needsSmooth) return
         const widths = new Map<string, number>()
@@ -517,16 +534,7 @@ export default function WordCarousel(props: Props) {
                     seg.words.map((w, j) => (
                         <span
                             key={`sizer-${j}`}
-                            ref={
-                                useSmooth
-                                    ? (el) => {
-                                          const key = `${segIdx}-${j}`
-                                          if (el)
-                                              sizerRefs.current.set(key, el)
-                                          else sizerRefs.current.delete(key)
-                                      }
-                                    : undefined
-                            }
+                            ref={useSmooth ? getSizerRef(`${segIdx}-${j}`) : undefined}
                             aria-hidden="true"
                             style={{
                                 ...(useGrid
@@ -606,8 +614,6 @@ export default function WordCarousel(props: Props) {
                         color: "transparent",
                         backgroundRepeat: "no-repeat",
                         backgroundSize: "400% 100%",
-                        willChange:
-                            "background-position, opacity, filter",
                         filter: "blur(var(--blur))",
                         ...typography,
                     }}

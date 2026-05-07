@@ -10,7 +10,7 @@
  */
 import * as React from "react"
 import { addPropertyControls, ControlType, RenderTarget, useIsStaticRenderer } from "framer"
-import { motion, animate, useMotionValue } from "framer-motion"
+import { motion, animate, useMotionValue, type Transition } from "framer-motion"
 
 // ============================================
 // TYPES
@@ -36,7 +36,6 @@ interface LayoutSettings {
     items: number
     gap: number
     padding: number
-    radius: number
     fit: ItemFit
     align: ItemAlign
     aspectRatio: number
@@ -52,14 +51,11 @@ interface PlaybackSettings {
 interface NavigationSettings {
     step: "Single" | "Page"
     draggable: boolean
-    dragThreshold: number
-    edgeResistance: number
     keyboard: boolean
 }
 
 interface ArrowSettings {
     show: boolean
-    reserveSpace: boolean
     type: "Split" | "Grouped" | "Inline"
     alignment: ArrowAlign
     prevImage: string
@@ -90,7 +86,6 @@ interface DotSettings {
     backdrop: string
     radius: number
     opacity: number
-    activeScale: number
     blur: number
     offsetX: number
     offsetY: number
@@ -118,6 +113,7 @@ interface AppearSettings {
 }
 
 interface CMSSliderProps {
+    style?: React.CSSProperties
     content: React.ReactNode
     direction: "Left" | "Right" | "Up" | "Down"
     autoPlay: boolean
@@ -128,7 +124,7 @@ interface CMSSliderProps {
     dots: DotSettings
     centerFocus: CenterFocusSettings
     appear: AppearSettings
-    animationOptions: any
+    animationOptions: Transition
 }
 
 // ============================================
@@ -138,6 +134,157 @@ interface CMSSliderProps {
 function clamp(n: number, min: number, max: number) {
     return Math.max(min, Math.min(max, n))
 }
+
+type ElementFrame = {
+    left: number
+    width: number
+    bottom: number
+}
+
+type ItemContainerMeasure = {
+    element: HTMLElement | null
+    count: number
+}
+
+function findSliderItemContainer(
+    container: HTMLElement,
+    isVertical: boolean
+): ItemContainerMeasure {
+    let bestElement: HTMLElement | null = null
+    let bestCount = 0
+    let bestSpread = -1
+
+    const visit = (el: Element) => {
+        const children = Array.from(el.children) as HTMLElement[]
+
+        if (children.length >= 2) {
+            const positions = children
+                .map((child) => {
+                    const rect = child.getBoundingClientRect()
+                    return isVertical ? rect.top : rect.left
+                })
+                .filter(Number.isFinite)
+
+            const spread =
+                positions.length > 1
+                    ? Math.max(...positions) - Math.min(...positions)
+                    : 0
+
+            // CMS slide wrappers spread along the slider axis. Inner card
+            // content usually stacks on the cross axis, so this avoids
+            // accidentally treating image/date/title layers as slides.
+            if (
+                spread > bestSpread + 0.5 ||
+                (Math.abs(spread - bestSpread) <= 0.5 &&
+                    children.length > bestCount)
+            ) {
+                bestElement = el as HTMLElement
+                bestCount = children.length
+                bestSpread = spread
+            }
+        }
+
+        children.forEach(visit)
+    }
+
+    visit(container)
+
+    return { element: bestElement, count: bestCount }
+}
+
+function getElementFrameInContainer(
+    container: HTMLElement,
+    target: HTMLElement | null
+): ElementFrame | null {
+    if (!target) return null
+
+    const containerRect = container.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    const width = target.offsetWidth || target.getBoundingClientRect().width
+    if (width <= 0) return null
+
+    let left = target.offsetLeft
+    let parent = target.offsetParent as HTMLElement | null
+
+    while (parent && parent !== container) {
+        left += parent.offsetLeft
+        parent = parent.offsetParent as HTMLElement | null
+    }
+
+    if (parent !== container) {
+        left = targetRect.left - containerRect.left
+    }
+
+    let bottom = targetRect.bottom - containerRect.top
+    target.querySelectorAll("*").forEach((child) => {
+        const rect = child.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) return
+        if (rect.right < containerRect.left || rect.left > containerRect.right) {
+            return
+        }
+        bottom = Math.max(bottom, rect.bottom - containerRect.top)
+    })
+
+    return {
+        left: Math.max(0, Math.round(left * 100) / 100),
+        width: Math.round(width * 100) / 100,
+        bottom: Math.round(bottom * 100) / 100,
+    }
+}
+
+function computeAlignmentStyle({
+    alignment,
+    inset,
+    offX,
+    offY,
+    splitSide,
+}: {
+    alignment: ArrowAlign
+    inset: number
+    offX: number
+    offY: number
+    splitSide?: "prev" | "next"
+}): React.CSSProperties {
+    const style: React.CSSProperties = { position: "absolute", zIndex: 10 }
+    const transforms: string[] = []
+
+    if (splitSide) {
+        if (splitSide === "prev") style.left = inset + offX
+        else style.right = inset + offX
+    } else if (alignment.includes("Left")) {
+        style.left = inset + offX
+    } else if (alignment.includes("Right")) {
+        style.right = inset - offX
+    } else {
+        style.left = "50%"
+        transforms.push(`translateX(calc(-50% + ${offX}px))`)
+    }
+
+    if (alignment.includes("Top")) {
+        style.top = inset + offY
+    } else if (alignment.includes("Bottom")) {
+        style.bottom = inset - offY
+    } else {
+        style.top = "50%"
+        transforms.push(`translateY(calc(-50% + ${offY}px))`)
+    }
+
+    if (transforms.length > 0) style.transform = transforms.join(" ")
+    return style
+}
+
+// ============================================
+// CONSTANTS
+// ============================================
+
+const DRAG_MOVE_THRESHOLD_PX = 6
+const DRAG_VELOCITY_CLAMP = 2 // px/ms
+const DRAG_PROJECTION_MULTIPLIER = 220
+const CLICK_SUPPRESS_MS = 50
+const DRAG_RESIST = 0.3
+const PROGRESS_BAR_HEIGHT = 4
+const ACTIVE_DOT_SCALE = 1.3
+const STAGGER_CAP = 12
 
 // ============================================
 // ICONS
@@ -181,8 +328,7 @@ const DEFAULT_LAYOUT: LayoutSettings = {
     items: 3,
     gap: 30,
     padding: 0,
-    radius: 0,
-    fit: "Fill",
+    fit: "Contain",
     align: "Stretch",
     aspectRatio: 0,
 }
@@ -195,13 +341,10 @@ const DEFAULT_PLAYBACK: PlaybackSettings = {
 const DEFAULT_NAVIGATION: NavigationSettings = {
     step: "Single",
     draggable: true,
-    dragThreshold: 6,
-    edgeResistance: 0.3,
     keyboard: true,
 }
 const DEFAULT_ARROWS: ArrowSettings = {
     show: true,
-    reserveSpace: false,
     type: "Split",
     alignment: "Center Center",
     prevImage: "",
@@ -231,7 +374,6 @@ const DEFAULT_DOTS: DotSettings = {
     backdrop: "rgba(0,0,0,0.4)",
     radius: 20,
     opacity: 0.5,
-    activeScale: 1.3,
     blur: 4,
     offsetX: 0,
     offsetY: 0,
@@ -253,10 +395,11 @@ const DEFAULT_APPEAR: AppearSettings = {
     distance: 24,
     stagger: 0.06,
 }
-const DEFAULT_ANIMATION = { type: "spring", stiffness: 240, damping: 28, mass: 1 }
+const DEFAULT_ANIMATION: Transition = { type: "spring", stiffness: 240, damping: 28, mass: 1 }
 
 export default function CMSSlider(props: CMSSliderProps) {
     const {
+        style,
         content,
         direction = "Left",
         autoPlay = false,
@@ -274,29 +417,12 @@ export default function CMSSlider(props: CMSSliderProps) {
     const animationOptions = props.animationOptions || DEFAULT_ANIMATION
 
     const { interval, pauseOnHover, loop, startAt } = playback
-    const { align: itemAlign, fit } = layout
-    const isFill = fit === "Fill"
+    const { align: itemAlign } = layout
+    // Legacy instances can keep `layout.fit = "Fill"` saved in Framer even
+    // after the default changes. Keep the slider child-sized unless a future
+    // dedicated height mode restores the old stretching behavior explicitly.
+    const shouldFillFrame = false
     const draggable = navigation.draggable
-
-    // Auto-reserve track padding so cards don't slide under arrows.
-    // Off by default — user opts in via arrows.reserveSpace.
-    const arrowReserveBase =
-        arrows.show && arrows.reserveSpace && arrows.type !== "Inline"
-            ? Math.max(
-                  0,
-                  arrows.inset + arrows.size + 8 - layout.padding
-              )
-            : 0
-    const arrowReserveLeft =
-        arrowReserveBase > 0 &&
-        (arrows.type === "Split" || arrows.alignment.includes("Left"))
-            ? arrowReserveBase
-            : 0
-    const arrowReserveRight =
-        arrowReserveBase > 0 &&
-        (arrows.type === "Split" || arrows.alignment.includes("Right"))
-            ? arrowReserveBase
-            : 0
 
     const isCanvas = RenderTarget.current() === RenderTarget.canvas
     const isStatic = useIsStaticRenderer()
@@ -317,36 +443,56 @@ export default function CMSSlider(props: CMSSliderProps) {
     const [isHovered, setIsHovered] = React.useState(false)
     const [isFocused, setIsFocused] = React.useState(false)
     const [isDragging, setIsDragging] = React.useState(false)
+    const [childrenFrame, setChildrenFrame] =
+        React.useState<ElementFrame | null>(null)
+    const [childrenViewportHeight, setChildrenViewportHeight] =
+        React.useState(0)
+    // Hide the slider until the first ResizeObserver measurement lands —
+    // kills the first-paint flash where CMS items briefly render in
+    // Framer's default layout before our !important track CSS reflows
+    // them. Frozen renderers (canvas/SSG) skip the gate so the editor and
+    // static HTML stay visible immediately.
+    const [isReady, setIsReady] = React.useState(isFrozen)
     const isActive = isHovered || isFocused
 
     const [reducedMotion, setReducedMotion] = React.useState(false)
     React.useEffect(() => {
         if (typeof window === "undefined") return
         const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
-        setReducedMotion(mq.matches)
-        const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches)
+        React.startTransition(() => {
+            setReducedMotion(mq.matches)
+        })
+        const handler = (e: MediaQueryListEvent) => {
+            React.startTransition(() => {
+                setReducedMotion(e.matches)
+            })
+            controlsRef.current?.stop()
+        }
         mq.addEventListener("change", handler)
         return () => mq.removeEventListener("change", handler)
     }, [])
 
     const itemsPerView = layout.items
-    const effectiveItems = itemsPerView
 
     const maxIndex = React.useMemo(() => {
         if (navigation.step === "Page") {
-            const totalPages = Math.ceil(itemCount / effectiveItems)
+            const totalPages = Math.ceil(itemCount / itemsPerView)
             return Math.max(0, totalPages - 1)
         }
-        return Math.max(0, itemCount - effectiveItems)
-    }, [itemCount, effectiveItems, navigation.step])
+        return Math.max(0, itemCount - itemsPerView)
+    }, [itemCount, itemsPerView, navigation.step])
 
     const dotCount = maxIndex + 1
-    const showNav = isCanvas ? itemCount > 0 || !!content : itemCount > effectiveItems
+    const showNav = isCanvas ? itemCount > 0 || !!content : itemCount > itemsPerView
 
     const showArrowsNow =
         arrows.show && showNav && (!arrows.fadeIn || isActive || isCanvas)
 
-    const effectiveLoop = loop
+    // During a viewport resize itemCount can briefly drop (mid-flux DOM
+    // measurements) and push activeIndex out of range for one render
+    // before the corrective useEffect runs. Use this for rendering so
+    // dots/numbers/progress never display an out-of-bounds value.
+    const safeActiveIndex = Math.min(activeIndex, maxIndex)
 
     // ============================================
     // CANVAS FIX: STRUCTURE NORMALIZATION
@@ -363,7 +509,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                     style={{
                         display: "flex",
                         width: "100%",
-                        height: "100%",
+                        height: shouldFillFrame ? "100%" : "auto",
                         gap: layout.gap,
                         flexDirection: isVertical ? "column" : "row",
                     }}
@@ -381,14 +527,18 @@ export default function CMSSlider(props: CMSSliderProps) {
             )
         }
         return content
-    }, [content, layout.gap, isVertical])
+    }, [content, layout.gap, isVertical, shouldFillFrame])
 
     // ============================================
     // SIZE + ITEM COUNT
     // ============================================
 
     React.useEffect(() => {
-        if (isCanvas) setActiveIndex(0)
+        if (isCanvas) {
+            React.startTransition(() => {
+                setActiveIndex(0)
+            })
+        }
     }, [itemsPerView, isCanvas, direction])
 
     React.useEffect(() => {
@@ -397,90 +547,99 @@ export default function CMSSlider(props: CMSSliderProps) {
 
         if (typeof ResizeObserver === "undefined") return
 
-        let rafId: number
+        let rafId = 0
+        let observedItemContainer: HTMLElement | null = null
+        let ro: ResizeObserver
 
         const measure = () => {
+            if (rafId) cancelAnimationFrame(rafId)
             rafId = requestAnimationFrame(() => {
                 if (!container) return
                 const size = isVertical
                     ? container.offsetHeight
                     : container.offsetWidth
-                const horizontalPad =
-                    layout.padding * 2 + arrowReserveLeft + arrowReserveRight
-                const verticalPad = layout.padding * 2
-                setContainerSize(
-                    size - (isVertical ? verticalPad : horizontalPad)
+                // Skip mid-resize garbage reads — a tiny size produces a
+                // negative containerSize and cascades into nonsense
+                // itemSize/slideSize values.
+                if (size < 10) return
+                const pad = layout.padding * 2
+
+                const {
+                    element: itemContainer,
+                    count,
+                } = findSliderItemContainer(container, isVertical)
+
+                if (itemContainer && itemContainer !== container) {
+                    if (itemContainer !== observedItemContainer) {
+                        if (observedItemContainer) ro.unobserve(observedItemContainer)
+                        ro.observe(itemContainer)
+                        observedItemContainer = itemContainer
+                    }
+                } else if (observedItemContainer) {
+                    ro.unobserve(observedItemContainer)
+                    observedItemContainer = null
+                }
+
+                const nextChildrenFrame = getElementFrameInContainer(
+                    container,
+                    itemContainer
                 )
 
-                let count = 0
-                let itemContainer: Element | null = null
-                const findItems = (el: Element) => {
-                    if (el.children.length >= count && el.children.length >= 2) {
-                        count = el.children.length
-                        itemContainer = el
-                    }
-                    Array.from(el.children).forEach(findItems)
-                }
-                findItems(container)
-
-                // Label CMS-rendered slides for screen readers. Only set when
-                // missing so synthetic role="group" wrappers (childCount > 1
-                // branch in normalizedContent) aren't overwritten.
-                if (itemContainer && !isCanvas) {
-                    const slides = Array.from(
-                        (itemContainer as Element).children
-                    )
-                    slides.forEach((child, i) => {
-                        if (!child.getAttribute("aria-roledescription")) {
-                            child.setAttribute("role", "group")
-                            child.setAttribute(
-                                "aria-roledescription",
-                                "Slide"
-                            )
+                React.startTransition(() => {
+                    setContainerSize(size - pad)
+                    setChildrenFrame((prev) => {
+                        if (!nextChildrenFrame) return prev === null ? prev : null
+                        if (
+                            prev &&
+                            Math.abs(prev.left - nextChildrenFrame.left) < 0.5 &&
+                            Math.abs(prev.width - nextChildrenFrame.width) < 0.5 &&
+                            Math.abs(prev.bottom - nextChildrenFrame.bottom) < 0.5
+                        ) {
+                            return prev
                         }
-                        child.setAttribute(
-                            "aria-label",
-                            `Slide ${i + 1} of ${slides.length}`
-                        )
+                        return nextChildrenFrame
                     })
-                }
+                    setChildrenViewportHeight(container.offsetHeight)
 
-                if (isCanvas) {
-                    // On canvas, CMS repeats the first item to fill the view,
-                    // so count often equals itemsPerView — force a larger
-                    // preview count so pagination is visible and styleable
-                    const preview = Math.max(itemsPerView + 2, 5)
-                    setItemCount(count > preview ? count : preview)
-                } else if (count > 0) {
-                    setItemCount(count)
-                }
+                    if (isCanvas) {
+                        // On canvas, CMS repeats the first item to fill the view,
+                        // so count often equals itemsPerView — force a larger
+                        // preview count so pagination is visible and styleable
+                        const preview = Math.max(itemsPerView + 2, 5)
+                        setItemCount(count > preview ? count : preview)
+                    } else if (count > 0) {
+                        setItemCount(count)
+                    }
+                    setIsReady(true)
+                })
             })
         }
 
-        measure()
-        const ro = new ResizeObserver(measure)
+        ro = new ResizeObserver(measure)
         ro.observe(container)
-        return () => { ro.disconnect(); cancelAnimationFrame(rafId) }
+        measure()
+        return () => {
+            ro.disconnect()
+            if (rafId) cancelAnimationFrame(rafId)
+        }
     }, [
         layout.padding,
         isCanvas,
         itemsPerView,
         isVertical,
         content,
-        arrowReserveLeft,
-        arrowReserveRight,
     ])
 
     // ============================================
     // LAYOUT CALCS
     // ============================================
 
-    const totalGaps = (effectiveItems - 1) * layout.gap
+    const totalGaps = (itemsPerView - 1) * layout.gap
     const itemSize =
         containerSize > 0
-            ? (containerSize - totalGaps) / Math.max(1, effectiveItems)
+            ? (containerSize - totalGaps) / Math.max(1, itemsPerView)
             : 0
-    const slideSize = itemSize + layout.gap
+    const slideSize = containerSize > 0 ? itemSize + layout.gap : 0
 
     // ============================================
     // MOTION ENGINE
@@ -489,7 +648,7 @@ export default function CMSSlider(props: CMSSliderProps) {
     const x = useMotionValue(0)
     const y = useMotionValue(0)
 
-    const controlsRef = React.useRef<any>(null)
+    const controlsRef = React.useRef<ReturnType<typeof animate> | null>(null)
 
     const setTranslate = React.useCallback(
         (v: number) => {
@@ -499,14 +658,18 @@ export default function CMSSlider(props: CMSSliderProps) {
         [isVertical, x, y]
     )
 
+    React.useEffect(() => {
+        controlsRef.current?.stop()
+        if (isVertical) x.set(0)
+        else y.set(0)
+    }, [isVertical, x, y])
+
     const animateTo = React.useCallback(
         (v: number) => {
             if (isCanvas) return
             const mv = isVertical ? y : x
 
-            if (controlsRef.current) {
-                controlsRef.current.stop()
-            }
+            controlsRef.current?.stop()
 
             controlsRef.current = animate(
                 mv,
@@ -521,28 +684,30 @@ export default function CMSSlider(props: CMSSliderProps) {
         (index: number) => {
             const sign = isReversed ? 1 : -1
             if (navigation.step === "Page")
-                return sign * index * effectiveItems * slideSize
+                return sign * index * itemsPerView * slideSize
             return sign * index * slideSize
         },
-        [navigation.step, effectiveItems, slideSize, isReversed]
+        [navigation.step, itemsPerView, slideSize, isReversed]
     )
 
     const goTo = React.useCallback(
         (index: number, animateIt = true) => {
             let newIndex = index
-            if (effectiveLoop) {
+            if (loop) {
                 if (index < 0) newIndex = maxIndex
                 else if (index > maxIndex) newIndex = 0
             } else {
                 newIndex = clamp(index, 0, maxIndex)
             }
 
-            setActiveIndex(newIndex)
+            React.startTransition(() => {
+                setActiveIndex(newIndex)
+            })
             const target = calcTargetTranslate(newIndex)
             if (animateIt) animateTo(target)
             else setTranslate(target)
         },
-        [effectiveLoop, maxIndex, calcTargetTranslate, animateTo, setTranslate]
+        [loop, maxIndex, calcTargetTranslate, animateTo, setTranslate]
     )
 
     const goPrev = React.useCallback(
@@ -553,6 +718,11 @@ export default function CMSSlider(props: CMSSliderProps) {
         () => goTo(activeIndex + 1, true),
         [goTo, activeIndex]
     )
+
+    const activeIndexRef = React.useRef(activeIndex)
+    React.useEffect(() => { activeIndexRef.current = activeIndex }, [activeIndex])
+    const goToRef = React.useRef(goTo)
+    React.useEffect(() => { goToRef.current = goTo }, [goTo])
 
     // Compute initial index based on startAt mode
     const initialIndex = React.useMemo(() => {
@@ -569,37 +739,40 @@ export default function CMSSlider(props: CMSSliderProps) {
 
     React.useEffect(() => {
         if (isCanvas) return
+        if (loop) return
+        if (activeIndex > maxIndex) {
+            goToRef.current(maxIndex, true)
+        }
+    }, [maxIndex, loop, isCanvas, activeIndex])
+
+    React.useEffect(() => {
+        if (isCanvas) return
         if (slideSize <= 0) return
         const target = calcTargetTranslate(activeIndex)
         setTranslate(target)
     }, [slideSize, activeIndex, calcTargetTranslate, setTranslate, isCanvas])
 
     React.useEffect(() => {
-        if (!autoPlay || isCanvas || itemCount <= effectiveItems || reducedMotion) return
+        if (!autoPlay || isCanvas || itemCount <= itemsPerView || reducedMotion) return
         if (pauseOnHover && isActive) return
 
         const ms = clamp(interval, 0.5, 30) * 1000
-        const t = window.setInterval(() => goTo(activeIndex + 1, true), ms)
+        const t = window.setInterval(() => goToRef.current(activeIndexRef.current + 1, true), ms)
         return () => window.clearInterval(t)
     }, [
         autoPlay,
         interval,
-        activeIndex,
         itemCount,
-        effectiveItems,
+        itemsPerView,
         isActive,
         pauseOnHover,
-        goTo,
         isCanvas,
         reducedMotion,
     ])
 
-    React.useEffect(() => {
-        if (!navigation.keyboard || isCanvas) return
-        const handleKeyDown = (e: KeyboardEvent) => {
-            // Only fire when the slider has focus — hovering shouldn't
-            // hijack page-level arrow scrolling.
-            if (!isFocused) return
+    const handleKeyDown = React.useCallback(
+        (e: React.KeyboardEvent) => {
+            if (!navigation.keyboard || isCanvas) return
             const tag = (e.target as HTMLElement)?.tagName?.toLowerCase()
             if (tag === "input" || tag === "textarea" || tag === "select") return
             if ((e.target as HTMLElement)?.isContentEditable) return
@@ -613,10 +786,9 @@ export default function CMSSlider(props: CMSSliderProps) {
                 e.preventDefault()
                 goNext()
             }
-        }
-        window.addEventListener("keydown", handleKeyDown)
-        return () => window.removeEventListener("keydown", handleKeyDown)
-    }, [navigation.keyboard, isCanvas, isFocused, isVertical, goPrev, goNext])
+        },
+        [navigation.keyboard, isCanvas, isVertical, goPrev, goNext]
+    )
 
     // ============================================
     // DRAG
@@ -639,9 +811,7 @@ export default function CMSSlider(props: CMSSliderProps) {
     )
     React.useEffect(() => {
         return () => {
-            if (controlsRef.current) {
-                controlsRef.current.stop()
-            }
+            controlsRef.current?.stop()
             if (clickSuppressTimeoutRef.current != null) {
                 window.clearTimeout(clickSuppressTimeoutRef.current)
             }
@@ -649,7 +819,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                 window.removeEventListener(
                     "click",
                     clickSuppressListenerRef.current,
-                    { capture: true } as any
+                    { capture: true }
                 )
             }
         }
@@ -657,12 +827,10 @@ export default function CMSSlider(props: CMSSliderProps) {
 
     const getCurrentTranslate = () => (isVertical ? y.get() : x.get())
 
-    const onPointerDown = (e: React.PointerEvent) => {
+    const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
         if (!draggable || isCanvas) return
 
-        if (controlsRef.current) {
-            controlsRef.current.stop()
-        }
+        controlsRef.current?.stop()
 
         const pos = isVertical ? e.clientY : e.clientX
         const now = performance.now()
@@ -674,17 +842,19 @@ export default function CMSSlider(props: CMSSliderProps) {
         dragRef.current.lastTime = now
         dragRef.current.velocity = 0
         dragRef.current.moved = false
-        setIsDragging(true)
-        ;(e.currentTarget as any).setPointerCapture?.(e.pointerId)
+        React.startTransition(() => {
+            setIsDragging(true)
+        })
+        e.currentTarget.setPointerCapture(e.pointerId)
     }
 
-    const onPointerMove = (e: React.PointerEvent) => {
+    const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
         if (!dragRef.current.dragging) return
 
         const pos = isVertical ? e.clientY : e.clientX
         const diff = pos - dragRef.current.startPos
 
-        if (Math.abs(diff) > Math.max(1, navigation.dragThreshold)) {
+        if (Math.abs(diff) > DRAG_MOVE_THRESHOLD_PX) {
             dragRef.current.moved = true
         }
 
@@ -700,37 +870,38 @@ export default function CMSSlider(props: CMSSliderProps) {
 
         const maxTranslateAbs =
             navigation.step === "Page"
-                ? maxIndex * effectiveItems * slideSize
+                ? maxIndex * itemsPerView * slideSize
                 : maxIndex * slideSize
 
         let nextTranslate = dragRef.current.startTranslate + diff
 
         const minTranslate = isReversed ? 0 : -maxTranslateAbs
         const maxTranslate = isReversed ? maxTranslateAbs : 0
-        const resist = clamp(navigation.edgeResistance, 0, 1)
 
         if (nextTranslate > maxTranslate)
             nextTranslate =
-                maxTranslate + (nextTranslate - maxTranslate) * resist
+                maxTranslate + (nextTranslate - maxTranslate) * DRAG_RESIST
         else if (nextTranslate < minTranslate)
             nextTranslate =
-                minTranslate + (nextTranslate - minTranslate) * resist
+                minTranslate + (nextTranslate - minTranslate) * DRAG_RESIST
 
         setTranslate(nextTranslate)
     }
 
-    const onPointerUp = (e: React.PointerEvent) => {
+    const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
         if (!dragRef.current.dragging) return
         dragRef.current.dragging = false
-        setIsDragging(false)
-        ;(e.currentTarget as any).releasePointerCapture?.(e.pointerId)
+        React.startTransition(() => {
+            setIsDragging(false)
+        })
+        e.currentTarget.releasePointerCapture(e.pointerId)
 
         if (!dragRef.current.moved) return
 
         const v = dragRef.current.velocity
         const currentT = getCurrentTranslate()
 
-        const projection = clamp(v, -2, 2) * 220
+        const projection = clamp(v, -DRAG_VELOCITY_CLAMP, DRAG_VELOCITY_CLAMP) * DRAG_PROJECTION_MULTIPLIER
         const projected = currentT + projection
 
         const safeSlideSize = Math.max(1, slideSize)
@@ -738,13 +909,13 @@ export default function CMSSlider(props: CMSSliderProps) {
         const signedProjected = isReversed ? projected : -projected
         let targetIndex = 0
         if (navigation.step === "Page") {
-            const pageSize = effectiveItems * safeSlideSize
+            const pageSize = itemsPerView * safeSlideSize
             targetIndex = Math.round(signedProjected / Math.max(1, pageSize))
         } else {
             targetIndex = Math.round(signedProjected / safeSlideSize)
         }
 
-        targetIndex = effectiveLoop
+        targetIndex = loop
             ? ((targetIndex % (maxIndex + 1)) + (maxIndex + 1)) %
               (maxIndex + 1)
             : clamp(targetIndex, 0, maxIndex)
@@ -766,130 +937,77 @@ export default function CMSSlider(props: CMSSliderProps) {
         clickSuppressTimeoutRef.current = window.setTimeout(() => {
             window.removeEventListener("click", preventClick, {
                 capture: true,
-            } as any)
+            })
             clickSuppressListenerRef.current = null
             clickSuppressTimeoutRef.current = null
-        }, 50)
+        }, CLICK_SUPPRESS_MS)
     }
 
     // ============================================
     // RENDER HELPERS
     // ============================================
 
-    const arrowBoxShadow = arrows.shadow
-        ? `0 4px ${arrows.shadowBlur}px ${arrows.shadowColor}`
-        : "none"
-
-    const arrowBtnStyle: React.CSSProperties = {
-        width: arrows.size,
-        height: arrows.size,
-        borderRadius: arrows.radius,
-        background: arrows.backdrop,
-        color: arrows.fill,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        border: "none",
-        padding: 0,
-        margin: 0,
-        boxSizing: "border-box",
-        font: "inherit",
-        lineHeight: 0,
-        cursor: "pointer",
-        transition: "opacity 0.2s ease, transform 0.15s ease",
-        opacity: showArrowsNow ? 1 : 0,
-        pointerEvents: isCanvas ? "none" : showArrowsNow ? "auto" : "none",
-        boxShadow: arrowBoxShadow,
-        flexShrink: 0,
-        appearance: "none",
-        WebkitAppearance: "none",
-    }
-
-    const isInline = arrows.type === "Inline"
-
-    // When pagination sits at the top or bottom, the visual center of the
-    // cards is offset from the geometric center of the component. Shift
-    // vertically-centered arrows by half the pagination footprint so they
-    // align with the cards, not the whole component area.
-    const paginationVerticalShift = React.useMemo(() => {
-        if (dots.type === "None" || !showNav) return 0
-        if (isInline && arrows.show) return 0
-        let h = 0
-        if (dots.type === "Dots") h = dots.size + dots.padding * 2
-        else if (dots.type === "Progress") h = 4
-        else if (dots.type === "Numbers") h = 13 + dots.padding
-        const footprint = dots.inset + h
-        if (dots.alignment.includes("Bottom")) return -footprint / 2
-        if (dots.alignment.includes("Top")) return footprint / 2
-        return 0
-    }, [
-        dots.type,
-        dots.size,
-        dots.padding,
-        dots.inset,
-        dots.alignment,
-        showNav,
-        isInline,
-        arrows.show,
-    ])
+    const arrowBtnStyle: React.CSSProperties = React.useMemo(
+        () => ({
+            width: arrows.size,
+            height: arrows.size,
+            borderRadius: arrows.radius,
+            background: arrows.backdrop,
+            color: arrows.fill,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "none",
+            padding: 0,
+            margin: 0,
+            boxSizing: "border-box",
+            font: "inherit",
+            lineHeight: 0,
+            cursor: "pointer",
+            transition: "opacity 0.2s ease, transform 0.15s ease",
+            opacity: showArrowsNow ? 1 : 0,
+            pointerEvents: isCanvas ? "none" : showArrowsNow ? "auto" : "none",
+            boxShadow: arrows.shadow
+                ? `0 4px ${arrows.shadowBlur}px ${arrows.shadowColor}`
+                : "none",
+            flexShrink: 0,
+            appearance: "none",
+            WebkitAppearance: "none",
+        }),
+        [
+            arrows.size,
+            arrows.radius,
+            arrows.backdrop,
+            arrows.fill,
+            arrows.shadow,
+            arrows.shadowBlur,
+            arrows.shadowColor,
+            showArrowsNow,
+            isCanvas,
+        ]
+    )
 
     // Position style for an arrow container.
     // For Split, each arrow gets its own container anchored to its edge
-    // (pass "prev"/"next"). For Grouped/Inline, one shared container holds
-    // both arrows.
-    const getArrowPositionStyle = (
-        side?: "prev" | "next"
-    ): React.CSSProperties => {
-        const align = arrows.alignment
-        const inset = arrows.inset
-        const offX = arrows.offsetX
-        const offY = arrows.offsetY
+    // (pass "prev"/"next"). For Grouped, one shared container holds
+    // both arrows. Inline arrows render in-flow below/above the cards.
+    const getArrowPositionStyle = (side?: "prev" | "next"): React.CSSProperties => {
         const isSplit = arrows.type === "Split"
-
-        const style: React.CSSProperties = {
-            position: "absolute",
-            zIndex: 10,
+        const base = computeAlignmentStyle({
+            alignment: arrows.alignment,
+            inset: arrows.inset,
+            offX: arrows.offsetX,
+            offY: arrows.offsetY,
+            splitSide: isSplit ? side : undefined,
+        })
+        return {
+            ...base,
             display: "flex",
             flexDirection: "row",
             alignItems: "center",
             pointerEvents: "none",
             gap: isSplit ? undefined : arrows.gap,
         }
-
-        const transforms: string[] = []
-
-        // Horizontal: Split anchors each arrow to its own edge; others
-        // follow the alignment prop. For Split, offsetX is mirrored so
-        // positive values move both arrows symmetrically toward center.
-        if (isSplit) {
-            if (side === "prev") style.left = inset + offX
-            else style.right = inset + offX
-        } else if (align.includes("Left")) {
-            style.left = inset + offX
-        } else if (align.includes("Right")) {
-            style.right = inset - offX
-        } else {
-            style.left = "50%"
-            transforms.push(`translateX(calc(-50% + ${offX}px))`)
-        }
-
-        // Vertical
-        if (align.includes("Top")) {
-            style.top = inset + offY
-        } else if (align.includes("Bottom")) {
-            style.bottom = inset - offY
-        } else {
-            style.top = "50%"
-            transforms.push(
-                `translateY(calc(-50% + ${offY + paginationVerticalShift}px))`
-            )
-        }
-
-        if (transforms.length > 0) {
-            style.transform = transforms.join(" ")
-        }
-
-        return style
     }
 
     const renderIcon = (type: "prev" | "next") => {
@@ -909,7 +1027,8 @@ export default function CMSSlider(props: CMSSliderProps) {
                         objectFit: "contain",
                         pointerEvents: "none",
                     }}
-                    alt={type}
+                    alt=""
+                    aria-hidden="true"
                 />
             )
         }
@@ -927,53 +1046,11 @@ export default function CMSSlider(props: CMSSliderProps) {
     }
 
     // ============================================
-    // PAGINATION POSITIONING
+    // PAGINATION CONTENT
     // ============================================
 
-    const getPaginationPositionStyle = (): React.CSSProperties => {
-        const align = dots.alignment
-        const inset = dots.inset
-        const offX = dots.offsetX
-        const offY = dots.offsetY
-
-        const style: React.CSSProperties = {
-            position: "absolute",
-            zIndex: 10,
-        }
-
-        const transforms: string[] = []
-
-        if (align.includes("Left")) {
-            style.left = inset + offX
-        } else if (align.includes("Right")) {
-            style.right = inset - offX
-        } else {
-            style.left = "50%"
-            transforms.push(`translateX(calc(-50% + ${offX}px))`)
-        }
-
-        if (align.includes("Top")) {
-            style.top = inset + offY
-        } else if (align.includes("Bottom")) {
-            style.bottom = inset - offY
-        } else {
-            style.top = "50%"
-            transforms.push(`translateY(calc(-50% + ${offY}px))`)
-        }
-
-        if (transforms.length > 0) {
-            style.transform = transforms.join(" ")
-        }
-
-        return style
-    }
-
-    const renderPagination = (inline: boolean) => {
+    const renderPaginationContent = (relativeToChildren = false) => {
         if (dots.type === "None") return null
-
-        const position: React.CSSProperties = inline
-            ? {}
-            : getPaginationPositionStyle()
 
         if (dots.type === "Dots") {
             const compact = dots.compact && dotCount > dots.compactVisible
@@ -987,7 +1064,7 @@ export default function CMSSlider(props: CMSSliderProps) {
 
             const halfVis = Math.floor(visible / 2)
             const windowStart = compact
-                ? clamp(activeIndex - halfVis, 0, dotCount - visible)
+                ? clamp(safeActiveIndex - halfVis, 0, dotCount - visible)
                 : 0
             const windowEnd = windowStart + visible - 1
             const translate = compact ? -windowStart * slotSize : 0
@@ -996,11 +1073,11 @@ export default function CMSSlider(props: CMSSliderProps) {
                 !compact || (i >= windowStart && i <= windowEnd)
 
             const getDotScale = (i: number) =>
-                i === activeIndex ? dots.activeScale : 1
+                i === safeActiveIndex ? ACTIVE_DOT_SCALE : 1
 
             const getDotOpacity = (i: number) => {
                 if (!isInWindow(i)) return 0
-                if (i === activeIndex) return 1
+                if (i === safeActiveIndex) return 1
                 return dots.opacity
             }
 
@@ -1013,8 +1090,8 @@ export default function CMSSlider(props: CMSSliderProps) {
                         goTo(i, true)
                     }}
                     role="tab"
-                    aria-selected={i === activeIndex}
-                    aria-label={`Slide ${i + 1}`}
+                    aria-selected={i === safeActiveIndex}
+                    aria-label={`${navigation.step === "Page" ? "Page" : "Slide"} ${i + 1}`}
                     style={{
                         borderRadius: "50%",
                         border: "none",
@@ -1026,7 +1103,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                         height: dots.size,
                         flexShrink: 0,
                         background:
-                            i === activeIndex ? dots.activeFill : dots.fill,
+                            i === safeActiveIndex ? dots.activeFill : dots.fill,
                         opacity: getDotOpacity(i),
                         transform: `scale(${getDotScale(i)})`,
                     }}
@@ -1036,7 +1113,6 @@ export default function CMSSlider(props: CMSSliderProps) {
             return (
                 <div
                     style={{
-                        ...position,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: compact ? "flex-start" : "center",
@@ -1075,7 +1151,8 @@ export default function CMSSlider(props: CMSSliderProps) {
 
         if (dots.type === "Progress") {
             const total = Math.max(1, dotCount)
-            const barHeight = 4
+            const progressWidth: React.CSSProperties["width"] =
+                relativeToChildren ? "100%" : dots.progressWidth
 
             // Compact = Instagram-story segmented bar, one segment per slide.
             if (dots.compact) {
@@ -1083,8 +1160,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                 return (
                     <div
                         style={{
-                            ...position,
-                            width: dots.progressWidth,
+                            width: progressWidth,
                             display: "flex",
                             gap: segmentGap,
                             pointerEvents: isCanvas ? "none" : "auto",
@@ -1101,18 +1177,18 @@ export default function CMSSlider(props: CMSSliderProps) {
                                     goTo(i, true)
                                 }}
                                 role="tab"
-                                aria-selected={i === activeIndex}
-                                aria-label={`Slide ${i + 1}`}
+                                aria-selected={i === safeActiveIndex}
+                                aria-label={`${navigation.step === "Page" ? "Page" : "Slide"} ${i + 1}`}
                                 style={{
                                     flex: 1,
                                     minWidth: 0,
-                                    height: barHeight,
+                                    height: PROGRESS_BAR_HEIGHT,
                                     padding: 0,
                                     border: "none",
                                     cursor: "pointer",
                                     borderRadius: dots.radius,
                                     background:
-                                        i <= activeIndex
+                                        i <= safeActiveIndex
                                             ? dots.activeFill
                                             : dots.backdrop,
                                     backdropFilter:
@@ -1132,9 +1208,8 @@ export default function CMSSlider(props: CMSSliderProps) {
             return (
                 <div
                     style={{
-                        ...position,
-                        width: dots.progressWidth,
-                        height: barHeight,
+                        width: progressWidth,
+                        height: PROGRESS_BAR_HEIGHT,
                         background: dots.backdrop,
                         borderRadius: dots.radius,
                         overflow: "hidden",
@@ -1144,10 +1219,6 @@ export default function CMSSlider(props: CMSSliderProps) {
                                 : undefined,
                         pointerEvents: isCanvas ? "none" : "auto",
                     }}
-                    role="progressbar"
-                    aria-valuemin={1}
-                    aria-valuemax={total}
-                    aria-valuenow={activeIndex + 1}
                 >
                     <motion.div
                         style={{
@@ -1157,7 +1228,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                             transformOrigin: "left center",
                         }}
                         animate={{
-                            scaleX: (activeIndex + 1) / total,
+                            scaleX: (safeActiveIndex + 1) / total,
                         }}
                         transition={animationOptions}
                     />
@@ -1169,7 +1240,6 @@ export default function CMSSlider(props: CMSSliderProps) {
             return (
                 <div
                     style={{
-                        ...position,
                         padding: `${dots.padding * 0.5}px ${dots.padding}px`,
                         background: dots.backdrop,
                         borderRadius: dots.radius,
@@ -1185,7 +1255,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                     }}
                 >
                     <span style={{ color: dots.activeFill }}>
-                        {activeIndex + 1}
+                        {safeActiveIndex + 1}
                     </span>
                     <span>/</span>
                     <span>{dotCount}</span>
@@ -1196,54 +1266,85 @@ export default function CMSSlider(props: CMSSliderProps) {
         return null
     }
 
-    const paginationInline = isInline && arrows.show && showNav
-
     // ============================================
-    // EMPTY STATE
+    // IN-FLOW ROW LAYOUT
     // ============================================
 
-    if (!content) {
-        return (
-            <div
-                style={{
-                    width: "100%",
-                    height: "100%",
-                    minWidth: 200,
-                    minHeight: 200,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: "#EBEAF9",
-                    color: "#8855FF",
-                    fontFamily: "inherit",
-                    textAlign: "center",
-                    padding: 12,
-                    boxSizing: "border-box",
-                    overflow: "hidden",
-                }}
-            >
-                <div
-                    style={{
-                        fontSize: 14,
-                        fontWeight: 600,
-                        marginBottom: 6,
-                    }}
-                >
-                    Connect to Content
-                </div>
-                <div
-                    style={{
-                        fontSize: 12,
-                        color: "#9999AA",
-                        maxWidth: 200,
-                        lineHeight: 1.4,
-                    }}
-                >
-                    Add layers or components to make infinite slides.
-                </div>
-            </div>
-        )
+    // Pagination and Inline-arrow rows stay in normal document flow.
+    // Standalone pagination is padded to the same content box as the CMS
+    // children; progress bars fill that relative width instead of a fixed
+    // absolute overlay.
+    const isPaginationTop = dots.alignment.includes("Top")
+    const isInlineTop = arrows.alignment.includes("Top")
+    const showInlineRow =
+        arrows.show && showNav && arrows.type === "Inline"
+    const showStandalonePagination =
+        !showInlineRow && showNav && dots.type !== "None"
+
+    const horizontalJustify = (a: ArrowAlign): React.CSSProperties["justifyContent"] =>
+        a.includes("Left")
+            ? "flex-start"
+            : a.includes("Right")
+              ? "flex-end"
+              : "center"
+
+    const paginationRowStyle: React.CSSProperties = {
+        position: "relative",
+        zIndex: 11,
+        display: "flex",
+        width: "100%",
+        alignItems: "center",
+        justifyContent: horizontalJustify(dots.alignment),
+        marginTop: isPaginationTop ? 0 : dots.inset,
+        marginBottom: isPaginationTop ? dots.inset : 0,
+        transform:
+            dots.offsetX || dots.offsetY
+                ? `translate(${dots.offsetX}px, ${dots.offsetY}px)`
+                : undefined,
+    }
+
+    const childrenOverflowAfter = childrenFrame
+        ? Math.max(0, childrenFrame.bottom - childrenViewportHeight)
+        : 0
+
+    const standalonePaginationRowStyle: React.CSSProperties = {
+        ...paginationRowStyle,
+        marginTop: isPaginationTop
+            ? paginationRowStyle.marginTop
+            : dots.inset + childrenOverflowAfter,
+        ...(childrenFrame
+            ? {
+                  width: childrenFrame.width,
+                  marginLeft: childrenFrame.left,
+              }
+            : {
+                  paddingLeft: layout.padding,
+                  paddingRight: layout.padding,
+              }),
+        boxSizing: "border-box",
+    }
+
+    const inlineRowOuterStyle: React.CSSProperties = {
+        position: "relative",
+        zIndex: 11,
+        display: "flex",
+        width: "100%",
+        alignItems: "center",
+        justifyContent: horizontalJustify(arrows.alignment),
+        marginTop: isInlineTop ? 0 : arrows.inset,
+        marginBottom: isInlineTop ? arrows.inset : 0,
+        transform:
+            arrows.offsetX || arrows.offsetY
+                ? `translate(${arrows.offsetX}px, ${arrows.offsetY}px)`
+                : undefined,
+        pointerEvents: "none",
+    }
+
+    const inlineRowInnerStyle: React.CSSProperties = {
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: arrows.gap,
     }
 
     // ============================================
@@ -1255,11 +1356,11 @@ export default function CMSSlider(props: CMSSliderProps) {
     const centerIndex = React.useMemo(() => {
         if (!centerFocus.enabled) return -1
         if (navigation.step === "Page") {
-            const pageStart = activeIndex * effectiveItems
-            return pageStart + Math.floor(effectiveItems / 2)
+            const pageStart = activeIndex * itemsPerView
+            return pageStart + Math.floor(itemsPerView / 2)
         }
-        return activeIndex + Math.floor(effectiveItems / 2)
-    }, [centerFocus.enabled, activeIndex, effectiveItems, navigation.step])
+        return activeIndex + Math.floor(itemsPerView / 2)
+    }, [centerFocus.enabled, activeIndex, itemsPerView, navigation.step])
 
     const centerFocusCSS = React.useMemo(() => {
         if (!centerFocus.enabled || itemCount === 0) return ""
@@ -1311,13 +1412,16 @@ export default function CMSSlider(props: CMSSliderProps) {
     }
     const flexAlign = alignMap[itemAlign] || "stretch"
 
-    const cssVars = {
-        "--slider-gap": `${layout.gap}px`,
-        "--slider-items": `${effectiveItems}`,
-        "--slider-radius": `${layout.radius}px`,
-        "--flex-dir": isVertical ? "column" : "row",
-        "--slider-align": flexAlign,
-    } as React.CSSProperties
+    const cssVars = React.useMemo(
+        () =>
+            ({
+                "--slider-gap": `${layout.gap}px`,
+                "--slider-items": `${itemsPerView}`,
+                "--flex-dir": isVertical ? "column" : "row",
+                "--slider-align": flexAlign,
+            }) as React.CSSProperties,
+        [layout.gap, itemsPerView, isVertical, flexAlign]
+    )
 
     const css = React.useMemo(() => `
       .${trackClass} {
@@ -1332,7 +1436,7 @@ export default function CMSSlider(props: CMSSliderProps) {
         justify-content: flex-start !important;
         align-items: var(--slider-align) !important;
         width: 100% !important;
-        height: 100% !important;
+        height: ${shouldFillFrame ? "100%" : "auto"} !important;
         gap: var(--slider-gap) !important;
         grid-template-columns: none !important;
         box-sizing: border-box !important;
@@ -1345,14 +1449,13 @@ export default function CMSSlider(props: CMSSliderProps) {
 
         ${isVertical ? "height: var(--item-size) !important;" : "width: var(--item-size) !important;"}
         ${isVertical ? "min-height: var(--item-size) !important;" : "min-width: var(--item-size) !important;"}
-        ${isVertical
-            ? (isFill ? "width: 100% !important;" : "")
-            : (isFill ? "height: 100% !important;" : "")}
+        ${shouldFillFrame ? (isVertical ? "width: 100% !important;" : "height: 100% !important;") : ""}
+        ${layout.aspectRatio > 0 ? `aspect-ratio: ${layout.aspectRatio} !important;` : ""}
+        ${layout.aspectRatio > 0 && !isVertical && !shouldFillFrame ? "height: auto !important;" : ""}
+        ${layout.aspectRatio > 0 && isVertical && !shouldFillFrame ? "width: auto !important;" : ""}
         max-width: none !important;
         max-height: none !important;
 
-        border-radius: var(--slider-radius) !important;
-        overflow: hidden !important;
         margin: 0 !important;
         flex-shrink: 0 !important;
         box-sizing: border-box !important;
@@ -1360,6 +1463,7 @@ export default function CMSSlider(props: CMSSliderProps) {
       }
       .${trackClass} > * > * > * {
         width: 100% !important;
+        ${shouldFillFrame ? "height: 100% !important;" : ""}
         min-height: 0 !important;
         flex: 1 1 auto !important;
       }
@@ -1374,7 +1478,7 @@ export default function CMSSlider(props: CMSSliderProps) {
         -webkit-user-drag: none !important;
         user-drag: none !important;
       }
-    `, [trackClass, isVertical, isFill])
+    `, [trackClass, isVertical, shouldFillFrame, layout.aspectRatio])
 
     // ============================================
     // APPEAR EFFECT
@@ -1422,14 +1526,27 @@ export default function CMSSlider(props: CMSSliderProps) {
         }`
     }, [appear.type, appear.distance, appearAnimName, reducedMotion])
 
-    const appearStyle: React.CSSProperties =
-        appear.type === "None" ||
-        reducedMotion ||
-        effectiveAppearMode !== "All Together"
-            ? {}
-            : {
-                  animation: `${appearAnimName} ${appear.duration}s cubic-bezier(0.32, 0.72, 0, 1) both`,
-              }
+    const appearStyle: React.CSSProperties = React.useMemo(
+        () =>
+            appear.type === "None" ||
+            reducedMotion ||
+            effectiveAppearMode !== "All Together"
+                ? {}
+                : {
+                      // Hold the from-state inline so first paint matches the
+                      // animation start, even on browsers that don't apply the
+                      // keyframes' from on first frame.
+                      opacity: 0,
+                      animation: `${appearAnimName} ${appear.duration}s cubic-bezier(0.32, 0.72, 0, 1) both`,
+                  },
+        [
+            appear.type,
+            reducedMotion,
+            effectiveAppearMode,
+            appearAnimName,
+            appear.duration,
+        ]
+    )
 
     const itemAppearCSS = React.useMemo(() => {
         if (
@@ -1438,7 +1555,6 @@ export default function CMSSlider(props: CMSSliderProps) {
             reducedMotion
         ) return ""
 
-        const STAGGER_CAP = 12
         const cap = Math.min(itemCount > 0 ? itemCount : STAGGER_CAP, STAGGER_CAP)
         const stagger = Math.max(0, appear.stagger)
 
@@ -1453,6 +1569,7 @@ export default function CMSSlider(props: CMSSliderProps) {
 
         return `
             .${trackClass} > * > * {
+                opacity: 0;
                 animation: ${appearAnimName} ${appear.duration}s cubic-bezier(0.32, 0.72, 0, 1) both;
             }
             ${delayRules}
@@ -1471,7 +1588,7 @@ export default function CMSSlider(props: CMSSliderProps) {
     const styleSheet = React.useMemo(
         () => `${css}
           [data-cms-slider]:focus-visible {
-              outline: 2px solid currentColor;
+              outline: 2px solid #4c8eff;
               outline-offset: -2px;
           }
           [data-cms-slider]:focus:not(:focus-visible) {
@@ -1487,32 +1604,92 @@ export default function CMSSlider(props: CMSSliderProps) {
     // RENDER
     // ============================================
 
+    if (!content) {
+        return (
+            <div
+                style={{
+                    width: "100%",
+                    height: "100%",
+                    minWidth: 200,
+                    minHeight: 200,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: "#EBEAF9",
+                    color: "#8855FF",
+                    fontFamily: "inherit",
+                    textAlign: "center",
+                    padding: 12,
+                    boxSizing: "border-box",
+                    overflow: "hidden",
+                }}
+            >
+                <div
+                    style={{
+                        fontSize: 14,
+                        fontWeight: 600,
+                        marginBottom: 6,
+                    }}
+                >
+                    Connect to Content
+                </div>
+                <div
+                    style={{
+                        fontSize: 12,
+                        color: "#9999AA",
+                        maxWidth: 200,
+                        lineHeight: 1.4,
+                    }}
+                >
+                    Add layers or components to make infinite slides.
+                </div>
+            </div>
+        )
+    }
+
     return (
         <div
             style={{
+                ...style,
                 position: "relative",
+                display: "flex",
+                flexDirection: "column",
                 width: "100%",
-                height: "100%",
+                height: shouldFillFrame ? "100%" : "auto",
                 ...cssVars,
                 minWidth: 200,
-                minHeight: 200,
-                aspectRatio:
-                    layout.aspectRatio > 0 ? layout.aspectRatio : undefined,
-                ...appearStyle,
+                minHeight: shouldFillFrame ? 200 : 0,
+                ...(isReady ? appearStyle : { opacity: 0 }),
             }}
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-            onFocus={() => setIsFocused(true)}
+            onMouseEnter={() => {
+                React.startTransition(() => {
+                    setIsHovered(true)
+                })
+            }}
+            onMouseLeave={() => {
+                React.startTransition(() => {
+                    setIsHovered(false)
+                })
+            }}
+            onFocus={() => {
+                React.startTransition(() => {
+                    setIsFocused(true)
+                })
+            }}
             onBlur={(e) => {
                 if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                    setIsFocused(false)
+                    React.startTransition(() => {
+                        setIsFocused(false)
+                    })
                 }
             }}
+            onKeyDown={handleKeyDown}
             tabIndex={0}
             data-cms-slider
             role="region"
             aria-roledescription="carousel"
-            aria-label="Slider"
+            aria-label="Carousel"
         >
             <style>{styleSheet}</style>
             {centerFocusCSS && <style>{centerFocusCSS}</style>}
@@ -1531,63 +1708,13 @@ export default function CMSSlider(props: CMSSliderProps) {
                     border: 0,
                 }}
             >
-                {`Slide ${activeIndex + 1} of ${dotCount}`}
+                {`${navigation.step === "Page" ? "Page" : "Slide"} ${safeActiveIndex + 1} of ${dotCount}`}
             </div>
 
-            <div
-                ref={containerRef}
-                style={{
-                    width: "100%",
-                    height: "100%",
-                    overflow: centerFocus.enabled ? "visible" : "hidden",
-                    padding: `${layout.padding}px ${layout.padding + arrowReserveRight}px ${layout.padding}px ${layout.padding + arrowReserveLeft}px`,
-                    boxSizing: "border-box",
-                }}
-            >
-                {isFrozen ? (
-                    <div
-                        className={trackClass}
-                        style={{
-                            display: "flex",
-                            flexDirection: isVertical ? "column" : "row",
-                            width: "100%",
-                            height: "100%",
-                        }}
-                    >
-                        {normalizedContent}
-                    </div>
-                ) : (
-                    <motion.div
-                        className={trackClass}
-                        onPointerDown={onPointerDown}
-                        onPointerMove={onPointerMove}
-                        onPointerUp={onPointerUp}
-                        style={{
-                            display: "flex",
-                            flexDirection: isVertical ? "column" : "row",
-                            width: "100%",
-                            height: "100%",
-                            cursor: draggable
-                                ? isDragging
-                                    ? "grabbing"
-                                    : "grab"
-                                : "default",
-                            touchAction: isVertical ? "pan-x" : "pan-y",
-                            userSelect: "none",
-                            x: isVertical ? undefined : x,
-                            y: isVertical ? y : undefined,
-                        }}
-                    >
-                        {normalizedContent}
-                    </motion.div>
-                )}
-            </div>
-
-            {/* Arrows. Split positions each arrow independently to avoid
-                container clipping; Grouped/Inline share one container. */}
-            {arrows.show && showNav && arrows.type === "Split" && (
-                <>
-                    <div style={getArrowPositionStyle("prev")}>
+            {/* Above-the-cards rows */}
+            {showInlineRow && isInlineTop && (
+                <div style={inlineRowOuterStyle}>
+                    <div style={inlineRowInnerStyle}>
                         <button
                             type="button"
                             onClick={(e) => {
@@ -1599,8 +1726,7 @@ export default function CMSSlider(props: CMSSliderProps) {
                         >
                             {renderIcon("prev")}
                         </button>
-                    </div>
-                    <div style={getArrowPositionStyle("next")}>
+                        {dots.type !== "None" && renderPaginationContent()}
                         <button
                             type="button"
                             onClick={(e) => {
@@ -1613,40 +1739,183 @@ export default function CMSSlider(props: CMSSliderProps) {
                             {renderIcon("next")}
                         </button>
                     </div>
-                </>
-            )}
-
-            {arrows.show && showNav && arrows.type !== "Split" && (
-                <div style={getArrowPositionStyle()}>
-                    <button
-                        type="button"
-                        onClick={(e) => {
-                            e.stopPropagation()
-                            goPrev()
-                        }}
-                        style={arrowBtnStyle}
-                        aria-label="Previous slide"
-                    >
-                        {renderIcon("prev")}
-                    </button>
-                    {paginationInline && renderPagination(true)}
-                    <button
-                        type="button"
-                        onClick={(e) => {
-                            e.stopPropagation()
-                            goNext()
-                        }}
-                        style={arrowBtnStyle}
-                        aria-label="Next slide"
-                    >
-                        {renderIcon("next")}
-                    </button>
                 </div>
             )}
 
-            {/* Standalone pagination (skipped when inline with arrows) */}
-            {!paginationInline && showNav && renderPagination(false)}
+            {/* Card section: track + non-inline arrows. Arrows anchor to
+                this section so they center on the cards regardless of any
+                pagination row above/below. */}
+            <div
+                style={{
+                    position: "relative",
+                    flex: shouldFillFrame ? "1 1 auto" : "0 0 auto",
+                    minHeight: 0,
+                    minWidth: 0,
+                }}
+            >
+                {showStandalonePagination && isPaginationTop && (
+                    <div style={standalonePaginationRowStyle}>
+                        {renderPaginationContent(true)}
+                    </div>
+                )}
 
+                <div
+                    ref={containerRef}
+                    style={{
+                        width: "100%",
+                        height: shouldFillFrame ? "100%" : "auto",
+                        position: "relative",
+                        overflow: "visible",
+                        // Clip only the scroll axis so off-screen track cards
+                        // stay hidden, while shadows / hover scale /
+                        // center-focus bleed perpendicular to it. Center-focus
+                        // disables clipping so the active card can scale past
+                        // every edge.
+                        clipPath: centerFocus.enabled
+                            ? undefined
+                            : isVertical
+                                ? "inset(0 -9999px)"
+                                : "inset(-9999px 0)",
+                        padding: layout.padding,
+                        boxSizing: "border-box",
+                    }}
+                >
+                    {isFrozen ? (
+                        <div
+                            className={trackClass}
+                            style={{
+                                display: "flex",
+                                flexDirection: isVertical ? "column" : "row",
+                                width: "100%",
+                                height: shouldFillFrame ? "100%" : "auto",
+                            }}
+                        >
+                            {normalizedContent}
+                        </div>
+                    ) : (
+                        <motion.div
+                            className={trackClass}
+                            onPointerDown={onPointerDown}
+                            onPointerMove={onPointerMove}
+                            onPointerUp={onPointerUp}
+                            style={{
+                                display: "flex",
+                                flexDirection: isVertical ? "column" : "row",
+                                width: "100%",
+                                height: shouldFillFrame ? "100%" : "auto",
+                                cursor: draggable
+                                    ? isDragging
+                                        ? "grabbing"
+                                        : "grab"
+                                    : "default",
+                                touchAction: isVertical ? "pan-x" : "pan-y",
+                                userSelect: "none",
+                                x: isVertical ? undefined : x,
+                                y: isVertical ? y : undefined,
+                            }}
+                        >
+                            {normalizedContent}
+                        </motion.div>
+                    )}
+                </div>
+
+                {/* Split positions each arrow independently to avoid
+                    container clipping; Grouped shares one container. */}
+                {arrows.show && showNav && arrows.type === "Split" && (
+                    <>
+                        <div style={getArrowPositionStyle("prev")}>
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    goPrev()
+                                }}
+                                style={arrowBtnStyle}
+                                aria-label="Previous slide"
+                            >
+                                {renderIcon("prev")}
+                            </button>
+                        </div>
+                        <div style={getArrowPositionStyle("next")}>
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    goNext()
+                                }}
+                                style={arrowBtnStyle}
+                                aria-label="Next slide"
+                            >
+                                {renderIcon("next")}
+                            </button>
+                        </div>
+                    </>
+                )}
+
+                {arrows.show && showNav && arrows.type === "Grouped" && (
+                    <div style={getArrowPositionStyle()}>
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                goPrev()
+                            }}
+                            style={arrowBtnStyle}
+                            aria-label="Previous slide"
+                        >
+                            {renderIcon("prev")}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                goNext()
+                            }}
+                            style={arrowBtnStyle}
+                            aria-label="Next slide"
+                        >
+                            {renderIcon("next")}
+                        </button>
+                    </div>
+                )}
+
+                {showStandalonePagination && !isPaginationTop && (
+                    <div style={standalonePaginationRowStyle}>
+                        {renderPaginationContent(true)}
+                    </div>
+                )}
+            </div>
+
+            {/* Below-the-cards rows */}
+            {showInlineRow && !isInlineTop && (
+                <div style={inlineRowOuterStyle}>
+                    <div style={inlineRowInnerStyle}>
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                goPrev()
+                            }}
+                            style={arrowBtnStyle}
+                            aria-label="Previous slide"
+                        >
+                            {renderIcon("prev")}
+                        </button>
+                        {dots.type !== "None" && renderPaginationContent()}
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                goNext()
+                            }}
+                            style={arrowBtnStyle}
+                            aria-label="Next slide"
+                        >
+                            {renderIcon("next")}
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
@@ -1667,7 +1936,6 @@ addPropertyControls(CMSSlider, {
         type: ControlType.Enum,
         title: "Direction",
         options: ["Left", "Right", "Up", "Down"],
-        optionTitles: ["Left", "Right", "Up", "Down"],
         defaultValue: "Left",
     },
     autoPlay: {
@@ -1691,7 +1959,7 @@ addPropertyControls(CMSSlider, {
             },
             pauseOnHover: {
                 type: ControlType.Boolean,
-                title: "Pause Hover",
+                title: "Pause On Hover",
                 defaultValue: true,
             },
             loop: {
@@ -1704,7 +1972,6 @@ addPropertyControls(CMSSlider, {
                 type: ControlType.Enum,
                 title: "Start At",
                 options: ["Start", "End"],
-                optionTitles: ["Start", "End"],
                 defaultValue: "Start",
             },
         },
@@ -1742,20 +2009,11 @@ addPropertyControls(CMSSlider, {
                 step: 5,
                 unit: "px",
             },
-            radius: {
-                type: ControlType.Number,
-                title: "Radius",
-                defaultValue: 0,
-                min: 0,
-                max: 60,
-                step: 2,
-                unit: "px",
-            },
             fit: {
                 type: ControlType.Enum,
                 title: "Fit",
                 options: ["Fill", "Contain"],
-                defaultValue: "Fill",
+                defaultValue: "Contain",
                 description: "Fill stretches to the slider. Contain uses the card's own size.",
             },
             align: {
@@ -1771,9 +2029,9 @@ addPropertyControls(CMSSlider, {
                 defaultValue: 0,
                 min: 0,
                 max: 10,
-                step: 0.05,
+                step: 0.1,
                 description:
-                    "0 = off. Set when using fit-content height in Framer (e.g. 2 = 2:1).",
+                    "Per-card width ÷ height. 0 = off. Use with fit-content height in Framer (e.g. 1.5 = 3:2, 2 = 2:1).",
             },
         },
     },
@@ -1847,7 +2105,6 @@ addPropertyControls(CMSSlider, {
                 type: ControlType.Enum,
                 title: "Mode",
                 options: ["Stagger", "All Together"],
-                optionTitles: ["Stagger", "All Together"],
                 defaultValue: "Stagger",
                 description:
                     "Stagger cascades each card. All Together animates the whole slider.",
@@ -1912,25 +2169,6 @@ addPropertyControls(CMSSlider, {
                 defaultValue: true,
                 description: "Arrow keys.",
             },
-            dragThreshold: {
-                type: ControlType.Number,
-                title: "Drag Limit",
-                defaultValue: 6,
-                min: 1,
-                max: 24,
-                step: 1,
-                unit: "px",
-                description: "Min drag to trigger.",
-            },
-            edgeResistance: {
-                type: ControlType.Number,
-                title: "Resistance",
-                defaultValue: 0.3,
-                min: 0,
-                max: 1,
-                step: 0.05,
-                description: "Edge rubber-band.",
-            },
         },
     },
 
@@ -1949,18 +2187,10 @@ addPropertyControls(CMSSlider, {
                 title: "Show",
                 defaultValue: true,
             },
-            reserveSpace: {
-                type: ControlType.Boolean,
-                title: "Reserve Space",
-                defaultValue: false,
-                description:
-                    "Shrink cards so arrows don't overlap them.",
-            },
             type: {
                 type: ControlType.Enum,
                 title: "Type",
                 options: ["Split", "Grouped", "Inline"],
-                optionTitles: ["Split", "Grouped", "Inline"],
                 defaultValue: "Split",
                 description:
                     "Inline puts arrows on either side of the pagination.",
@@ -2021,6 +2251,7 @@ addPropertyControls(CMSSlider, {
                 type: ControlType.Boolean,
                 title: "Hover Only",
                 defaultValue: false,
+                description: "Show arrows only on hover or focus.",
             },
             inset: {
                 type: ControlType.Number,
@@ -2040,6 +2271,7 @@ addPropertyControls(CMSSlider, {
                 step: 1,
                 unit: "px",
                 description: "When Grouped or Inline.",
+                hidden: (p: ArrowSettings) => p.type === "Split",
             },
             offsetX: {
                 type: ControlType.Number,
@@ -2155,7 +2387,8 @@ addPropertyControls(CMSSlider, {
                 max: 600,
                 step: 10,
                 unit: "px",
-                description: "Progress bar width.",
+                description:
+                    "Inline progress width. Standalone progress fills the CMS children container.",
             },
             compact: {
                 type: ControlType.Boolean,
@@ -2194,12 +2427,12 @@ addPropertyControls(CMSSlider, {
             },
             fill: {
                 type: ControlType.Color,
-                title: "Inactive",
+                title: "Inactive Color",
                 defaultValue: "rgba(255,255,255,0.4)",
             },
             activeFill: {
                 type: ControlType.Color,
-                title: "Active",
+                title: "Active Color",
                 defaultValue: "#ffffff",
             },
             backdrop: {
@@ -2222,14 +2455,6 @@ addPropertyControls(CMSSlider, {
                 defaultValue: 0.5,
                 min: 0.05,
                 max: 1,
-                step: 0.05,
-            },
-            activeScale: {
-                type: ControlType.Number,
-                title: "Active Scale",
-                defaultValue: 1.3,
-                min: 1,
-                max: 2.2,
                 step: 0.05,
             },
             blur: {

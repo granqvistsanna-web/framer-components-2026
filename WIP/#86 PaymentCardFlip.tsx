@@ -183,10 +183,13 @@ const DEFAULT_CARDS: Required<CardData>[] = [
         showContactless: true,
         network: "Mastercard",
         networkLogo: "",
-        background: "Solid",
-        color1: "#0A0A0A",
-        color2: "#1A1A1A",
-        gradientAngle: 135,
+        // Subtle off-axis gradient on a warm near-black gives the surface
+        // depth that pure #000 lacks — pulls it out of the generic
+        // "premium black" trope.
+        background: "Gradient",
+        color1: "#15151C",
+        color2: "#08080C",
+        gradientAngle: 160,
         backgroundImage: "",
         textColor: "#FFFFFF",
         holographic: true,
@@ -314,12 +317,16 @@ function ChipMark({ size }: { size: number }) {
     // Embossed gold contact pattern. Pure SVG so it stays sharp at any scale.
     // Random gradient ids prevent cross-instance collisions when multiple
     // PaymentCardFlip components share a page.
-    const idRef = useRef<{ body: string; shine: string }>()
+    const idRef = useRef<{ body: string; shine: string; bevel: string }>()
     if (!idRef.current) {
         const seed = Math.random().toString(36).slice(2, 9)
-        idRef.current = { body: `cb-${seed}`, shine: `cs-${seed}` }
+        idRef.current = {
+            body: `cb-${seed}`,
+            shine: `cs-${seed}`,
+            bevel: `cv-${seed}`,
+        }
     }
-    const { body, shine } = idRef.current
+    const { body, shine, bevel } = idRef.current
     const w = size
     const h = size * 0.78
     return (
@@ -331,18 +338,25 @@ function ChipMark({ size }: { size: number }) {
             style={{ display: "block" }}
         >
             <defs>
-                <linearGradient id={body} x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0%" stopColor="#F4D27A" />
-                    <stop offset="40%" stopColor="#C9A24A" />
-                    <stop offset="100%" stopColor="#8C6A1F" />
+                {/* Multi-stop metallic body — warm gold top edge, deeper
+                    bronze bottom for material thickness. */}
+                <linearGradient id={body} x1="0" y1="0" x2="0.55" y2="1">
+                    <stop offset="0%" stopColor="#F8DC8E" />
+                    <stop offset="22%" stopColor="#E8C25C" />
+                    <stop offset="55%" stopColor="#C09439" />
+                    <stop offset="100%" stopColor="#7A5612" />
                 </linearGradient>
+                {/* Diagonal specular sheen — strongest at upper-left. */}
                 <linearGradient id={shine} x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0%" stopColor="rgba(255,255,255,0.6)" />
-                    <stop
-                        offset="40%"
-                        stopColor="rgba(255,255,255,0.05)"
-                    />
+                    <stop offset="0%" stopColor="rgba(255,255,255,0.7)" />
+                    <stop offset="35%" stopColor="rgba(255,255,255,0.05)" />
                     <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+                </linearGradient>
+                {/* Subtle bottom shadow for chip thickness. */}
+                <linearGradient id={bevel} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="rgba(255,255,255,0)" />
+                    <stop offset="80%" stopColor="rgba(0,0,0,0)" />
+                    <stop offset="100%" stopColor="rgba(0,0,0,0.28)" />
                 </linearGradient>
             </defs>
             <rect
@@ -352,21 +366,13 @@ function ChipMark({ size }: { size: number }) {
                 height="27"
                 rx="5"
                 fill={`url(#${body})`}
-                stroke="rgba(0,0,0,0.25)"
+                stroke="rgba(40, 25, 5, 0.45)"
                 strokeWidth="0.5"
             />
-            <rect
-                x="0.5"
-                y="0.5"
-                width="35"
-                height="27"
-                rx="5"
-                fill={`url(#${shine})`}
-            />
-            {/* Contact lines */}
+            {/* Etched contact divisions — finer & lighter than before. */}
             <g
-                stroke="rgba(60, 40, 10, 0.55)"
-                strokeWidth="0.6"
+                stroke="rgba(70, 45, 12, 0.40)"
+                strokeWidth="0.45"
                 strokeLinecap="round"
             >
                 <line x1="2" y1="9" x2="34" y2="9" />
@@ -375,16 +381,43 @@ function ChipMark({ size }: { size: number }) {
                 <line x1="13" y1="0.5" x2="13" y2="27.5" />
                 <line x1="23" y1="0.5" x2="23" y2="27.5" />
             </g>
-            {/* Center pad */}
+            {/* Center pad — slightly recessed look. */}
             <rect
                 x="13"
                 y="9"
                 width="10"
                 height="10"
                 rx="1.4"
-                fill="rgba(0,0,0,0.05)"
-                stroke="rgba(60, 40, 10, 0.4)"
+                fill="rgba(0,0,0,0.06)"
+                stroke="rgba(60, 38, 10, 0.35)"
+                strokeWidth="0.35"
+            />
+            {/* Specular sheen overlay. */}
+            <rect
+                x="0.5"
+                y="0.5"
+                width="35"
+                height="27"
+                rx="5"
+                fill={`url(#${shine})`}
+            />
+            {/* Bottom bevel shadow. */}
+            <rect
+                x="0.5"
+                y="0.5"
+                width="35"
+                height="27"
+                rx="5"
+                fill={`url(#${bevel})`}
+            />
+            {/* Top rim highlight — single arc that catches light at the
+                upper edge, sells the metallic raised feel. */}
+            <path
+                d="M 5 0.7 Q 18 0.5 31 0.7"
+                fill="none"
+                stroke="rgba(255,255,255,0.55)"
                 strokeWidth="0.4"
+                strokeLinecap="round"
             />
         </svg>
     )
@@ -465,26 +498,34 @@ function NetworkMark({
             </svg>
         )
     }
-    // Mastercard + Circles share the dual-circle motif.
+    // Mastercard + Circles share the dual-circle motif. The brand mark has
+    // a third color in the lens where the two circles overlap — solid
+    // orange (#FF5F00) for Mastercard, a muted tone for the abstract
+    // "Circles" variant. Drawing it as an explicit lens path is more
+    // robust than mix-blend-mode tricks, which break on dark surfaces.
     const isMastercard = type === "Mastercard"
     const left = isMastercard ? "#EB001B" : "#E2614C"
     const right = isMastercard ? "#F79E1B" : "#E0B14A"
+    const intersect = isMastercard ? "#FF5F00" : "#C97942"
     return (
         <svg
             width={size}
             height={size * 0.62}
             viewBox="0 0 100 62"
             aria-hidden="true"
-            style={{ display: "block" }}
+            style={{
+                display: "block",
+                filter: "drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18))",
+            }}
         >
             <circle cx="38" cy="31" r="28" fill={left} />
-            <circle
-                cx="62"
-                cy="31"
-                r="28"
-                fill={right}
-                fillOpacity="0.92"
-                style={{ mixBlendMode: "multiply" }}
+            <circle cx="62" cy="31" r="28" fill={right} />
+            {/* Lens at the intersection of the two circles. The two arcs
+                meet at (50, 5.7) and (50, 56.3) — derived from the equal-
+                radius geometry (centers 38 and 62, r=28). */}
+            <path
+                d="M 50 5.7 A 28 28 0 0 1 50 56.3 A 28 28 0 0 0 50 5.7 Z"
+                fill={intersect}
             />
         </svg>
     )
@@ -542,13 +583,15 @@ function CardFace({
               : card.color1
 
     // Glass top-light highlight — a cool diagonal sheen across the upper
-    // third. Intensity is keyed off whether the card is light or dark so it
-    // stays subtle on yellow / beige cards.
+    // third + a soft radial bloom at upper-left that suggests an off-axis
+    // light source. The radial is what separates a flat card from one that
+    // looks like an actual physical surface. Intensity is keyed off whether
+    // the card is light or dark so it stays subtle on yellow / beige cards.
     const glossOpacity = fgIsDark ? 0.18 : 0.28
+    const radialOpacity = fgIsDark ? 0.10 : 0.22
+    const cornerShadow = fgIsDark ? 0.04 : 0.18
     const glossLayer = glassGloss
-        ? `linear-gradient(135deg, rgba(255,255,255,${glossOpacity}) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,${
-              fgIsDark ? 0.04 : 0.12
-          }) 100%)`
+        ? `radial-gradient(125% 90% at 18% 10%, rgba(255,255,255,${radialOpacity}) 0%, rgba(255,255,255,0) 55%), linear-gradient(135deg, rgba(255,255,255,${glossOpacity}) 0%, rgba(255,255,255,0) 45%, rgba(0,0,0,${cornerShadow}) 100%)`
         : "none"
 
     const cursorXPct = cursor.x * 100
@@ -705,7 +748,10 @@ function renderRealistic(
                 )}
             </div>
 
-            {/* PAN — chunky monospace */}
+            {/* PAN — chunky monospace. On dark cards the numerals get a
+                stacked text-shadow that suggests raised/embossed digits:
+                a hairline white highlight on top + a soft drop shadow
+                below. On light cards we keep a single subtle drop. */}
             <div
                 style={{
                     fontFamily: MONO_FALLBACK,
@@ -715,8 +761,8 @@ function renderRealistic(
                     fontVariantNumeric: "tabular-nums",
                     color: fg,
                     textShadow: fgIsDark
-                        ? "none"
-                        : "0 1px 1px rgba(0,0,0,0.2)",
+                        ? "0 1px 0 rgba(255,255,255,0.5)"
+                        : "0 1px 0 rgba(255,255,255,0.10), 0 2px 4px rgba(0,0,0,0.45)",
                 }}
             >
                 {card.cardNumber}
