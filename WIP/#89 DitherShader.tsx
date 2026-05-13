@@ -1,62 +1,14 @@
-import { addPropertyControls, ControlType, RenderTarget, useIsStaticRenderer } from "framer"
+import {
+    addPropertyControls,
+    ControlType,
+    RenderTarget,
+    useIsStaticRenderer,
+} from "framer"
 import * as React from "react"
 import { useEffect, useRef } from "react"
-import * as THREE from "https://esm.sh/three@0.160.0"
-import { EffectComposer } from "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js"
-import { RenderPass } from "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/RenderPass.js"
-import { ShaderPass } from "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/ShaderPass.js"
-
-// Create glow effect using Three.js ShaderPass
-const createGlowShaderPass = (opts?: { intensity?: number; size?: number }) => {
-    const GlowShader = {
-        uniforms: {
-            tDiffuse: { value: null },
-            uGlowIntensity: { value: opts?.intensity ?? 0.5 },
-            uGlowSize: { value: opts?.size ?? 1.0 },
-            uResolution: { value: new THREE.Vector2(1, 1) },
-        },
-        vertexShader: `
-            varying vec2 vUv;
-            void main() {
-                vUv = uv;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-        `,
-        fragmentShader: `
-            uniform sampler2D tDiffuse;
-            uniform float uGlowIntensity;
-            uniform float uGlowSize;
-            uniform vec2 uResolution;
-            varying vec2 vUv;
-
-            void main() {
-                vec2 texelSize = 1.0 / uResolution;
-                vec4 inputColor = texture2D(tDiffuse, vUv);
-                vec4 sum = vec4(0.0);
-
-                float samples = uGlowSize * 5.0;
-                float halfSamples = samples * 0.5;
-                float weight = 0.0;
-
-                for(float x = -5.0; x <= 5.0; x += 1.0) {
-                    for(float y = -5.0; y <= 5.0; y += 1.0) {
-                        vec2 offset = vec2(x, y) * texelSize * uGlowSize;
-                        float dist = length(vec2(x, y)) / 5.0;
-                        float w = 1.0 - smoothstep(0.0, 1.0, dist);
-                        sum += texture2D(tDiffuse, vUv + offset) * w;
-                        weight += w;
-                    }
-                }
-
-                vec4 blur = sum / max(weight, 1.0);
-                gl_FragColor = inputColor + blur * uGlowIntensity;
-            }
-        `,
-    }
-    return new ShaderPass(GlowShader)
-}
 
 type ShapeVariant = "square" | "circle" | "triangle" | "diamond"
+type PerformanceMode = "high" | "balanced" | "low"
 
 const SHAPE_MAP: Record<ShapeVariant, number> = {
     square: 0,
@@ -66,18 +18,19 @@ const SHAPE_MAP: Record<ShapeVariant, number> = {
 }
 
 const MAX_CLICKS = 10
+const MAX_RIPPLE_TIME = 3.0
 
 interface DitherShaderProps {
     enabled?: boolean
     variant?: ShapeVariant
-    pixelSize?: number
     color?: string
+    pixelSize?: number
     opacity?: number
-    patternScale?: number
     patternDensity?: number
+    patternScale?: number
     pixelSizeJitter?: number
-    noiseAmount?: number
     speed?: number
+    paused?: boolean
     enableRipples?: boolean
     rippleIntensityScale?: number
     rippleThickness?: number
@@ -85,18 +38,199 @@ interface DitherShaderProps {
     enableGradient?: boolean
     gradientColor1?: string
     gradientColor2?: string
-    enableGlow?: boolean
-    glowIntensity?: number
-    glowSize?: number
-    colorPulse?: boolean
-    pulseSpeed?: number
-    pulseIntensity?: number
-    rotationSpeed?: number
-    edgeFade?: number
-    autoPauseOffscreen?: boolean
-    performanceMode?: "high" | "balanced" | "low"
-    targetFPS?: number
+    performanceMode?: PerformanceMode
     autoScale?: boolean
+    autoPauseOffscreen?: boolean
+    targetFPS?: number
+}
+
+// --- Shaders ---
+
+const VERT = `
+attribute vec2 a_position;
+void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
+`
+
+const FRAG = `
+#extension GL_OES_standard_derivatives : enable
+precision highp float;
+
+uniform vec2  uResolution;
+uniform float uTime;
+uniform float uPixelSize;
+uniform vec3  uColor;
+uniform float uOpacity;
+uniform float uPatternScale;
+uniform float uPatternDensity;
+uniform float uPixelSizeJitter;
+uniform int   uShapeType;
+uniform bool  uEnableRipples;
+uniform float uRippleIntensity;
+uniform float uRippleThickness;
+uniform float uRippleSpeed;
+uniform vec2  uClickPos[10];
+uniform float uClickTimes[10];
+uniform bool  uEnableGradient;
+uniform vec3  uGradientColor1;
+uniform vec3  uGradientColor2;
+uniform float uAspect;
+uniform float uMaxRippleTime;
+
+float hash21(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
+float Bayer2(vec2 a){ a=floor(a); return fract(a.x/2. + a.y * a.y * .75); }
+#define Bayer4(a) (Bayer2(.5*(a))*0.25 + Bayer2(a))
+#define Bayer8(a) (Bayer4(.5*(a))*0.25 + Bayer2(a))
+
+float vnoise(vec2 p){
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    vec2 u = f*f*(3.0-2.0*f);
+    return mix(a, b, u.x) + (c - a)*u.y*(1.0 - u.x) + (d - b)*u.x*u.y;
+}
+
+float maskCircle(vec2 p, float cov){
+    float r = sqrt(cov) * 0.25;
+    float d = length(p - 0.5) - r;
+    float aa = 0.5 * fwidth(d);
+    return cov * (1.0 - smoothstep(-aa, aa, d * 2.0));
+}
+
+float maskTriangle(vec2 p, vec2 id, float cov){
+    bool flip = mod(id.x + id.y, 2.0) > 0.5;
+    if (flip) p.x = 1.0 - p.x;
+    float r = sqrt(cov);
+    float d = p.y - r * (1.0 - p.x);
+    float aa = fwidth(d);
+    return cov * clamp(0.5 - d / aa, 0.0, 1.0);
+}
+
+float maskDiamond(vec2 p, float cov){
+    float r = sqrt(cov) * 0.564;
+    return step(abs(p.x - 0.49) + abs(p.y - 0.49), r);
+}
+
+void main(){
+    vec2 uv = gl_FragCoord.xy / uResolution.xy;
+    float px = max(1.0, uPixelSize);
+    if (uPixelSizeJitter > 0.0) {
+        float j = hash21(floor(gl_FragCoord.xy / (px * 10.0))) * uPixelSizeJitter;
+        px += j;
+    }
+    vec2 pixelId = floor(gl_FragCoord.xy / px);
+    vec2 pixelUV = fract(gl_FragCoord.xy / px);
+    float cellPx = 8.0 * uPixelSize;
+    vec2 cellUv = (floor(gl_FragCoord.xy / cellPx) * cellPx) / uResolution.xy;
+    vec2 aspectUv = cellUv * vec2(uAspect, 1.0);
+
+    float base = vnoise(aspectUv * uPatternScale * 8.0 + uTime * 0.05);
+    base = base * 0.5 - 0.65;
+    float feed = base + (uPatternDensity - 0.5) * 0.3;
+
+    if (uEnableRipples) {
+        const float dampT = 2.5;
+        const float dampR = 10.0;
+        for (int i = 0; i < 10; ++i) {
+            vec2 pos = uClickPos[i];
+            if (pos.x < 0.0) continue;
+            float t = max(uTime - uClickTimes[i], 0.0);
+            if (t > uMaxRippleTime) continue;
+            vec2 cuv = (pos / uResolution) * vec2(uAspect, 1.0);
+            float r = distance(aspectUv, cuv);
+            float waveR = uRippleSpeed * t;
+            float ring = exp(-pow((r - waveR) / uRippleThickness, 2.0));
+            float atten = exp(-dampT * t) * exp(-dampR * r);
+            feed = max(feed, ring * atten * uRippleIntensity);
+        }
+    }
+
+    float bayer = Bayer8(gl_FragCoord.xy / px) - 0.5;
+    float bw = step(0.5, feed + bayer);
+    float h = hash21(floor(gl_FragCoord.xy / px));
+    float jitterScale = 1.0 + (h - 0.5) * uPixelSizeJitter * 0.1;
+    float coverage = bw * jitterScale;
+
+    float M;
+    if      (uShapeType == 1) M = maskCircle(pixelUV, coverage);
+    else if (uShapeType == 2) M = maskTriangle(pixelUV, pixelId, coverage);
+    else if (uShapeType == 3) M = maskDiamond(pixelUV, coverage);
+    else                      M = coverage;
+
+    vec3 baseColor = uColor;
+    if (uEnableGradient) baseColor = mix(uGradientColor1, uGradientColor2, uv.y);
+
+    gl_FragColor = vec4(baseColor * M, M * uOpacity);
+}
+`
+
+// --- Helpers (lifted from #12 HalftoneAmbientBG) ---
+
+function parseColor(color: string): [number, number, number] {
+    if (!color) return [0, 0, 0]
+    let hex = color.replace("#", "")
+    if (/^[a-f\d]{3}$/i.test(hex))
+        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2]
+    if (/^[a-f\d]{6,8}$/i.test(hex))
+        return [
+            parseInt(hex.slice(0, 2), 16) / 255,
+            parseInt(hex.slice(2, 4), 16) / 255,
+            parseInt(hex.slice(4, 6), 16) / 255,
+        ]
+    const rgb = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/.exec(color)
+    if (rgb) return [+rgb[1] / 255, +rgb[2] / 255, +rgb[3] / 255]
+    return [0, 0, 0]
+}
+
+function compileShader(gl: WebGLRenderingContext, type: number, src: string) {
+    const s = gl.createShader(type)
+    if (!s) return null
+    gl.shaderSource(s, src)
+    gl.compileShader(s)
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s))
+        gl.deleteShader(s)
+        return null
+    }
+    return s
+}
+
+function linkProgram(gl: WebGLRenderingContext, vs: string, fs: string) {
+    const v = compileShader(gl, gl.VERTEX_SHADER, vs)
+    const f = compileShader(gl, gl.FRAGMENT_SHADER, fs)
+    if (!v || !f) {
+        if (v) gl.deleteShader(v)
+        if (f) gl.deleteShader(f)
+        return null
+    }
+    const p = gl.createProgram()
+    if (!p) {
+        gl.deleteShader(v)
+        gl.deleteShader(f)
+        return null
+    }
+    gl.attachShader(p, v)
+    gl.attachShader(p, f)
+    gl.linkProgram(p)
+    gl.deleteShader(v)
+    gl.deleteShader(f)
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        console.error(gl.getProgramInfoLog(p))
+        gl.deleteProgram(p)
+        return null
+    }
+    return p
+}
+
+function dprFor(mode: PerformanceMode, autoScale: boolean) {
+    if (typeof window === "undefined") return 1
+    const device = window.devicePixelRatio || 1
+    if (!autoScale) return Math.min(device, 2)
+    if (mode === "low") return 1
+    if (mode === "balanced") return Math.min(device, 1.5)
+    return Math.min(device, 2)
 }
 
 /**
@@ -115,746 +249,416 @@ export default function DitherShader(
     const {
         enabled = true,
         variant = "circle",
-        pixelSize = 4,
         color = "#000000",
+        pixelSize = 4,
         opacity = 1.0,
-
-        patternScale = 1.0,
         patternDensity = 2,
+        patternScale = 1.0,
         pixelSizeJitter = 0.0,
-        noiseAmount = 0.7,
         speed = 0.1,
-
+        paused = false,
         enableRipples = true,
         rippleIntensityScale = 1.0,
         rippleThickness = 0.12,
         rippleSpeed = 0.4,
-
         enableGradient = true,
         gradientColor1 = "#FF0000",
         gradientColor2 = "#0810FF",
-
-        enableGlow = false,
-        glowIntensity = 0.5,
-        glowSize = 1.0,
-
-        colorPulse = false,
-        pulseSpeed = 1.0,
-        pulseIntensity = 0.2,
-
-        rotationSpeed = 0.0,
-        edgeFade = 0.0,
-
+        performanceMode = "balanced",
+        autoScale = true,
+        autoPauseOffscreen = true,
         targetFPS = 60,
-
-        // Use props directly without canvas-specific overrides for consistent output
-        performanceMode = props.performanceMode ?? "balanced",
-        autoScale = props.performanceMode === "low" ? false : (props.autoScale ?? true),
-        // Only disable offscreen pause on canvas to keep animation running while editing
-        autoPauseOffscreen = isCanvas
-            ? false
-            : (props.autoPauseOffscreen ?? true),
         ...restProps
     } = props
 
-    const containerRef = useRef<HTMLDivElement | null>(null)
-    const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
-    const materialRef = useRef<THREE.ShaderMaterial | null>(null)
-    const composerRef = useRef<{
-        composer?: EffectComposer
-        glowPass?: ShaderPass
-        enabled?: boolean
-    }>({ composer: undefined, glowPass: undefined, enabled: false })
-    const frameIdRef = useRef<number | null>(null)
-    const clockRef = useRef(new THREE.Clock())
-    const lastFrameTime = useRef(0)
-    const visibilityRef = useRef({ visible: true })
-    const isScrollingRef = useRef(false)
+    // While editing on the Framer canvas, never pause offscreen — the editor
+    // pans/zooms and we want continuous feedback.
+    const effectiveAutoPause = isCanvas ? false : autoPauseOffscreen
 
-    // Click tracking refs (initialized once)
-    const clickPosRef = useRef<THREE.Vector2[]>(
-        Array.from({ length: MAX_CLICKS }, () => new THREE.Vector2(-1, -1))
+    const containerRef = useRef<HTMLDivElement | null>(null)
+    const canvasRef = useRef<HTMLCanvasElement | null>(null)
+    const glRef = useRef<{
+        gl: WebGLRenderingContext
+        program: WebGLProgram
+        buf: WebGLBuffer
+        locs: Record<string, WebGLUniformLocation | null>
+    } | null>(null)
+    const rafRef = useRef(0)
+    const t0Ref = useRef(0)
+    const pauseOffsetRef = useRef(0)
+    const pauseStartRef = useRef(0)
+    const lastRenderRef = useRef(0)
+
+    // Click ripple ring buffer — Float32Arrays push to GL via uniformNfv
+    // without per-frame allocation.
+    const clickPosRef = useRef<Float32Array>(
+        new Float32Array(MAX_CLICKS * 2).fill(-1)
     )
     const clickTimesRef = useRef<Float32Array>(new Float32Array(MAX_CLICKS))
+    const clickIndexRef = useRef(0)
+    // Ripples are timed in shader-time (uTime, scaled by speed) so they
+    // advance in sync with the pattern animation.
+    const lastScaledTimeRef = useRef(0)
 
-    // Internal scaler state
-    const fpsEMARef = useRef<number | null>(null)
-    const scalerStateRef = useRef({
-        qualityIndex: 2, // 0..3, start at mid-high for soft mode
-        lastChangeTime: 0,
-        autoDisabled: false,
+    const reducedMotionRef = useRef(false)
+    const pausedRef = useRef(paused)
+    pausedRef.current = paused
+
+    const visibleRef = useRef(true)
+    const dprRef = useRef(dprFor(performanceMode, autoScale))
+
+    // Single propsRef refreshed every render. The rAF loop reads this instead
+    // of stale closure values; replaces ~12 per-prop ref-sync useEffects.
+    const propsRef = useRef({
+        rgb: parseColor(color),
+        rgbG1: parseColor(gradientColor1),
+        rgbG2: parseColor(gradientColor2),
+        opacity,
+        pixelSize,
+        patternScale,
+        patternDensity,
+        pixelSizeJitter,
+        speed,
+        shapeType: SHAPE_MAP[variant] ?? 0,
+        enableRipples,
+        rippleIntensityScale,
+        rippleThickness,
+        rippleSpeed,
+        enableGradient,
+        targetFPS,
     })
-
-    // ============================================
-    // REFS FOR REAL-TIME ANIMATION LOOP UPDATES
-    // These refs ensure the animation loop always reads current prop values
-    // instead of stale closure values from when the loop was created
-    // ============================================
-    const speedRef = useRef(speed)
-    const rotationSpeedRef = useRef(rotationSpeed)
-    const autoPauseOffscreenRef = useRef(autoPauseOffscreen)
-    const autoScaleRef = useRef(autoScale)
-    const targetFPSRef = useRef(targetFPS)
-    const patternDensityRef = useRef(patternDensity)
-    const noiseAmountRef = useRef(noiseAmount)
-    const performanceModeRef = useRef(performanceMode)
-    const glowIntensityRef = useRef(glowIntensity)
-    const glowSizeRef = useRef(glowSize)
-    const enableRipplesRef = useRef(enableRipples)
-
-    // Mapping qualityIndex -> DPR multiplier (soft scaling)
-    const computeDPRForIndex = (index: number, devicePR: number) => {
-        const steps = [Math.min(devicePR, 1.5), 1.0, 0.85, 0.75]
-        return steps[Math.min(Math.max(index, 0), steps.length - 1)]
+    propsRef.current = {
+        rgb: parseColor(color),
+        rgbG1: parseColor(gradientColor1),
+        rgbG2: parseColor(gradientColor2),
+        opacity,
+        pixelSize,
+        patternScale,
+        patternDensity,
+        pixelSizeJitter,
+        speed,
+        shapeType: SHAPE_MAP[variant] ?? 0,
+        enableRipples,
+        rippleIntensityScale,
+        rippleThickness,
+        rippleSpeed,
+        enableGradient,
+        targetFPS,
     }
 
-    // ============================================
-    // KEEP REFS IN SYNC WITH PROPS
-    // ============================================
-    useEffect(() => {
-        speedRef.current = speed
-    }, [speed])
-    useEffect(() => {
-        rotationSpeedRef.current = rotationSpeed
-    }, [rotationSpeed])
-    useEffect(() => {
-        autoPauseOffscreenRef.current = autoPauseOffscreen
-    }, [autoPauseOffscreen])
-    useEffect(() => {
-        autoScaleRef.current = autoScale
-    }, [autoScale])
-    useEffect(() => {
-        targetFPSRef.current = targetFPS
-    }, [targetFPS])
-    useEffect(() => {
-        patternDensityRef.current = patternDensity
-    }, [patternDensity])
-    useEffect(() => {
-        noiseAmountRef.current = noiseAmount
-    }, [noiseAmount])
-    useEffect(() => {
-        performanceModeRef.current = performanceMode
-    }, [performanceMode])
-    useEffect(() => {
-        glowIntensityRef.current = glowIntensity
-    }, [glowIntensity])
-    useEffect(() => {
-        glowSizeRef.current = glowSize
-    }, [glowSize])
-    useEffect(() => {
-        enableRipplesRef.current = enableRipples
-    }, [enableRipples])
+    const autoPauseOffscreenRef = useRef(effectiveAutoPause)
+    autoPauseOffscreenRef.current = effectiveAutoPause
 
-    // Update glow uniforms when props change
+    // Reduced motion listener. Canvas RAF stays running; we just skip render.
+    // (BEST-PRACTICES.md §5: do NOT add reduced-motion guards to the loop in
+    // a way that breaks rendering — only skip the draw.)
     useEffect(() => {
-        const glowPass = composerRef.current?.glowPass
-        if (glowPass) {
-            glowPass.uniforms.uGlowIntensity.value = glowIntensity
-            glowPass.uniforms.uGlowSize.value = glowSize
+        if (typeof window === "undefined" || !window.matchMedia) return
+        const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+        reducedMotionRef.current = mq.matches
+        const onChange = (e: MediaQueryListEvent) => {
+            reducedMotionRef.current = e.matches
         }
-    }, [glowIntensity, glowSize])
-
-    // ================================
-    // SHADERS
-    // ================================
-    const vertexShader = `
-        void main() {
-            gl_Position = vec4(position, 1.0);
-        }
-    `
-
-    const fragmentShader = `
-        uniform vec2 uResolution;
-        uniform float uTime;
-        uniform float uPixelSize;
-        uniform vec3 uColor;
-        uniform float uPatternScale;
-        uniform float uPatternDensity;
-        uniform float uPixelSizeJitter;
-        uniform float uNoiseAmount;
-        uniform int uShapeType;
-        const int SHAPE_SQUARE   = 0;
-        const int SHAPE_CIRCLE   = 1;
-        const int SHAPE_TRIANGLE = 2;
-        const int SHAPE_DIAMOND  = 3;
-        uniform bool uEnableRipples;
-        uniform float uRippleIntensity;
-        uniform float uRippleThickness;
-        uniform float uRippleSpeed;
-        const int MAX_CLICKS = 10;
-        uniform vec2 uClickPos[MAX_CLICKS];
-        uniform float uClickTimes[MAX_CLICKS];
-        uniform bool uEnableGradient;
-        uniform vec3 uGradientColor1;
-        uniform vec3 uGradientColor2;
-        uniform float uGradientSpeed;
-        uniform bool uColorPulse;
-        uniform float uPulseSpeed;
-        uniform float uPulseIntensity;
-        uniform vec2 uRotSC;
-        uniform float uEdgeFade;
-        uniform float uAspect;
-        uniform float uMaxRippleTime;
-
-        float hash21(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
-        float Bayer2(vec2 a){
-            a=floor(a);
-            return fract(a.x/2. + a.y * a.y * .75);
-        }
-        #define Bayer4(a) (Bayer2(.5*(a))*0.25 + Bayer2(a))
-        #define Bayer8(a) (Bayer4(.5*(a))*0.25 + Bayer2(a))
-        float noise(vec2 p){
-            vec2 i=floor(p);
-            vec2 f=fract(p);
-            float a=hash21(i);
-            float b=hash21(i + vec2(1.0,0.0));
-            float c=hash21(i + vec2(0.0,1.0));
-            float d=hash21(i + vec2(1.0,1.0));
-            vec2 u = f*f*(3.0-2.0*f);
-            return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
-        }
-        float maskCircle(vec2 p, float cov){
-            float r = sqrt(cov) * 0.25;
-            float d = length(p - 0.5) - r;
-            float aa = 0.5 * fwidth(d);
-            return cov * (1.0 - smoothstep(-aa, aa, d * 2.0));
-        }
-        float maskTriangle(vec2 p, vec2 id, float cov){
-            bool flip = mod(id.x + id.y, 2.0) > 0.5;
-            if (flip) p.x = 1.0 - p.x;
-            float r = sqrt(cov);
-            float d  = p.y - r*(1.0 - p.x);
-            float aa = fwidth(d);
-            return cov * clamp(0.5 - d/aa, 0.0, 1.0);
-        }
-        float maskDiamond(vec2 p, float cov){
-            float r = sqrt(cov) * 0.564;
-            return step(abs(p.x - 0.49) + abs(p.y - 0.49), r);
-        }
-
-        void main(){
-            vec2 uv = gl_FragCoord.xy / uResolution.xy;
-            vec2 centered = (gl_FragCoord.xy - 0.5 * uResolution.xy) / uResolution.y;
-            if(uRotSC.x != 0.0 || uRotSC.y != 1.0){
-                mat2 rot = mat2(uRotSC.y, -uRotSC.x, uRotSC.x, uRotSC.y);
-                centered = rot * centered;
-            }
-            float px = max(1.0, uPixelSize);
-            if(uPixelSizeJitter > 0.0){
-                float jitter = hash21(floor(gl_FragCoord.xy / (px*10.0))) * uPixelSizeJitter;
-                px += jitter;
-            }
-            vec2 pcell = floor(gl_FragCoord.xy / px) * px;
-            vec2 pUv = (pcell - 0.5 * uResolution.xy) / uResolution.y;
-            if(uRotSC.x != 0.0 || uRotSC.y != 1.0){
-                mat2 rot = mat2(uRotSC.y, -uRotSC.x, uRotSC.x, uRotSC.y);
-                pUv = rot * pUv;
-            }
-            vec2 pixelId = floor(gl_FragCoord.xy / px);
-            vec2 pixelUV = fract(gl_FragCoord.xy / px);
-            float cellPixelSize = 8.0 * uPixelSize;
-            vec2 cellId = floor(gl_FragCoord.xy / cellPixelSize);
-            vec2 cellCoord = cellId * cellPixelSize;
-            vec2 cellUv = cellCoord / uResolution.xy;
-            vec2 aspectUv = cellUv * vec2(uAspect, 1.0);
-            float base = noise(aspectUv * uPatternScale * 8.0 + uTime * 0.05);
-            base = base * 0.5 - 0.65;
-            float feed = base + (uPatternDensity - 0.5) * 0.3;
-            if(uEnableRipples){
-                float speed = uRippleSpeed;
-                float thickness = uRippleThickness;
-                const float dampT = 2.5;
-                const float dampR = 10.0;
-                for(int i = 0; i < MAX_CLICKS; ++i){
-                    vec2 pos = uClickPos[i];
-                    if(pos.x < 0.0) continue;
-                    float t = max(uTime - uClickTimes[i], 0.0);
-                    if(t > uMaxRippleTime) continue;
-                    vec2 cuv = (pos / uResolution) * vec2(uAspect, 1.0);
-                    float r = distance(aspectUv, cuv);
-                    float waveR = speed * t;
-                    float ring = exp(-pow((r - waveR) / thickness, 2.0));
-                    float atten = exp(-dampT * t) * exp(-dampR * r);
-                    feed = max(feed, ring * atten * uRippleIntensity);
-                }
-            }
-            if(uColorPulse){
-                feed += sin(uTime * uPulseSpeed) * uPulseIntensity * 0.1;
-            }
-            float bayer = Bayer8(gl_FragCoord.xy / px) - 0.5;
-            float bw = step(0.5, feed + bayer);
-            float h = hash21(floor(gl_FragCoord.xy / px));
-            float jitterScale = 1.0 + (h - 0.5) * uPixelSizeJitter * 0.1;
-            float coverage = bw * jitterScale;
-            float M;
-            if      (uShapeType == SHAPE_CIRCLE)   M = maskCircle(pixelUV, coverage);
-            else if (uShapeType == SHAPE_TRIANGLE) M = maskTriangle(pixelUV, pixelId, coverage);
-            else if (uShapeType == SHAPE_DIAMOND)  M = maskDiamond(pixelUV, coverage);
-            else                                   M = coverage;
-            vec3 baseColor = uColor;
-            if(uEnableGradient){
-                // Static gradient from bottom (Color 1) to top (Color 2)
-                float g = uv.y;
-                baseColor = mix(uGradientColor1, uGradientColor2, g);
-            }
-            vec3 col = baseColor * M;
-            float alpha = M;
-            if(uEdgeFade > 0.0){
-                float d = length(uv - 0.5);
-                float fade = smoothstep(0.8 - uEdgeFade, 0.8, d);
-                col *= (1.0 - fade);
-                alpha *= (1.0 - fade);
-            }
-            gl_FragColor = vec4(col, alpha);
-        }
-    `
-
-    useEffect(() => {
-        if (typeof window === "undefined") return
-        let scrollTimer: number | null = null
-        const onScroll = () => {
-            isScrollingRef.current = true
-            if (scrollTimer != null) window.clearTimeout(scrollTimer)
-            scrollTimer = window.setTimeout(() => {
-                isScrollingRef.current = false
-            }, 200)
-        }
-        window.addEventListener("scroll", onScroll, { passive: true })
-        return () => {
-            window.removeEventListener("scroll", onScroll)
-            if (scrollTimer != null) window.clearTimeout(scrollTimer)
-        }
+        mq.addEventListener("change", onChange)
+        return () => mq.removeEventListener("change", onChange)
     }, [])
 
-    // ==================================
-    //  INIT + RENDER LOOP
-    // ==================================
+    // Quality/autoScale → DPR. The *only* place DPR is mutated. Never inside
+    // the rAF loop — that was the primary scroll-glitch source.
+    useEffect(() => {
+        const canvas = canvasRef.current
+        const ctx = glRef.current
+        if (!canvas || !ctx) return
+        dprRef.current = dprFor(performanceMode, autoScale)
+        const rect = canvas.getBoundingClientRect()
+        const w = Math.max(1, Math.floor(rect.width * dprRef.current))
+        const h = Math.max(1, Math.floor(rect.height * dprRef.current))
+        canvas.width = w
+        canvas.height = h
+        ctx.gl.viewport(0, 0, w, h)
+        if (ctx.locs.uResolution) ctx.gl.uniform2f(ctx.locs.uResolution, w, h)
+        if (ctx.locs.uAspect) ctx.gl.uniform1f(ctx.locs.uAspect, w / h)
+    }, [performanceMode, autoScale])
+
+    // GL setup, rAF loop, observers, listeners. Runs once on mount; cleanup
+    // on unmount. Loop reads from propsRef every frame — no re-init on prop
+    // change.
     useEffect(() => {
         if (!enabled) return
+        const canvas = canvasRef.current
+        if (!canvas) return
+        let alive = true
 
-        const container = containerRef.current
-        if (!container) return
-
-        container.innerHTML = ""
-
-        const canvas = document.createElement("canvas")
-        canvas.style.width = "100%"
-        canvas.style.height = "100%"
-        canvas.style.display = "block"
-
-        const showFallback = (msg: string) => {
-            container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;font:13px/1.4 inherit;text-align:center;padding:16px;box-sizing:border-box;">${msg}</div>`
+        const gl = canvas.getContext("webgl", {
+            alpha: true,
+            antialias: false,
+            premultipliedAlpha: false,
+        })
+        if (!gl) {
+            console.error("DitherShader: WebGL not available")
+            return
         }
-
-        // Let Three.js pick the best context: WebGL2 first, WebGL1 fallback.
-        // Older Safari (iOS < 15) and some Android browsers lack WebGL2 but
-        // can still run this shader on WebGL1 with the derivatives extension.
-        let renderer: THREE.WebGLRenderer
-        try {
-            renderer = new THREE.WebGLRenderer({
-                canvas,
-                alpha: true,
-                premultipliedAlpha: false,
-                antialias: false,
-                powerPreference: "high-performance",
-            })
-        } catch (err) {
-            console.error("WebGL not available:", err)
-            showFallback("WebGL is not available in this browser.")
+        if (!gl.getExtension("OES_standard_derivatives")) {
+            console.error(
+                "DitherShader: OES_standard_derivatives unsupported"
+            )
             return
         }
 
-        // fwidth() requires OES_standard_derivatives on WebGL1. Three.js adds
-        // the directive when the material declares extensions.derivatives, but
-        // we still need the extension to be supported by the GPU.
-        if (!renderer.capabilities.isWebGL2) {
-            const ctx = renderer.getContext()
-            if (!ctx.getExtension("OES_standard_derivatives")) {
-                console.error(
-                    "DitherShader: OES_standard_derivatives unsupported"
-                )
-                showFallback("This browser cannot render the dither effect.")
-                renderer.dispose()
-                return
+        const initGL = () => {
+            const program = linkProgram(gl, VERT, FRAG)
+            if (!program) return null
+            const buf = gl.createBuffer()
+            if (!buf) {
+                gl.deleteProgram(program)
+                return null
             }
+            gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+            gl.bufferData(
+                gl.ARRAY_BUFFER,
+                new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+                gl.STATIC_DRAW
+            )
+            const pos = gl.getAttribLocation(program, "a_position")
+            gl.enableVertexAttribArray(pos)
+            gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0)
+            gl.useProgram(program)
+            const loc = (n: string) => gl.getUniformLocation(program, n)
+            const locs = {
+                uResolution: loc("uResolution"),
+                uTime: loc("uTime"),
+                uPixelSize: loc("uPixelSize"),
+                uColor: loc("uColor"),
+                uOpacity: loc("uOpacity"),
+                uPatternScale: loc("uPatternScale"),
+                uPatternDensity: loc("uPatternDensity"),
+                uPixelSizeJitter: loc("uPixelSizeJitter"),
+                uShapeType: loc("uShapeType"),
+                uEnableRipples: loc("uEnableRipples"),
+                uRippleIntensity: loc("uRippleIntensity"),
+                uRippleThickness: loc("uRippleThickness"),
+                uRippleSpeed: loc("uRippleSpeed"),
+                uClickPos: loc("uClickPos[0]"),
+                uClickTimes: loc("uClickTimes[0]"),
+                uEnableGradient: loc("uEnableGradient"),
+                uGradientColor1: loc("uGradientColor1"),
+                uGradientColor2: loc("uGradientColor2"),
+                uAspect: loc("uAspect"),
+                uMaxRippleTime: loc("uMaxRippleTime"),
+            }
+            return { program, buf, locs }
         }
 
-        // Recover gracefully if the GPU drops the context (common on iOS
-        // Safari under memory pressure or when tabs are backgrounded). Without
-        // preventDefault the browser refuses to restore the context.
+        const setup = initGL()
+        if (!setup) return
+        glRef.current = {
+            gl,
+            program: setup.program,
+            buf: setup.buf,
+            locs: setup.locs,
+        }
+        gl.uniform1f(setup.locs.uMaxRippleTime, MAX_RIPPLE_TIME)
+
+        // Initial sizing — synchronous so the first frame matches layout.
+        {
+            const rect = canvas.getBoundingClientRect()
+            const w = Math.max(1, Math.floor(rect.width * dprRef.current))
+            const h = Math.max(1, Math.floor(rect.height * dprRef.current))
+            canvas.width = w
+            canvas.height = h
+            gl.viewport(0, 0, w, h)
+            gl.uniform2f(setup.locs.uResolution, w, h)
+            gl.uniform1f(setup.locs.uAspect, w / h)
+        }
+
+        // Resize: ResizeObserver → rAF debounce, plus a 4px tolerance.
+        // iOS Safari's URL-bar animation walks viewport height ~18px over
+        // ~300ms (multiple frames). rAF only collapses events within one
+        // frame, so without the tolerance each step reallocates the buffer
+        // and shifts uResolution/uAspect — visibly morphing the pattern
+        // because cellUv = gl_FragCoord / uResolution.
+        let resizeRaf = 0
+        let lastW = 0
+        let lastH = 0
+        const ro = new ResizeObserver(() => {
+            cancelAnimationFrame(resizeRaf)
+            resizeRaf = requestAnimationFrame(() => {
+                if (!alive || !glRef.current) return
+                const rect = canvas.getBoundingClientRect()
+                const w = Math.max(1, Math.floor(rect.width * dprRef.current))
+                const h = Math.max(1, Math.floor(rect.height * dprRef.current))
+                if (Math.abs(w - lastW) < 4 && Math.abs(h - lastH) < 4) return
+                lastW = w
+                lastH = h
+                canvas.width = w
+                canvas.height = h
+                gl.viewport(0, 0, w, h)
+                gl.uniform2f(setup.locs.uResolution, w, h)
+                gl.uniform1f(setup.locs.uAspect, w / h)
+            })
+        })
+        ro.observe(canvas)
+
+        // Visibility — only attach IO if requested.
+        let io: IntersectionObserver | null = null
+        if (autoPauseOffscreenRef.current) {
+            io = new IntersectionObserver(
+                (entries) => {
+                    visibleRef.current = entries[0].isIntersecting
+                },
+                { threshold: 0 }
+            )
+            io.observe(canvas)
+        }
+
+        const onPointerDown = (e: PointerEvent) => {
+            if (!propsRef.current.enableRipples) return
+            if (pausedRef.current || reducedMotionRef.current) return
+            const rect = canvas.getBoundingClientRect()
+            const fx =
+                ((e.clientX - rect.left) * canvas.width) / rect.width
+            const fy =
+                ((rect.height - (e.clientY - rect.top)) * canvas.height) /
+                rect.height
+            const i = clickIndexRef.current
+            clickPosRef.current[i * 2] = fx
+            clickPosRef.current[i * 2 + 1] = fy
+            clickTimesRef.current[i] = lastScaledTimeRef.current
+            clickIndexRef.current = (i + 1) % MAX_CLICKS
+        }
+        canvas.addEventListener("pointerdown", onPointerDown, {
+            passive: true,
+        })
+
+        // Context-loss recovery — keeps t0/pauseOffset so time doesn't jump.
         const onContextLost = (e: Event) => {
             e.preventDefault()
-            if (frameIdRef.current != null) {
-                cancelAnimationFrame(frameIdRef.current)
-                frameIdRef.current = null
-            }
+            cancelAnimationFrame(rafRef.current)
+            glRef.current = null
         }
         const onContextRestored = () => {
-            if (frameIdRef.current == null) {
-                lastFrameTime.current = 0
-                frameIdRef.current = requestAnimationFrame(animate)
+            const restored = initGL()
+            if (!restored || !alive) return
+            glRef.current = {
+                gl,
+                program: restored.program,
+                buf: restored.buf,
+                locs: restored.locs,
             }
+            const rect = canvas.getBoundingClientRect()
+            const w = Math.max(1, Math.floor(rect.width * dprRef.current))
+            const h = Math.max(1, Math.floor(rect.height * dprRef.current))
+            canvas.width = w
+            canvas.height = h
+            gl.viewport(0, 0, w, h)
+            gl.uniform2f(restored.locs.uResolution, w, h)
+            gl.uniform1f(restored.locs.uAspect, w / h)
+            gl.uniform1f(restored.locs.uMaxRippleTime, MAX_RIPPLE_TIME)
+            rafRef.current = requestAnimationFrame(loop)
         }
-        canvas.addEventListener("webglcontextlost", onContextLost as EventListener)
+        canvas.addEventListener(
+            "webglcontextlost",
+            onContextLost as EventListener
+        )
         canvas.addEventListener(
             "webglcontextrestored",
             onContextRestored as EventListener
         )
 
-        // Initial DPR based on preference & performance mode
-        const devicePR = window.devicePixelRatio || 1.0
-        let initialDpr = 1.0
+        t0Ref.current = performance.now()
+        pauseOffsetRef.current = 0
+        pauseStartRef.current = 0
+        lastRenderRef.current = 0
 
-        // Use performance mode to determine DPR
-        if (performanceMode === "high") initialDpr = Math.min(devicePR, 2.0)
-        else if (performanceMode === "balanced")
-            initialDpr = Math.min(devicePR, 1.5)
-        else initialDpr = 1.0
+        const loop = () => {
+            rafRef.current = requestAnimationFrame(loop)
+            if (!alive) return
+            const ctx = glRef.current
+            if (!ctx) return
 
-        const dpr = computeDPRForIndex(
-            scalerStateRef.current.qualityIndex,
-            initialDpr
-        )
-        renderer.setPixelRatio(dpr)
-
-        renderer.setClearColor(0x000000, 0)
-        rendererRef.current = renderer
-
-        const scene = new THREE.Scene()
-        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
-
-        const material = new THREE.ShaderMaterial({
-            vertexShader,
-            fragmentShader,
-            uniforms: {
-                uResolution: { value: new THREE.Vector2(1, 1) },
-                uTime: { value: 0 },
-                uPixelSize: { value: pixelSize },
-                uColor: { value: new THREE.Color(color) },
-                uShapeType: { value: SHAPE_MAP[variant as ShapeVariant] ?? 0 },
-                uPatternScale: { value: patternScale },
-                uPatternDensity: { value: patternDensity },
-                uPixelSizeJitter: { value: pixelSizeJitter },
-                uNoiseAmount: { value: noiseAmount },
-                uEnableRipples: { value: enableRipples },
-                uRippleIntensity: { value: rippleIntensityScale },
-                uRippleThickness: { value: rippleThickness },
-                uRippleSpeed: { value: rippleSpeed },
-                uClickPos: { value: clickPosRef.current },
-                uClickTimes: { value: clickTimesRef.current },
-                uEnableGradient: { value: enableGradient },
-                uGradientColor1: { value: new THREE.Color(gradientColor1) },
-                uGradientColor2: { value: new THREE.Color(gradientColor2) },
-                uColorPulse: { value: colorPulse },
-                uPulseSpeed: { value: pulseSpeed },
-                uPulseIntensity: { value: pulseIntensity },
-                uRotSC: { value: new THREE.Vector2(0, 1) }, // sin, cos
-                uEdgeFade: { value: edgeFade },
-                uAspect: { value: 1.0 },
-                uMaxRippleTime: { value: 3.0 },
-            },
-            transparent: true,
-            depthTest: false,
-            depthWrite: false,
-            // fwidth() in maskCircle/maskTriangle needs the derivatives
-            // extension on WebGL1; harmless on WebGL2 where it's built in.
-            extensions: { derivatives: true } as any,
-        })
-
-        materialRef.current = material
-
-        const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material)
-        scene.add(quad)
-
-        // Setup post-processing composer only when needed
-        let composer: EffectComposer | undefined
-        let glowPass: ShaderPass | undefined
-        // Enable glow based on user settings and performance mode
-        if (enableGlow && performanceMode !== "low") {
-            composer = new EffectComposer(renderer)
-            composer.addPass(new RenderPass(scene, camera))
-
-            glowPass = createGlowShaderPass({
-                intensity: glowIntensity,
-                size: glowSize,
-            })
-            glowPass.uniforms.uResolution.value.set(
-                container.clientWidth,
-                container.clientHeight
-            )
-            composer.addPass(glowPass)
-
-            composerRef.current = { composer, glowPass, enabled: true }
-        } else {
-            composerRef.current = {
-                composer: undefined,
-                glowPass: undefined,
-                enabled: false,
-            }
-        }
-
-        container.appendChild(canvas)
-
-        // Resize handling
-        let resizeScheduled = false
-        let lastW = 0
-        let lastH = 0
-        let lastDpr = 0
-        const doResize = () => {
-            resizeScheduled = false
-            const w = Math.max(1, container.clientWidth || 100)
-            const h = Math.max(1, container.clientHeight || 100)
-            const dprNow = renderer.getPixelRatio()
-
-            // iOS Safari's URL-bar animation walks the viewport height through
-            // ~300ms of 1–2px increments; reacting to each one reallocates the
-            // GPU framebuffer (expensive on mobile) and shifts uAspect, which
-            // visibly morphs the dither pattern. Tolerance > 4px ignores the
-            // animation and only resizes on real layout changes.
-            if (
-                Math.abs(w - lastW) < 4 &&
-                Math.abs(h - lastH) < 4 &&
-                dprNow === lastDpr
-            )
-                return
-            lastW = w
-            lastH = h
-            lastDpr = dprNow
-
-            renderer.setSize(w, h, false)
-            const bufW = Math.floor(w * dprNow)
-            const bufH = Math.floor(h * dprNow)
-            material.uniforms.uResolution.value.set(bufW, bufH)
-            material.uniforms.uAspect.value = bufW / bufH
-
-            if (composerRef.current?.composer) {
-                composerRef.current.composer.setSize(w, h)
-            }
-            if (composerRef.current?.glowPass) {
-                composerRef.current.glowPass.uniforms.uResolution.value.set(
-                    bufW,
-                    bufH
-                )
-            }
-
-            // setSize clears the drawing buffer; render now so it doesn't
-            // sit blank until the next throttled animate() frame.
-            const composerEntry = composerRef.current
-            if (
-                composerEntry &&
-                composerEntry.composer &&
-                composerEntry.enabled
-            ) {
-                composerEntry.composer.render()
-            } else {
-                renderer.render(scene, camera)
-            }
-        }
-
-        const scheduleResize = () => {
-            if (!resizeScheduled) {
-                resizeScheduled = true
-                requestAnimationFrame(doResize)
-            }
-        }
-
-        doResize()
-
-        const ro = new ResizeObserver(scheduleResize)
-        ro.observe(container)
-
-        const io = new IntersectionObserver(
-            (entries) => {
-                visibilityRef.current.visible = entries[0].isIntersecting
-            },
-            { threshold: 0 }
-        )
-        if (autoPauseOffscreen) {
-            io.observe(container)
-        }
-
-        // Click handler - uses ref for real-time reactivity
-        // Cache the reduced-motion query so each click doesn't re-create it.
-        // Canvas RAF stays running; we just suppress the interactive ripple.
-        const reducedMotionQuery = window.matchMedia?.(
-            "(prefers-reduced-motion: reduce)"
-        )
-
-        let clickIndex = 0
-        const onPointerDown = (e: PointerEvent) => {
-            if (!enableRipplesRef.current) return
-            if (reducedMotionQuery?.matches) return
-
-            const rect = canvas.getBoundingClientRect()
-            const scaleX = canvas.width / rect.width
-            const scaleY = canvas.height / rect.height
-            const fx = (e.clientX - rect.left) * scaleX
-            const fy = (rect.height - (e.clientY - rect.top)) * scaleY
-
-            const currentTime = material.uniforms.uTime.value
-            material.uniforms.uClickPos.value[clickIndex].set(fx, fy)
-            material.uniforms.uClickTimes.value[clickIndex] = currentTime
-            clickIndex = (clickIndex + 1) % MAX_CLICKS
-        }
-
-        canvas.addEventListener("pointerdown", onPointerDown, { passive: true })
-
-        // Animation loop - NOTE: Uses refs for all values that can change during animation
-        // This ensures real-time reactivity when controls are adjusted
-        let lastSampleTime = performance.now()
-        const animate = (time: number) => {
-            frameIdRef.current = requestAnimationFrame(animate)
-
-            if (
-                autoPauseOffscreenRef.current &&
-                !visibilityRef.current.visible
-            ) {
-                // Stop the clock and clear lastFrameTime so resuming doesn't
-                // jump uTime forward by the pause duration (visible glitch)
-                // or feed a giant dt into the FPS EMA (corrupts auto-scaler).
-                if (clockRef.current.running) clockRef.current.stop()
-                lastFrameTime.current = 0
+            const offscreen =
+                autoPauseOffscreenRef.current && !visibleRef.current
+            const blocked =
+                pausedRef.current || reducedMotionRef.current || offscreen
+            if (blocked) {
+                if (pauseStartRef.current === 0)
+                    pauseStartRef.current = performance.now()
                 return
             }
-            if (!clockRef.current.running) clockRef.current.start()
-
-            // Calculate frame timing using current targetFPS
-            const currentFpsTarget = Math.max(10, targetFPSRef.current || 30)
-            const minInterval = 1000 / currentFpsTarget
-
-            // rAF jitter on a 60Hz display can deliver consecutive frames
-            // ~16.5ms apart — just under a 16.67ms gate — causing every other
-            // frame to be dropped (effective 30fps with visible stutter, very
-            // noticeable during scroll). The 4ms tolerance keeps us aligned
-            // with vsync while still throttling correctly at lower targets.
-            // First frame after init or visibility-pause: lastFrameTime is 0,
-            // so we'd compute a huge dt and drag the FPS EMA to ~0. Skip the
-            // gate this frame and use dt=0 to mark "no measurement".
-            const isFirstFrame = lastFrameTime.current === 0
-            if (
-                !isFirstFrame &&
-                time - lastFrameTime.current < minInterval - 4
-            )
-                return
-            const dt = isFirstFrame ? 0 : time - lastFrameTime.current
-            lastFrameTime.current = time
-
-            // Use speedRef for real-time updates
-            const currentTime =
-                clockRef.current.getElapsedTime() * speedRef.current * 5.0
-            material.uniforms.uTime.value = currentTime
-
-            // Use rotationSpeedRef for real-time updates
-            if (rotationSpeedRef.current !== 0.0) {
-                const angle = currentTime * rotationSpeedRef.current
-                const s = Math.sin(angle)
-                const c = Math.cos(angle)
-                const rotVec = material.uniforms.uRotSC.value as THREE.Vector2
-                rotVec.set(s, c)
-            } else {
-                const rotVec = material.uniforms.uRotSC.value as THREE.Vector2
-                rotVec.set(0, 1)
+            if (pauseStartRef.current > 0) {
+                pauseOffsetRef.current +=
+                    performance.now() - pauseStartRef.current
+                pauseStartRef.current = 0
             }
 
-            // Cleanup Ripples
-            const maxRippleTime = material.uniforms.uMaxRippleTime
-                .value as number
-            for (let i = 0; i < MAX_CLICKS; i++) {
-                const clickTime = material.uniforms.uClickTimes.value[i]
-                if (clickTime > 0 && currentTime - clickTime > maxRippleTime) {
-                    material.uniforms.uClickPos.value[i].set(-1, -1)
-                    material.uniforms.uClickTimes.value[i] = 0
-                }
-            }
+            const p = propsRef.current
 
-            // === Auto Performance Scaler ===
-            // Use autoScaleRef for real-time updates. Skip during scroll +
-            // 200ms cooldown — scroll-induced FPS dips are transient false
-            // signals; reacting to them locks DPR low for sustained content.
-            if (autoScaleRef.current && dt > 0 && !isScrollingRef.current) {
+            // Target-FPS throttle with 4ms vsync slop. rAF jitter delivers
+            // consecutive frames at ~16.5ms / ~17.0ms on a 60Hz display; a
+            // strict 16.667ms gate drops every other frame (visible 30fps
+            // stutter during scroll). The slop lets jittered-early frames
+            // through while still throttling correctly at lower targets.
+            const target = p.targetFPS
+            if (target > 0 && target < 120) {
                 const now = performance.now()
-                const instFps = 1000 / Math.max(1, dt)
-                const alpha = 0.12
-                fpsEMARef.current =
-                    fpsEMARef.current == null
-                        ? instFps
-                        : alpha * instFps + (1 - alpha) * fpsEMARef.current
+                if (now - lastRenderRef.current < 1000 / target - 4) return
+                lastRenderRef.current = now
+            }
 
-                if (now - lastSampleTime > 800) {
-                    lastSampleTime = now
-                    const fps = fpsEMARef.current || instFps
-                    const state = scalerStateRef.current
-                    const nowSec = now / 1000
-                    const minTimeBetween = 1.0
-                    if (nowSec - state.lastChangeTime > minTimeBetween) {
-                        const lowThreshold = Math.min(30, currentFpsTarget - 15)
-                        const highThreshold = Math.max(currentFpsTarget - 5, 50)
-                        if (fps < lowThreshold && state.qualityIndex < 3) {
-                            state.qualityIndex = Math.min(
-                                3,
-                                state.qualityIndex + 1
-                            )
-                            state.lastChangeTime = nowSec
-                        } else if (
-                            fps > highThreshold &&
-                            state.qualityIndex > 0
-                        ) {
-                            state.qualityIndex = Math.max(
-                                0,
-                                state.qualityIndex - 1
-                            )
-                            state.lastChangeTime = nowSec
-                        }
+            const time =
+                (performance.now() - t0Ref.current - pauseOffsetRef.current) /
+                1000
+            const scaledTime = time * p.speed * 5.0
+            lastScaledTimeRef.current = scaledTime
 
-                        const desiredDpr = computeDPRForIndex(
-                            state.qualityIndex,
-                            window.devicePixelRatio || 1.0
-                        )
-
-                        if (
-                            Math.abs(desiredDpr - renderer.getPixelRatio()) >
-                            0.05
-                        ) {
-                            renderer.setPixelRatio(desiredDpr)
-                            requestAnimationFrame(doResize)
-                        }
-
-                        // Don't mutate shader uniforms here — changing
-                        // uPatternDensity/uNoiseAmount mid-render visibly
-                        // morphs the dither pattern (looks like glitching
-                        // during scroll). DPR change is the only auto-scale
-                        // adjustment users won't perceive directly.
-
-                        const composerEntry = composerRef.current
-                        if (composerEntry && composerEntry.composer) {
-                            composerEntry.enabled = !(
-                                state.qualityIndex >= 3 &&
-                                performanceModeRef.current !== "high"
-                            )
-                        }
-                    }
+            for (let i = 0; i < MAX_CLICKS; i++) {
+                const ct = clickTimesRef.current[i]
+                if (ct > 0 && scaledTime - ct > MAX_RIPPLE_TIME) {
+                    clickPosRef.current[i * 2] = -1
+                    clickPosRef.current[i * 2 + 1] = -1
+                    clickTimesRef.current[i] = 0
                 }
             }
 
-            // render
-            const composerEntry = composerRef.current
-            if (
-                composerEntry &&
-                composerEntry.composer &&
-                composerEntry.enabled
-            ) {
-                composerEntry.composer.render()
-            } else {
-                renderer.render(scene, camera)
-            }
-        }
+            const { gl: g, locs: L } = ctx
+            g.uniform1f(L.uTime, scaledTime)
+            g.uniform1f(L.uPixelSize, p.pixelSize)
+            g.uniform3f(L.uColor, p.rgb[0], p.rgb[1], p.rgb[2])
+            g.uniform1f(L.uOpacity, p.opacity)
+            g.uniform1f(L.uPatternScale, p.patternScale)
+            g.uniform1f(L.uPatternDensity, p.patternDensity)
+            g.uniform1f(L.uPixelSizeJitter, p.pixelSizeJitter)
+            g.uniform1i(L.uShapeType, p.shapeType)
+            g.uniform1i(L.uEnableRipples, p.enableRipples ? 1 : 0)
+            g.uniform1f(L.uRippleIntensity, p.rippleIntensityScale)
+            g.uniform1f(L.uRippleThickness, p.rippleThickness)
+            g.uniform1f(L.uRippleSpeed, p.rippleSpeed)
+            g.uniform2fv(L.uClickPos, clickPosRef.current)
+            g.uniform1fv(L.uClickTimes, clickTimesRef.current)
+            g.uniform1i(L.uEnableGradient, p.enableGradient ? 1 : 0)
+            g.uniform3f(
+                L.uGradientColor1,
+                p.rgbG1[0],
+                p.rgbG1[1],
+                p.rgbG1[2]
+            )
+            g.uniform3f(
+                L.uGradientColor2,
+                p.rgbG2[0],
+                p.rgbG2[1],
+                p.rgbG2[2]
+            )
 
-        frameIdRef.current = requestAnimationFrame(animate)
+            g.drawArrays(g.TRIANGLE_STRIP, 0, 4)
+        }
+        rafRef.current = requestAnimationFrame(loop)
 
         return () => {
-            if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current)
+            alive = false
+            cancelAnimationFrame(rafRef.current)
+            cancelAnimationFrame(resizeRaf)
             ro.disconnect()
-            io.disconnect()
+            io?.disconnect()
             canvas.removeEventListener("pointerdown", onPointerDown)
             canvas.removeEventListener(
                 "webglcontextlost",
@@ -864,88 +668,20 @@ export default function DitherShader(
                 "webglcontextrestored",
                 onContextRestored as EventListener
             )
-
-            material.dispose()
-            quad.geometry.dispose()
-            composerRef.current?.composer?.dispose()
-            renderer.dispose()
-
-            if (container.contains(canvas)) {
-                container.removeChild(canvas)
+            const ctx = glRef.current
+            if (ctx) {
+                gl.deleteProgram(ctx.program)
+                gl.deleteBuffer(ctx.buf)
             }
-            rendererRef.current = null
-            materialRef.current = null
-            composerRef.current = {
-                composer: undefined,
-                glowPass: undefined,
-                enabled: false,
-            }
+            glRef.current = null
         }
-    }, [
-        enabled, // Re-init when component is toggled on/off
-        enableGlow, // Re-init when glow is toggled (requires composer setup)
-        performanceMode, // Re-init when quality mode changes (affects DPR and glow)
-        // Note: autoPauseOffscreen, autoScale, speed, rotationSpeed, targetFPS, etc.
-        // are now handled via refs and don't require re-initialization
-    ])
+    }, [enabled])
 
-    // Uniform updates
-    useEffect(() => {
-        const mat = materialRef.current
-        if (!mat) return
+    if (!enabled) return null
 
-        mat.uniforms.uShapeType.value = SHAPE_MAP[variant as ShapeVariant] ?? 0
-        mat.uniforms.uPixelSize.value = pixelSize
-        mat.uniforms.uColor.value.set(color)
-        mat.uniforms.uPatternScale.value = patternScale
-        mat.uniforms.uPatternDensity.value = patternDensity
-        mat.uniforms.uPixelSizeJitter.value = pixelSizeJitter
-        mat.uniforms.uNoiseAmount.value = noiseAmount
-
-        mat.uniforms.uEnableRipples.value = enableRipples
-        mat.uniforms.uRippleIntensity.value = rippleIntensityScale
-        mat.uniforms.uRippleThickness.value = rippleThickness
-        mat.uniforms.uRippleSpeed.value = rippleSpeed
-
-        mat.uniforms.uEnableGradient.value = enableGradient
-        mat.uniforms.uGradientColor1.value.set(gradientColor1)
-        mat.uniforms.uGradientColor2.value.set(gradientColor2)
-
-        mat.uniforms.uColorPulse.value = colorPulse
-        mat.uniforms.uPulseSpeed.value = pulseSpeed
-        mat.uniforms.uPulseIntensity.value = pulseIntensity
-
-        mat.uniforms.uEdgeFade.value = edgeFade
-    }, [
-        variant,
-        pixelSize,
-        color,
-        patternScale,
-        patternDensity,
-        pixelSizeJitter,
-        noiseAmount,
-        enableRipples,
-        rippleIntensityScale,
-        rippleThickness,
-        rippleSpeed,
-        enableGradient,
-        gradientColor1,
-        gradientColor2,
-        colorPulse,
-        pulseSpeed,
-        pulseIntensity,
-        rotationSpeed,
-        edgeFade,
-    ])
-
-    if (!enabled) {
-        return null
-    }
-
-    // Static renderer (SSG, thumbnails, social previews) can't run WebGL,
-    // so paint a representative solid swatch instead of an empty div.
-    // The Framer Canvas reports as static for component thumbnails but can
-    // run WebGL during normal editing — only show the fallback off-canvas.
+    // Static renderer (SSG, thumbnails) can't run WebGL — show a frozen
+    // gradient/color swatch. Framer canvas reports static for thumbnails but
+    // can run WebGL during normal editing, so only fall back off-canvas.
     if (isStatic && !isCanvas) {
         const fallbackBg = enableGradient
             ? `linear-gradient(to top, ${gradientColor1}, ${gradientColor2})`
@@ -969,6 +705,7 @@ export default function DitherShader(
     return (
         <div
             {...restProps}
+            ref={containerRef}
             style={{
                 ...restProps.style,
                 position: "relative",
@@ -977,12 +714,12 @@ export default function DitherShader(
                 minHeight: 200,
             }}
         >
-            <div
-                ref={containerRef}
+            <canvas
+                ref={canvasRef}
                 style={{
+                    display: "block",
                     width: "100%",
                     height: "100%",
-                    opacity,
                     background: "transparent",
                 }}
             />
@@ -991,7 +728,7 @@ export default function DitherShader(
 }
 
 addPropertyControls(DitherShader, {
-    // Appearance Section
+    // Appearance
     variant: {
         type: ControlType.Enum,
         title: "Shape",
@@ -1029,24 +766,13 @@ addPropertyControls(DitherShader, {
         step: 0.05,
         section: "Appearance",
     },
-    edgeFade: {
-        type: ControlType.Number,
-        title: "Edge Fade",
-        description:
-            "Creates a vignette effect, fading the pattern towards the edges",
-        defaultValue: 0,
-        min: 0,
-        max: 1,
-        step: 0.05,
-        section: "Appearance",
-    },
 
-    // Pattern Section
+    // Pattern
     patternDensity: {
         type: ControlType.Number,
         title: "Pattern Density",
         description:
-            "Controls how crowded the dither pattern appears. Higher values create more particles",
+            "How crowded the dither pattern appears. Higher values pack more particles",
         defaultValue: 2,
         min: 0.1,
         max: 10,
@@ -1057,21 +783,10 @@ addPropertyControls(DitherShader, {
     patternScale: {
         type: ControlType.Number,
         title: "Pattern Scale",
-        description:
-            "Overall scale of the noise pattern that drives the dither",
+        description: "Overall scale of the noise pattern that drives the dither",
         defaultValue: 1,
         min: 0.1,
         max: 5,
-        step: 0.1,
-        section: "Pattern",
-    },
-    noiseAmount: {
-        type: ControlType.Number,
-        title: "Dither Intensity",
-        description: "Strength of the dithering effect",
-        defaultValue: 0.7,
-        min: 0,
-        max: 2,
         step: 0.1,
         section: "Pattern",
     },
@@ -1087,12 +802,11 @@ addPropertyControls(DitherShader, {
         section: "Pattern",
     },
 
-    // Animation Section
+    // Animation
     speed: {
         type: ControlType.Number,
         title: "Animation Speed",
-        description:
-            "Speed of the pattern movement. Set to 0 for a static pattern",
+        description: "Speed of the pattern movement. 0 for a static pattern",
         defaultValue: 0.1,
         min: 0,
         max: 2,
@@ -1100,19 +814,15 @@ addPropertyControls(DitherShader, {
         section: "Animation",
         displaySectionTitles: true,
     },
-    rotationSpeed: {
-        type: ControlType.Number,
-        title: "Rotation Speed",
-        description:
-            "Rotates the entire pattern. Negative values rotate counter-clockwise",
-        defaultValue: 0,
-        min: -2,
-        max: 2,
-        step: 0.1,
+    paused: {
+        type: ControlType.Boolean,
+        title: "Paused",
+        description: "Freeze the animation on the current frame",
+        defaultValue: false,
         section: "Animation",
     },
 
-    // Ripple Effects Section
+    // Ripples
     enableRipples: {
         type: ControlType.Boolean,
         title: "Enable Ripples",
@@ -1155,11 +865,11 @@ addPropertyControls(DitherShader, {
         section: "Ripples",
     },
 
-    // Gradient Section
+    // Gradient
     enableGradient: {
         type: ControlType.Boolean,
         title: "Enable Gradient",
-        description: "Apply a color gradient to the pattern",
+        description: "Apply a vertical color gradient to the pattern",
         defaultValue: true,
         section: "Gradient",
         displaySectionTitles: true,
@@ -1181,75 +891,11 @@ addPropertyControls(DitherShader, {
         section: "Gradient",
     },
 
-    // Glow Section
-    enableGlow: {
-        type: ControlType.Boolean,
-        title: "Enable Glow",
-        description: "Add a soft glow effect around the particles",
-        defaultValue: false,
-        section: "Glow",
-        displaySectionTitles: true,
-    },
-    glowIntensity: {
-        type: ControlType.Number,
-        title: "Glow Strength",
-        description: "Brightness of the glow effect",
-        defaultValue: 0.5,
-        min: 0,
-        max: 2,
-        step: 0.1,
-        hidden: (props: any) => !props.enableGlow,
-        section: "Glow",
-    },
-    glowSize: {
-        type: ControlType.Number,
-        title: "Glow Size",
-        description: "How far the glow extends from particles",
-        defaultValue: 1.0,
-        min: 0.5,
-        max: 3,
-        step: 0.1,
-        hidden: (props: any) => !props.enableGlow,
-        section: "Glow",
-    },
-
-    // Pulse Section
-    colorPulse: {
-        type: ControlType.Boolean,
-        title: "Enable Pulse",
-        description: "Pulse the dither density on a sine wave",
-        defaultValue: false,
-        section: "Pulse",
-        displaySectionTitles: true,
-    },
-    pulseSpeed: {
-        type: ControlType.Number,
-        title: "Pulse Speed",
-        description: "How fast the pulse oscillates",
-        defaultValue: 1,
-        min: 0,
-        max: 5,
-        step: 0.1,
-        hidden: (props: any) => !props.colorPulse,
-        section: "Pulse",
-    },
-    pulseIntensity: {
-        type: ControlType.Number,
-        title: "Pulse Strength",
-        description: "Amplitude of the pulse",
-        defaultValue: 0.2,
-        min: 0,
-        max: 1,
-        step: 0.05,
-        hidden: (props: any) => !props.colorPulse,
-        section: "Pulse",
-    },
-
-    // Performance Section
+    // Performance
     performanceMode: {
         type: ControlType.Enum,
         title: "Quality",
-        description: "Balance between visual quality and performance",
+        description: "Caps render resolution. Lower = faster on weak GPUs",
         options: ["high", "balanced", "low"],
         optionTitles: ["High", "Balanced", "Low"],
         defaultValue: "balanced",
@@ -1260,7 +906,7 @@ addPropertyControls(DitherShader, {
         type: ControlType.Boolean,
         title: "Auto Scale",
         description:
-            "Automatically adjust resolution based on device performance",
+            "Apply the Quality cap. Off = use raw devicePixelRatio (max 2x)",
         defaultValue: true,
         section: "Performance",
     },
@@ -1268,7 +914,7 @@ addPropertyControls(DitherShader, {
         type: ControlType.Boolean,
         title: "Pause Offscreen",
         description:
-            "Stop animation when component is not visible to save resources",
+            "Stop rendering when the component scrolls out of view",
         defaultValue: true,
         section: "Performance",
     },
@@ -1281,8 +927,7 @@ addPropertyControls(DitherShader, {
         step: 1,
         unit: "fps",
         section: "Performance",
-        description:
-            "Target frame rate for the animation. Powered by [FramerHub](https://framerhub.io)",
+        description: "Target frame rate for the animation",
     },
 })
 

@@ -42,8 +42,11 @@ type CycleWidthProps = {
     widthDurationMs: number
 }
 
+type Tag = "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p"
+
 type Props = {
     text: string
+    tag: Tag
     timing?: TimingProps
     textColor: string
     colorPreset: ColorPreset
@@ -162,6 +165,7 @@ function toFontStyle(font?: any): React.CSSProperties {
 export default function WordCarousel(props: Props) {
     const {
         text = "We build {fast|smooth|colorful|crisp} interfaces",
+        tag = "div",
         timing,
         textColor = "#000000",
         colorPreset = "spectrum",
@@ -176,6 +180,7 @@ export default function WordCarousel(props: Props) {
         fontSize = 64,
         lineHeight = 1.2,
     } = props
+    const Wrapper = tag as keyof JSX.IntrinsicElements
 
     const sweepMs = timing?.sweepMs ?? 750
     const staggerMs = timing?.staggerMs ?? 120
@@ -391,7 +396,7 @@ export default function WordCarousel(props: Props) {
     // visible jump in position or word spacing.
     if (isStatic || reducedMotion) {
         return (
-            <div
+            <Wrapper
                 style={{
                     display: "flex",
                     alignItems: "center",
@@ -402,6 +407,7 @@ export default function WordCarousel(props: Props) {
                     paddingTop: bleedPad,
                     paddingBottom: bleedPad,
                     boxSizing: "border-box",
+                    margin: 0,
                 }}
             >
                 <span
@@ -450,7 +456,7 @@ export default function WordCarousel(props: Props) {
                         )
                     })}
                 </span>
-            </div>
+            </Wrapper>
         )
     }
 
@@ -654,7 +660,7 @@ export default function WordCarousel(props: Props) {
     }
 
     return (
-        <div
+        <Wrapper
             style={{
                 display: "flex",
                 alignItems: "center",
@@ -665,6 +671,7 @@ export default function WordCarousel(props: Props) {
                 paddingTop: bleedPad,
                 paddingBottom: bleedPad,
                 boxSizing: "border-box",
+                margin: 0,
             }}
         >
             {/* Screen reader */}
@@ -767,7 +774,7 @@ export default function WordCarousel(props: Props) {
                     )
                 })}
             </span>
-        </div>
+        </Wrapper>
     )
 }
 
@@ -781,6 +788,14 @@ addPropertyControls(WordCarousel, {
         defaultValue: "We build {fast|smooth|colorful|crisp} interfaces",
         description:
             "**{a|b|c}** cycles through words.  \n**//** forces a line break (e.g. `We build // amazing things`). Spaces around // are optional.",
+    },
+    tag: {
+        type: ControlType.Enum,
+        title: "Tag",
+        options: ["div", "h1", "h2", "h3", "h4", "h5", "h6", "p"],
+        optionTitles: ["div", "H1", "H2", "H3", "H4", "H5", "H6", "p"],
+        defaultValue: "div",
+        description: "HTML tag for the wrapper. Use H1–H6 for SEO headings.",
     },
     // ── Timing ──────────────────────────────────────────────────────────────
     timing: {

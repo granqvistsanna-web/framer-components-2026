@@ -963,7 +963,10 @@ function DraggableCardStack({
                     flexDirection: "column",
                     alignItems: "center",
                     justifyContent: "center",
+                    gap: `${responsive.gap}px`,
                     boxSizing: "border-box",
+                    position: "relative",
+                    isolation: "isolate",
                 }}
             >
                 <div
@@ -1004,6 +1007,68 @@ function DraggableCardStack({
                         })}
                     </div>
                 </div>
+                {showControls && (
+                    <div
+                        style={{
+                            display: "flex",
+                            gap: `${responsive.controlGap}px`,
+                        }}
+                    >
+                        {[0, 1].map((i) => (
+                            <div
+                                key={i}
+                                style={{
+                                    transform: i === 0 ? "scaleX(-1)" : undefined,
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        color: controlColor,
+                                        backgroundColor: controlBgColor,
+                                        borderRadius: "50%",
+                                        flex: "none",
+                                        justifyContent: "center",
+                                        alignItems: "center",
+                                        width: `${responsive.controlSize}px`,
+                                        height: `${responsive.controlSize}px`,
+                                        display: "flex",
+                                        position: "relative",
+                                        boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+                                    }}
+                                >
+                                    {controlIcon ? (
+                                        <img
+                                            src={controlIcon}
+                                            alt=""
+                                            style={{
+                                                width: "40%",
+                                                height: "40%",
+                                                objectFit: "contain",
+                                                display: "block",
+                                            }}
+                                        />
+                                    ) : (
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="40%"
+                                            viewBox="0 0 18 18"
+                                            fill="none"
+                                        >
+                                            <path
+                                                d="M6.74976 14.25L11.9998 9L6.74976 3.75"
+                                                stroke="currentColor"
+                                                strokeWidth="2.5"
+                                                strokeMiterlimit="10"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            />
+                                        </svg>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
         )
     }
@@ -1023,6 +1088,8 @@ function DraggableCardStack({
                 justifyContent: "center",
                 gap: `${responsive.gap}px`,
                 boxSizing: "border-box",
+                position: "relative",
+                isolation: "isolate",
             }}
         >
             <div
@@ -1113,7 +1180,6 @@ function DraggableCardStack({
                             style={{
                                 color: controlColor,
                                 backgroundColor: controlBgColor,
-                                opacity: 0.5,
                                 borderRadius: "50%",
                                 flex: "none",
                                 justifyContent: "center",

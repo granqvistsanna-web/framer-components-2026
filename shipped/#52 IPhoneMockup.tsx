@@ -9,8 +9,10 @@
  */
 
 import * as React from "react"
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react"
 import { addPropertyControls, ControlType, useIsStaticRenderer } from "framer"
+
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect
 
 // ── Props ────────────────────────────────────────────────────────────
 
@@ -111,10 +113,13 @@ function IPhoneMockup(props: Props) {
     const canTilt = tiltEnabled && !reducedMotion && !isStatic
 
     const onMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-        if (!canTilt || !tiltRef.current) return
-        const r = tiltRef.current.getBoundingClientRect()
-        const x = (e.clientX - r.left) / r.width
-        const y = (e.clientY - r.top) / r.height
+        if (!canTilt || !tiltRef.current || !wrapperRef.current) return
+        // Reference the wrapper's rect (not the tilted device's) so the tilt transform doesn't feed back into its own input
+        const wr = wrapperRef.current.getBoundingClientRect()
+        const w = tiltRef.current.offsetWidth
+        const h = tiltRef.current.offsetHeight
+        const x = (e.clientX - (wr.left + (wr.width - w) / 2)) / w
+        const y = (e.clientY - (wr.top + (wr.height - h) / 2)) / h
         cancelAnimationFrame(rafRef.current)
         rafRef.current = requestAnimationFrame(() => {
             setTform({ rx: (0.5 - y) * intensity * 2, ry: (x - 0.5) * intensity * 2, s: scale })
@@ -122,7 +127,28 @@ function IPhoneMockup(props: Props) {
         })
     }, [canTilt, intensity, scale])
 
-    const onEnter = useCallback(() => { if (canTilt) setHovering(true) }, [canTilt])
+    // Suppress tilt activation while the user is scrolling. Without this, the device
+    // sliding under the cursor fires mouseenter → glare flash + 500ms tilt-reset
+    // transition on the next leave, which reads as a "glitch" during scroll.
+    const scrollingRef = useRef(false)
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        let timer: ReturnType<typeof setTimeout>
+        const onScroll = () => {
+            scrollingRef.current = true
+            clearTimeout(timer)
+            timer = setTimeout(() => { scrollingRef.current = false }, 150)
+        }
+        window.addEventListener("scroll", onScroll, { passive: true, capture: true })
+        return () => {
+            window.removeEventListener("scroll", onScroll, { capture: true } as any)
+            clearTimeout(timer)
+        }
+    }, [])
+
+    const onEnter = useCallback(() => {
+        if (canTilt && !scrollingRef.current) setHovering(true)
+    }, [canTilt])
     const onLeave = useCallback(() => {
         if (!canTilt) return
         setHovering(false)
@@ -135,27 +161,40 @@ function IPhoneMockup(props: Props) {
 
     // ── Aspect ratio ─────────────────────────────────────────────────
     const wrapperRef = useRef<HTMLDivElement>(null)
-    const [cSize, setCSize] = useState({ w: 320, h: 640 })
-    useEffect(() => {
+    const [cSize, setCSize] = useState<{ w: number; h: number } | null>(null)
+    useIsoLayoutEffect(() => {
         if (!wrapperRef.current || typeof ResizeObserver === "undefined") return
+        const el = wrapperRef.current
+        // Sync initial measurement: setState in layout effect re-renders before paint, avoiding the default-size flicker
+        const r = el.getBoundingClientRect()
+        if (r.width > 0 && r.height > 0) setCSize({ w: r.width, h: r.height })
         const ro = new ResizeObserver(([e]) => {
             const { width, height } = e.contentRect
             if (width > 0 && height > 0) setCSize({ w: width, h: height })
         })
-        ro.observe(wrapperRef.current)
+        ro.observe(el)
         return () => ro.disconnect()
     }, [])
 
-    const dims = lockAspectRatio ? (() => {
-        const bw = { w: cSize.w, h: cSize.w * IPHONE_RATIO }
-        const bh = { w: cSize.h / IPHONE_RATIO, h: cSize.h }
-        return bw.h <= cSize.h ? bw : bh
+    // Fit the SCREEN (not the whole device) in 19.5:9 — the real iPhone screen ratio.
+    // The bezel then adds outward via padding, so increasing borderWidth no longer
+    // crops the image (previously the screen was outer - 2*borderWidth and ended up
+    // in the wrong ratio, with the bezel visibly eating into the image).
+    const dims = lockAspectRatio && cSize ? (() => {
+        const innerW = Math.max(0, cSize.w - borderWidth * 2)
+        const innerH = Math.max(0, cSize.h - borderWidth * 2)
+        const bw = { w: innerW, h: innerW * IPHONE_RATIO }
+        const bh = { w: innerH / IPHONE_RATIO, h: innerH }
+        return bw.h <= innerH ? bw : bh
     })() : null
+
+    // Hide the very first render until the wrapper has been measured (only when locking ratio in live mode)
+    const awaitingMeasure = lockAspectRatio && !cSize && !isStatic
 
     // ── Dynamic shadow ───────────────────────────────────────────────
     const sxOff = canTilt ? -tform.ry * (shadowBlur / intensity) * 0.5 : 0
     const syOff = canTilt ? shadowOffsetY + tform.rx * (shadowBlur / intensity) * 0.5 : shadowOffsetY
-    const sBlur = canTilt ? shadowBlur + Math.abs(tform.rx + tform.ry) * 0.3 : shadowBlur
+    const sBlur = canTilt ? shadowBlur + (Math.abs(tform.rx) + Math.abs(tform.ry)) * 0.3 : shadowBlur
     const shadow = shadowEnabled ? `${sxOff}px ${syOff}px ${sBlur}px ${shadowColor}` : "none"
 
     // ── Float ────────────────────────────────────────────────────────
@@ -170,7 +209,7 @@ function IPhoneMockup(props: Props) {
     const deviceBase: React.CSSProperties = {
         position: "relative", width: deviceW, height: deviceH,
         borderRadius: outerR, padding: borderWidth,
-        boxSizing: "border-box", overflow: "visible",
+        boxSizing: "content-box", overflow: "visible",
         background: `linear-gradient(145deg, ${edge} 0%, ${deviceColor} 50%, ${deviceColor} 100%)`,
         boxShadow: `${shadow}, ${EDGE_HIGHLIGHT}`,
     }
@@ -230,6 +269,7 @@ function IPhoneMockup(props: Props) {
     const wrapperStyle: React.CSSProperties = {
         width: "100%", height: "100%",
         display: "flex", alignItems: "center", justifyContent: "center",
+        visibility: awaitingMeasure ? "hidden" : undefined,
         ...(canFloat ? { animation: `${floatId} ${floatSpeed}s ease-in-out infinite`, willChange: "transform" } : {}),
     }
 
@@ -331,7 +371,7 @@ addPropertyControls(IPhoneMockup, {
             rotateX: { type: ControlType.Number, title: "Rotate X", min: -45, max: 45, step: 1, unit: "\u00B0", defaultValue: 0 },
             rotateY: { type: ControlType.Number, title: "Rotate Y", min: -45, max: 45, step: 1, unit: "\u00B0", defaultValue: 0 },
             rotateZ: { type: ControlType.Number, title: "Rotate Z", min: -45, max: 45, step: 1, unit: "\u00B0", defaultValue: 0 },
-            perspective: { type: ControlType.Number, title: "Perspective", min: 400, max: 3000, step: 50, unit: "px", defaultValue: 1000, hidden: (p: any) => (p.tilt?.enabled ?? true) === true },
+            perspective: { type: ControlType.Number, title: "Perspective", min: 400, max: 3000, step: 50, unit: "px", defaultValue: 1000 },
         },
     },
     float: {
