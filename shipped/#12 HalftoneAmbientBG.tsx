@@ -329,9 +329,7 @@ export default function HalftoneAmbientBG({
     const mouseVelRef = useRef({ x: 0, y: 0 })
     const mouseInsideRef = useRef(false)
     const mouseFadeRef = useRef(0)
-    const dprRef = useRef(
-        quality === "Half" ? 1 : Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 2)
-    )
+    const dprRef = useRef(1)
 
     const gradientAngleRad = gradientAngle * (Math.PI / 180)
     const reducedMotionRef = useRef(false)

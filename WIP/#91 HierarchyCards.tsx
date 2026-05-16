@@ -9,7 +9,7 @@
  */
 
 import * as React from "react"
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { addPropertyControls, ControlType, RenderTarget, useIsStaticRenderer } from "framer"
 
 // ─── Framer hidden control types ────────────────────────────
@@ -24,15 +24,14 @@ interface CardData {
     badgeText: string
     title: string
     body: string
-    icon: string
     linkUrl: string
     showArrow: boolean
 }
 
 interface TypographyProps {
-    titleFont?: any
-    bodyFont?: any
-    badgeFont?: any
+    titleFont?: Record<string, any>
+    bodyFont?: Record<string, any>
+    badgeFont?: Record<string, any>
     titleColor: string
     bodyColor: string
     badgeColor: string
@@ -44,18 +43,25 @@ interface CardStyleProps {
     padding: number
     shadow: boolean
     badgeBackground: string
-    iconButtonBackground: string
-    iconColor: string
+    arrowButtonBackground: string
     arrowColor: string
 }
 
 interface LinesProps {
     lineColor: string
     lineThickness: number
+    lineStyle: "solid" | "dashed" | "dotted"
+    lineOpacity: number
+    glowEnabled: boolean
+    glowColor: string
+    glowSpread: number
     dotColor: string
     dotSize: number
+    showDots: boolean
     pulseEnabled: boolean
+    pulseStyle: "comet" | "flow"
     pulseColor: string
+    pulseSize: number
     pulseSpeed: number
 }
 
@@ -66,6 +72,18 @@ interface LayoutProps {
     verticalGap: number
     horizontalGap: number
     backgroundColor: string
+    equalSubCardHeights: boolean
+}
+
+interface AppearProps {
+    enabled: boolean
+    style: "fanOut" | "stagger"
+    trigger: "mount" | "inView"
+    replay: boolean
+    duration: number
+    stagger: number
+    delay: number
+    distance: number
 }
 
 interface Props {
@@ -75,58 +93,55 @@ interface Props {
     cardStyle: CardStyleProps
     lines: LinesProps
     layout: LayoutProps
+    appear: AppearProps
 }
 
 // ─── Defaults ───────────────────────────────────────────────
 const DEFAULT_MAIN: CardData = {
     image: "",
-    imageAlt: "Demorino Building",
+    imageAlt: "Marlowe & Co. flagship",
     badgeEnabled: true,
     badgeText: "285m",
-    title: "Demorino Building",
-    body: "See our restaurants",
-    icon: "",
-    linkUrl: "#",
+    title: "Marlowe & Co.",
+    body: "See our locations",
+    linkUrl: "",
     showArrow: true,
 }
 
 const DEFAULT_SUBS: CardData[] = [
     {
         image: "",
-        imageAlt: "Demorino Kitchen",
+        imageAlt: "Marlowe Kitchen",
         badgeEnabled: false,
         badgeText: "",
-        title: "Demorino Kitchen",
-        body: "Hot lunch, daily specials",
-        icon: "",
-        linkUrl: "#",
+        title: "Marlowe Kitchen",
+        body: "Lunch & daily specials",
+        linkUrl: "",
         showArrow: true,
     },
     {
         image: "",
-        imageAlt: "Demorino Café",
+        imageAlt: "Marlowe Café",
         badgeEnabled: false,
         badgeText: "",
-        title: "Demorino Café",
-        body: "Coffee and breakfast",
-        icon: "",
-        linkUrl: "#",
+        title: "Marlowe Café",
+        body: "Coffee & breakfast",
+        linkUrl: "",
         showArrow: true,
     },
     {
         image: "",
-        imageAlt: "Demorino Grab & Go",
+        imageAlt: "Marlowe Market",
         badgeEnabled: false,
         badgeText: "",
-        title: "Demorino Grab & Go",
-        body: "Pre-packed meals for meeting days",
-        icon: "",
-        linkUrl: "#",
+        title: "Marlowe Market",
+        body: "Pre-packed meals to go",
+        linkUrl: "",
         showArrow: true,
     },
     // Additional defaults — add via the Framer Array control:
-    // { title: "Demorino Greens", body: "Salads and bowls" }
-    // { title: "Demorino Deli",   body: "Sandwiches and afternoon service" }
+    // { title: "Marlowe Greens", body: "Salads & bowls" }
+    // { title: "Marlowe Deli",   body: "Sandwiches & afternoon service" }
 ]
 
 const DEFAULT_TYPOGRAPHY: TypographyProps = {
@@ -144,18 +159,25 @@ const DEFAULT_CARD_STYLE: CardStyleProps = {
     padding: 14,
     shadow: true,
     badgeBackground: "#FFFFFF",
-    iconButtonBackground: "#DCD4F8",
-    iconColor: "#5B4FE9",
+    arrowButtonBackground: "#DCD4F8",
     arrowColor: "#5B4FE9",
 }
 
 const DEFAULT_LINES: LinesProps = {
     lineColor: "#C7BEFA",
     lineThickness: 1.5,
+    lineStyle: "solid",
+    lineOpacity: 1,
+    glowEnabled: true,
+    glowColor: "#7C6BF5",
+    glowSpread: 6,
     dotColor: "#EFEAFD",
     dotSize: 5,
+    showDots: true,
     pulseEnabled: true,
+    pulseStyle: "comet",
     pulseColor: "#7C6BF5",
+    pulseSize: 3,
     pulseSpeed: 2.4,
 }
 
@@ -166,16 +188,19 @@ const DEFAULT_LAYOUT: LayoutProps = {
     verticalGap: 90,
     horizontalGap: 16,
     backgroundColor: "rgba(0,0,0,0)",
+    equalSubCardHeights: true,
 }
 
-// ─── Inline icons (used when no custom icon image is supplied) ─
-const DEFAULT_BUILDING_ICON = (color: string) => (
-    <svg viewBox="0 0 24 24" width="55%" height="55%" fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="4" y="3" width="10" height="18" rx="0.5" />
-        <rect x="14" y="9" width="6" height="12" rx="0.5" />
-        <path d="M7 7h1M11 7h0M7 11h1M11 11h0M7 15h1M11 15h0M17 13h0M17 17h0" />
-    </svg>
-)
+const DEFAULT_APPEAR: AppearProps = {
+    enabled: true,
+    style: "fanOut",
+    trigger: "inView",
+    replay: false,
+    duration: 0.9,
+    stagger: 0.18,
+    delay: 0.05,
+    distance: 14,
+}
 
 const ARROW_ICON = (color: string) => (
     <svg viewBox="0 0 24 24" width="50%" height="50%" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -192,15 +217,18 @@ interface CardProps {
     typography: TypographyProps
     width: number
     aspectRatio: number
+    fillHeight?: boolean
+    wrapperStyle?: React.CSSProperties
     cardRef?: (el: HTMLDivElement | null) => void
 }
 
-function Card({ data, size, style, typography, width, aspectRatio, cardRef }: CardProps) {
+function Card({ data, size, style, typography, width, aspectRatio, fillHeight, wrapperStyle, cardRef }: CardProps) {
     const isLg = size === "lg"
     const imageHeight = Math.round((width / aspectRatio) * 0.62)
 
     const containerStyle: React.CSSProperties = {
         width,
+        height: fillHeight ? "100%" : undefined,
         background: style.background,
         borderRadius: style.borderRadius,
         overflow: "hidden",
@@ -248,7 +276,15 @@ function Card({ data, size, style, typography, width, aspectRatio, cardRef }: Ca
     const buttonRadius = 999
 
     return (
-        <div ref={cardRef} style={{ display: "inline-block" }}>
+        <div
+            ref={cardRef}
+            style={{
+                ...(fillHeight
+                    ? { display: "flex", height: "100%" }
+                    : { display: "inline-block" }),
+                ...wrapperStyle,
+            }}
+        >
             <Wrapper {...wrapperProps}>
                 <div
                     style={{
@@ -302,34 +338,13 @@ function Card({ data, size, style, typography, width, aspectRatio, cardRef }: Ca
                             gap: 8,
                         }}
                     >
-                        <div
-                            style={{
-                                width: iconButtonSize,
-                                height: iconButtonSize,
-                                borderRadius: buttonRadius,
-                                background: style.iconButtonBackground,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                            }}
-                        >
-                            {data.icon ? (
-                                <img
-                                    src={data.icon}
-                                    alt=""
-                                    style={{ width: "55%", height: "55%", objectFit: "contain" }}
-                                />
-                            ) : (
-                                DEFAULT_BUILDING_ICON(style.iconColor)
-                            )}
-                        </div>
                         {data.showArrow && (
                             <div
                                 style={{
                                     width: iconButtonSize,
                                     height: iconButtonSize,
                                     borderRadius: buttonRadius,
-                                    background: style.iconButtonBackground,
+                                    background: style.arrowButtonBackground,
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
@@ -354,6 +369,7 @@ export default function HierarchyCards(props: Props) {
         cardStyle = DEFAULT_CARD_STYLE,
         lines = DEFAULT_LINES,
         layout = DEFAULT_LAYOUT,
+        appear = DEFAULT_APPEAR,
     } = props
 
     const isStatic = useIsStaticRenderer()
@@ -449,6 +465,7 @@ export default function HierarchyCards(props: Props) {
         layout.cardAspectRatio,
         layout.verticalGap,
         layout.horizontalGap,
+        layout.equalSubCardHeights,
         cardStyle.padding,
     ])
 
@@ -511,6 +528,159 @@ export default function HierarchyCards(props: Props) {
     }, [geo])
 
     const animatePulse = lines.pulseEnabled && !reducedMotion && !isCanvas && !isStatic
+    const rawId = useId()
+    const uid = rawId.replace(/:/g, "")
+    const strokeDash =
+        lines.lineStyle === "dashed"
+            ? `${Math.max(lines.lineThickness * 4, 6)} ${Math.max(lines.lineThickness * 3, 5)}`
+            : lines.lineStyle === "dotted"
+              ? `${lines.lineThickness} ${Math.max(lines.lineThickness * 2.4, 4)}`
+              : undefined
+
+    // ── Appear animation ──
+    // Two reveal styles:
+    //   "fanOut"  — main lands, trunk/bar/drops draw progressively, subs
+    //               converge from main center to their grid positions as
+    //               the drop-lines arrive. Connector lines start drawing
+    //               while cards are still animating.
+    //   "stagger" — simple uniform fade-up for each card in order, then
+    //               connector fades in. (Original behavior.)
+    //
+    // Both styles can be triggered either on mount or when the component
+    // scrolls into view (IntersectionObserver). Cards hold at opacity 0
+    // until `playAppear` flips true, then keyframes take over (with
+    // animation-fill-mode: both, the keyframe's `from` state holds
+    // through any delay, so there's no flash at the transition).
+    const animateAppear = appear.enabled && !reducedMotion && !isCanvas && !isStatic
+
+    const [inView, setInView] = useState(appear.trigger === "mount" || !animateAppear)
+    useEffect(() => {
+        if (!animateAppear) {
+            setInView(true)
+            return
+        }
+        if (appear.trigger === "mount") {
+            setInView(true)
+            return
+        }
+        const wrap = wrapperRef.current
+        if (!wrap || typeof IntersectionObserver === "undefined") {
+            setInView(true)
+            return
+        }
+        // rootMargin pulls the trigger zone up by 10% of viewport height so
+        // the reveal kicks off just before the component is fully on screen.
+        const io = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    setInView(true)
+                    if (!appear.replay) io.disconnect()
+                } else if (appear.replay) {
+                    setInView(false)
+                }
+            },
+            { threshold: 0.15, rootMargin: "0px 0px -10% 0px" }
+        )
+        io.observe(wrap)
+        return () => io.disconnect()
+    }, [animateAppear, appear.trigger, appear.replay])
+
+    // Timing chain — main lands first, then trunk + bar draw, then each
+    // (drop[i], sub[i]) pair fires sequentially with a designerly stagger
+    // between them. Per-sub cadence is what makes the reveal read as
+    // "structure expanding one branch at a time" instead of "everything
+    // pops together".
+    const apDur = appear.duration
+    const apStg = appear.stagger
+    const mainStart = appear.delay
+    const mainDur = apDur * 0.55
+    const trunkStart = mainStart + mainDur * 0.7
+    const trunkDur = apDur * 0.3
+    const barStart = trunkStart + trunkDur * 0.9
+    const barDur = apDur * 0.4
+    const dropsBaseStart = barStart + barDur * 0.85
+    const dropDur = apDur * 0.32
+    const subDur = apDur * 0.55
+    // Each sub gets its own slot of length `apStg`. Drop draws first, sub
+    // follows after ~35% of the drop — they overlap so the line feels like
+    // it "delivers" the card rather than the two firing in lockstep.
+    const dropStart = (i: number) => dropsBaseStart + i * apStg
+    const subStartFan = (i: number) => dropStart(i) + dropDur * 0.35
+
+    // Cards fade in independently of geometry — the SVG connector still
+    // gates on `geo`, but the cards themselves no longer need offsets.
+    const playAppear = animateAppear ? inView : true
+
+    const lastIdx = Math.max(subCount - 1, 0)
+    const fanOutEndMs =
+        Math.max(
+            dropStart(lastIdx) + dropDur,
+            subStartFan(lastIdx) + subDur
+        ) * 1000
+    const staggerEndMs =
+        (appear.delay + (subCount + 1) * appear.stagger + apDur) * 1000
+    const totalAppearMs = appear.style === "fanOut" ? fanOutEndMs : staggerEndMs
+
+    // appearDone gates the comet/flow pulse (it shouldn't run while the
+    // lines are still drawing themselves). It also triggers a geometry
+    // recompute so the connector lands on final, settled positions in
+    // case the layout shifted during the reveal.
+    const [appearDone, setAppearDone] = useState(!animateAppear)
+    useEffect(() => {
+        if (!animateAppear) {
+            setAppearDone(true)
+            return
+        }
+        if (!playAppear) {
+            setAppearDone(false)
+            return
+        }
+        const t = setTimeout(() => setAppearDone(true), totalAppearMs)
+        return () => clearTimeout(t)
+    }, [animateAppear, playAppear, totalAppearMs])
+
+    useLayoutEffect(() => {
+        if (appearDone) recomputeGeometry()
+    }, [appearDone])
+
+    // Single ease-out — main card and subs all fade in with the same curve.
+    const easing = "cubic-bezier(0.22, 0.61, 0.36, 1)"
+    const mainAnim =
+        playAppear && animateAppear
+            ? appear.style === "fanOut"
+                ? `hcMainAppear-${uid} ${mainDur}s ${easing} ${mainStart}s both`
+                : `hcStaggerAppear-${uid} ${apDur}s ${easing} ${appear.delay}s both`
+            : undefined
+    const subAnim = (i: number) => {
+        if (!playAppear || !animateAppear) return undefined
+        return appear.style === "fanOut"
+            ? `hcSubFanOut-${uid} ${subDur}s ${easing} ${subStartFan(i)}s both`
+            : `hcStaggerAppear-${uid} ${apDur}s ${easing} ${appear.delay + (i + 1) * appear.stagger}s both`
+    }
+    // Hide cards at opacity 0 between mount and the moment the animation
+    // actually starts. Once the animation is attached, its keyframes' `from`
+    // state (with fill-mode: both) keeps the card at opacity 0 through the
+    // delay, then fades in — so the swap is seamless.
+    const preAppearOpacity =
+        animateAppear && !playAppear ? 0 : undefined
+
+    const appearKeyframes = `
+@keyframes hcMainAppear-${uid} {
+    from { opacity: 0; transform: scale(0.92) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes hcSubFanOut-${uid} {
+    from { opacity: 0; transform: scale(0.92) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes hcStaggerAppear-${uid} {
+    from { opacity: 0; transform: translateY(${appear.distance}px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes hcConnectorAppear-${uid} {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}`
 
     return (
         <div
@@ -531,6 +701,8 @@ export default function HierarchyCards(props: Props) {
                 gap: layout.verticalGap,
             }}
         >
+            {animateAppear && <style>{appearKeyframes}</style>}
+
             {/* Main card */}
             <Card
                 data={mainCard}
@@ -539,6 +711,10 @@ export default function HierarchyCards(props: Props) {
                 typography={typography}
                 width={layout.mainCardWidth}
                 aspectRatio={layout.cardAspectRatio}
+                wrapperStyle={{
+                    animation: mainAnim,
+                    opacity: preAppearOpacity,
+                }}
                 cardRef={(el) => {
                     mainCardRef.current = el
                 }}
@@ -554,114 +730,438 @@ export default function HierarchyCards(props: Props) {
                     maxWidth: "100%",
                 }}
             >
-                {safeSubs.map((sub, i) => (
-                    <Card
-                        key={i}
-                        data={sub}
-                        size="sm"
-                        style={cardStyle}
-                        typography={typography}
-                        width={layout.subCardWidth}
-                        aspectRatio={layout.cardAspectRatio}
-                        cardRef={registerSubRef(i)}
-                    />
-                ))}
+                {safeSubs.map((sub, i) => {
+                    const wrapStyle: React.CSSProperties = {
+                        animation: subAnim(i),
+                        opacity: preAppearOpacity,
+                    }
+                    return (
+                        <Card
+                            key={i}
+                            data={sub}
+                            size="sm"
+                            style={cardStyle}
+                            typography={typography}
+                            width={layout.subCardWidth}
+                            aspectRatio={layout.cardAspectRatio}
+                            fillHeight={layout.equalSubCardHeights}
+                            wrapperStyle={wrapStyle}
+                            cardRef={registerSubRef(i)}
+                        />
+                    )
+                })}
             </div>
 
-            {/* Connector SVG overlay */}
+            {/* Connector SVG overlay — pad outwards by glowPad so the SVG
+                filter region isn't clipped at the natural box bounds.
+                Mirrors the IntegrationFlow pattern: soft halo on the static
+                line + glowing orbs riding each segment.
+                Gating depends on appear style:
+                  fanOut  → render once playAppear (lines draw progressively
+                            via stroke-dashoffset begin times)
+                  stagger → render once appearDone (lines fade in via the
+                            SVG-level hcConnectorAppear keyframe)
+                  no-anim → render immediately. */}
             {geo && connectorPath && (
+                !animateAppear ||
+                (appear.style === "fanOut" ? playAppear : appearDone)
+            ) && (() => {
+                const glowPad = Math.max(lines.glowSpread * 6, 60)
+                const isFanOut = animateAppear && appear.style === "fanOut"
+                const { mainCenterX, mainBottomY, subTopY, subCenters } = geo
+                const junctionY =
+                    mainBottomY + Math.max(20, (subTopY - mainBottomY) * 0.45)
+                const firstX = subCenters[0]
+                const lastX = subCenters[subCenters.length - 1]
+                // Bar split into two halves so the line grows outward from
+                // main-center in both directions simultaneously.
+                const barLeftPath = `M ${mainCenterX} ${junctionY} L ${firstX} ${junctionY}`
+                const barRightPath = `M ${mainCenterX} ${junctionY} L ${lastX} ${junctionY}`
+                // Per-sub drop paths so each can fire on its own beat.
+                const dropPaths = subCenters.map(
+                    (cx) => `M ${cx} ${junctionY} L ${cx} ${subTopY}`
+                )
+
+                // Comet pulse rides the per-segment paths (same as before).
+                const segments: { path: string; begin: number }[] = [
+                    { path: connectorPath.trunkPath, begin: 0 },
+                    ...connectorPath.barSegments.map((p) => ({
+                        path: p,
+                        begin: -lines.pulseSpeed / 3,
+                    })),
+                    ...connectorPath.dropSegments.map((p) => ({
+                        path: p,
+                        begin: -(lines.pulseSpeed * 2) / 3,
+                    })),
+                ]
+
+                // Shared path props for the four drawable segments in fanOut.
+                const drawnPathBase = {
+                    fill: "none",
+                    stroke: lines.lineColor,
+                    strokeWidth: lines.lineThickness,
+                    strokeLinecap: "round" as const,
+                    strokeLinejoin: "round" as const,
+                    opacity: lines.lineOpacity,
+                    filter: lines.glowEnabled ? `url(#hcLineGlow-${uid})` : undefined,
+                }
+                // <animate> on stroke-dashoffset draws the path on. pathLength
+                // normalizes every path to 100 units so dasharray=100 + offset
+                // animation works without measuring real path length.
+                const drawAnim = (begin: number, dur: number) => (
+                    <animate
+                        attributeName="stroke-dashoffset"
+                        from="100"
+                        to="0"
+                        begin={`${begin}s`}
+                        dur={`${dur}s`}
+                        fill="freeze"
+                    />
+                )
+                // Inline fade-in animation for a dot, timed to a segment's
+                // completion in fanOut mode (otherwise static opacity).
+                const fadeIn = (begin: number) => (
+                    <animate
+                        attributeName="opacity"
+                        from="0"
+                        to={lines.lineOpacity}
+                        begin={`${begin}s`}
+                        dur="0.25s"
+                        fill="freeze"
+                    />
+                )
+
+                return (
                 <svg
-                    width={geo.w}
-                    height={geo.h}
-                    viewBox={`0 0 ${geo.w} ${geo.h}`}
+                    width={geo.w + glowPad * 2}
+                    height={geo.h + glowPad * 2}
+                    viewBox={`${-glowPad} ${-glowPad} ${geo.w + glowPad * 2} ${geo.h + glowPad * 2}`}
                     style={{
                         position: "absolute",
-                        inset: 0,
+                        top: -glowPad,
+                        left: -glowPad,
                         pointerEvents: "none",
                         overflow: "visible",
+                        // Stagger mode only — fade in the whole SVG after
+                        // cards settle. fanOut handles entrance per-segment.
+                        animation:
+                            animateAppear && appear.style === "stagger"
+                                ? `hcConnectorAppear-${uid} ${Math.max(appear.duration * 0.7, 0.3)}s ease-out both`
+                                : undefined,
                     }}
                     aria-hidden="true"
                 >
-                    {/* Base lines */}
-                    <path
-                        d={connectorPath.d}
-                        fill="none"
-                        stroke={lines.lineColor}
-                        strokeWidth={lines.lineThickness}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                    />
+                    <defs>
+                        {/* Soft halo on the static line — feGaussianBlur gives
+                            a feathered bloom that's softer than CSS drop-shadow. */}
+                        <filter
+                            id={`hcLineGlow-${uid}`}
+                            x="-50%"
+                            y="-50%"
+                            width="200%"
+                            height="200%"
+                        >
+                            <feGaussianBlur
+                                stdDeviation={lines.glowSpread * 0.3}
+                                result="blur"
+                            />
+                            <feMerge>
+                                <feMergeNode in="blur" />
+                                <feMergeNode in="SourceGraphic" />
+                            </feMerge>
+                        </filter>
+                        {/* Particle bloom — wider region so the halo isn't
+                            clipped at the orb's tiny bbox. Double-merging the
+                            blur amps the glow so the orb reads as luminous. */}
+                        <filter
+                            id={`hcParticleGlow-${uid}`}
+                            x="-200%"
+                            y="-200%"
+                            width="500%"
+                            height="500%"
+                        >
+                            <feGaussianBlur
+                                stdDeviation={lines.glowSpread * 0.7}
+                                result="blur"
+                            />
+                            <feMerge>
+                                <feMergeNode in="blur" />
+                                <feMergeNode in="blur" />
+                                <feMergeNode in="SourceGraphic" />
+                            </feMerge>
+                        </filter>
+                    </defs>
 
-                    {/* Cascading packets: trunk → bar → drops */}
-                    {animatePulse && (
-                        <g>
-                            <circle r={lines.dotSize + 1} fill={lines.pulseColor}>
-                                <animateMotion
-                                    dur={`${lines.pulseSpeed}s`}
-                                    repeatCount="indefinite"
-                                    path={connectorPath.trunkPath}
-                                    calcMode="linear"
+                    {/* Base line — single path in stagger / no-anim; in
+                        fanOut, replaced by four draw-animated paths below. */}
+                    {!isFanOut && (
+                        <path
+                            d={connectorPath.d}
+                            fill="none"
+                            stroke={lines.lineColor}
+                            strokeWidth={lines.lineThickness}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeDasharray={strokeDash}
+                            opacity={lines.lineOpacity}
+                            filter={lines.glowEnabled ? `url(#hcLineGlow-${uid})` : undefined}
+                        />
+                    )}
+
+                    {isFanOut && (() => {
+                        // Traveling tip — a bright `glowColor` window slides
+                        // along each path in lockstep with the base draw,
+                        // then fades out at the endpoint. Creates a visible
+                        // energy gradient that settles into the base line.
+                        // pathLength=100 + dasharray="15 100" gives a single
+                        // 15-unit visible window; dashoffset 15 → -85 walks
+                        // that window from before-start to past-end.
+                        const tip = (begin: number, dur: number) => (
+                            <>
+                                <animate
+                                    attributeName="stroke-dashoffset"
+                                    from="15"
+                                    to="-85"
+                                    begin={`${begin}s`}
+                                    dur={`${dur}s`}
+                                    fill="freeze"
                                 />
-                            </circle>
-                            {connectorPath.barSegments.map((seg, i) => (
-                                <circle
-                                    key={`bp-${i}`}
-                                    r={lines.dotSize + 1}
-                                    fill={lines.pulseColor}
-                                >
-                                    <animateMotion
-                                        dur={`${lines.pulseSpeed}s`}
-                                        repeatCount="indefinite"
-                                        path={seg}
-                                        begin={`-${lines.pulseSpeed / 3}s`}
-                                        calcMode="linear"
-                                    />
-                                </circle>
+                                <animate
+                                    attributeName="opacity"
+                                    from="1"
+                                    to="0"
+                                    begin={`${begin + dur}s`}
+                                    dur="0.35s"
+                                    fill="freeze"
+                                />
+                            </>
+                        )
+                        const tipPathProps = {
+                            pathLength: 100,
+                            fill: "none",
+                            stroke: lines.glowColor,
+                            strokeWidth: lines.lineThickness * 1.4,
+                            strokeLinecap: "round" as const,
+                            strokeLinejoin: "round" as const,
+                            strokeDasharray: "15 100",
+                            strokeDashoffset: 15,
+                            filter: lines.glowEnabled
+                                ? `url(#hcParticleGlow-${uid})`
+                                : undefined,
+                        }
+                        return (
+                        <>
+                            {/* Trunk: main → junction */}
+                            <path
+                                d={connectorPath.trunkPath}
+                                pathLength={100}
+                                strokeDashoffset={100}
+                                {...drawnPathBase}
+                                strokeDasharray={100}
+                            >
+                                {drawAnim(trunkStart, trunkDur)}
+                            </path>
+                            <path d={connectorPath.trunkPath} {...tipPathProps}>
+                                {tip(trunkStart, trunkDur)}
+                            </path>
+                            {/* Bar — two halves drawing outward from center */}
+                            <path
+                                d={barLeftPath}
+                                pathLength={100}
+                                strokeDashoffset={100}
+                                {...drawnPathBase}
+                                strokeDasharray={100}
+                            >
+                                {drawAnim(barStart, barDur)}
+                            </path>
+                            <path d={barLeftPath} {...tipPathProps}>
+                                {tip(barStart, barDur)}
+                            </path>
+                            <path
+                                d={barRightPath}
+                                pathLength={100}
+                                strokeDashoffset={100}
+                                {...drawnPathBase}
+                                strokeDasharray={100}
+                            >
+                                {drawAnim(barStart, barDur)}
+                            </path>
+                            <path d={barRightPath} {...tipPathProps}>
+                                {tip(barStart, barDur)}
+                            </path>
+                            {/* Drops — one path per sub, staggered so each
+                                drop draws as its sub is about to land. */}
+                            {dropPaths.map((d, i) => (
+                                <React.Fragment key={`drop-${i}`}>
+                                    <path
+                                        d={d}
+                                        pathLength={100}
+                                        strokeDashoffset={100}
+                                        {...drawnPathBase}
+                                        strokeDasharray={100}
+                                    >
+                                        {drawAnim(dropStart(i), dropDur)}
+                                    </path>
+                                    <path d={d} {...tipPathProps}>
+                                        {tip(dropStart(i), dropDur)}
+                                    </path>
+                                </React.Fragment>
                             ))}
-                            {connectorPath.dropSegments.map((seg, i) => (
-                                <circle
-                                    key={`dp-${i}`}
-                                    r={lines.dotSize + 1}
-                                    fill={lines.pulseColor}
-                                >
-                                    <animateMotion
-                                        dur={`${lines.pulseSpeed}s`}
-                                        repeatCount="indefinite"
-                                        path={seg}
-                                        begin={`-${(lines.pulseSpeed * 2) / 3}s`}
-                                        calcMode="linear"
-                                    />
-                                </circle>
-                            ))}
+                        </>
+                        )
+                    })()}
+
+                    {/* "flow" — animate stroke-dashoffset so dashes glide
+                        outward along the connector. Pulse only runs once the
+                        reveal is fully complete. */}
+                    {animatePulse && appearDone && lines.pulseStyle === "flow" && (
+                        <path
+                            d={connectorPath.d}
+                            fill="none"
+                            stroke={lines.pulseColor}
+                            strokeWidth={Math.max(lines.lineThickness, lines.pulseSize * 0.7)}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeDasharray={`${lines.pulseSize * 2} ${lines.pulseSize * 10}`}
+                            opacity={0.9}
+                            filter={lines.glowEnabled ? `url(#hcParticleGlow-${uid})` : undefined}
+                        >
+                            <animate
+                                attributeName="stroke-dashoffset"
+                                from={lines.pulseSize * 12}
+                                to="0"
+                                dur={`${lines.pulseSpeed}s`}
+                                repeatCount="indefinite"
+                            />
+                        </path>
+                    )}
+
+                    {/* "comet" — soft glowing orb (halo + crisp core) rides
+                        each segment. Cascades trunk → bars → drops. */}
+                    {animatePulse && appearDone && lines.pulseStyle === "comet" && (
+                        <g>
+                            {segments.map(({ path, begin }, i) => {
+                                const beginAt = `${begin}s`
+                                const dur = `${lines.pulseSpeed}s`
+                                return (
+                                    // opacity={0} hides the orb during SMIL's
+                                    // pre-begin window. Without it the circles
+                                    // sit at userspace (0,0) — top-left of the
+                                    // SVG — until animation actually starts.
+                                    <g key={`${path}-${i}`} opacity={0}>
+                                        <animateMotion
+                                            dur={dur}
+                                            repeatCount="indefinite"
+                                            path={path}
+                                            begin={beginAt}
+                                            calcMode="linear"
+                                        />
+                                        {/* Fade in/out at segment endpoints
+                                            so the orb doesn't pop in and out. */}
+                                        <animate
+                                            attributeName="opacity"
+                                            values="0;0.95;0.95;0"
+                                            keyTimes="0;0.15;0.85;1"
+                                            dur={dur}
+                                            begin={beginAt}
+                                            repeatCount="indefinite"
+                                        />
+                                        <circle
+                                            r={lines.pulseSize * 1.6}
+                                            fill={lines.glowColor}
+                                            opacity={Math.min(lines.glowSpread / 6, 1) * 0.5}
+                                            filter={`url(#hcParticleGlow-${uid})`}
+                                        />
+                                        <circle
+                                            r={lines.pulseSize}
+                                            fill={lines.pulseColor}
+                                        />
+                                    </g>
+                                )
+                            })}
                         </g>
                     )}
 
-                    {/* Junction dots */}
-                    {connectorPath.junctionDots.map((d, i) => (
-                        <circle
-                            key={`j-${i}`}
-                            cx={d.x}
-                            cy={d.y}
-                            r={lines.dotSize}
-                            fill={lines.dotColor}
-                            stroke={lines.lineColor}
-                            strokeWidth={1}
-                        />
-                    ))}
-                    {/* Endpoint dots at card tops */}
-                    {connectorPath.endpointDots.map((d, i) => (
-                        <circle
-                            key={`e-${i}`}
-                            cx={d.x}
-                            cy={d.y}
-                            r={lines.dotSize}
-                            fill={lines.dotColor}
-                            stroke={lines.lineColor}
-                            strokeWidth={1}
-                        />
-                    ))}
+                    {lines.showDots && isFanOut && (
+                        // FanOut dots — composed inline so each one's fade-in
+                        // is timed to the segment it visually anchors.
+                        <>
+                            {/* Central junction where trunk meets bar */}
+                            <circle
+                                cx={mainCenterX}
+                                cy={junctionY}
+                                r={lines.dotSize}
+                                fill={lines.dotColor}
+                                stroke={lines.lineColor}
+                                strokeWidth={1}
+                                opacity={0}
+                            >
+                                {fadeIn(trunkStart + trunkDur)}
+                            </circle>
+                            {/* Per-sub junction at the top of each drop */}
+                            {subCenters.map((cx, i) => (
+                                <circle
+                                    key={`j-${i}`}
+                                    cx={cx}
+                                    cy={junctionY}
+                                    r={lines.dotSize}
+                                    fill={lines.dotColor}
+                                    stroke={lines.lineColor}
+                                    strokeWidth={1}
+                                    opacity={0}
+                                >
+                                    {fadeIn(dropStart(i))}
+                                </circle>
+                            ))}
+                            {/* Endpoint dots at the top of each sub card */}
+                            {subCenters.map((cx, i) => (
+                                <circle
+                                    key={`e-${i}`}
+                                    cx={cx}
+                                    cy={subTopY}
+                                    r={lines.dotSize}
+                                    fill={lines.dotColor}
+                                    stroke={lines.lineColor}
+                                    strokeWidth={1}
+                                    opacity={0}
+                                >
+                                    {fadeIn(dropStart(i) + dropDur)}
+                                </circle>
+                            ))}
+                        </>
+                    )}
+
+                    {lines.showDots && !isFanOut && (
+                        <>
+                            {connectorPath.junctionDots.map((d, i) => (
+                                <circle
+                                    key={`j-${i}`}
+                                    cx={d.x}
+                                    cy={d.y}
+                                    r={lines.dotSize}
+                                    fill={lines.dotColor}
+                                    stroke={lines.lineColor}
+                                    strokeWidth={1}
+                                    opacity={lines.lineOpacity}
+                                />
+                            ))}
+                            {connectorPath.endpointDots.map((d, i) => (
+                                <circle
+                                    key={`e-${i}`}
+                                    cx={d.x}
+                                    cy={d.y}
+                                    r={lines.dotSize}
+                                    fill={lines.dotColor}
+                                    stroke={lines.lineColor}
+                                    strokeWidth={1}
+                                    opacity={lines.lineOpacity}
+                                />
+                            ))}
+                        </>
+                    )}
                 </svg>
-            )}
+                )
+            })()}
         </div>
     )
 }
@@ -681,7 +1181,6 @@ const CARD_CONTROLS = {
     },
     title: { type: ControlType.String, title: "Title", defaultValue: "Title" },
     body: { type: ControlType.String, title: "Body", defaultValue: "Description", displayTextArea: true },
-    icon: { type: imageControlType as any, title: "Icon (optional)" },
     linkUrl: { type: ControlType.Link, title: "Link", defaultValue: "" },
     showArrow: { type: ControlType.Boolean, title: "Arrow", defaultValue: true },
 }
@@ -752,8 +1251,7 @@ addPropertyControls(HierarchyCards, {
             padding: { type: ControlType.Number, title: "Padding", defaultValue: 14, min: 6, max: 40, step: 1, unit: "px" },
             shadow: { type: ControlType.Boolean, title: "Shadow", defaultValue: true },
             badgeBackground: { type: ControlType.Color, title: "Badge BG", defaultValue: "#FFFFFF" },
-            iconButtonBackground: { type: ControlType.Color, title: "Icon BG", defaultValue: "#DCD4F8" },
-            iconColor: { type: ControlType.Color, title: "Icon Color", defaultValue: "#5B4FE9" },
+            arrowButtonBackground: { type: ControlType.Color, title: "Arrow BG", defaultValue: "#DCD4F8" },
             arrowColor: { type: ControlType.Color, title: "Arrow Color", defaultValue: "#5B4FE9" },
         },
     },
@@ -763,10 +1261,33 @@ addPropertyControls(HierarchyCards, {
         controls: {
             lineColor: { type: ControlType.Color, title: "Line", defaultValue: "#C7BEFA" },
             lineThickness: { type: ControlType.Number, title: "Thickness", defaultValue: 1.5, min: 0.5, max: 6, step: 0.5, unit: "px" },
-            dotColor: { type: ControlType.Color, title: "Dot Fill", defaultValue: "#EFEAFD" },
-            dotSize: { type: ControlType.Number, title: "Dot Size", defaultValue: 5, min: 2, max: 12, step: 1, unit: "px" },
+            lineStyle: {
+                type: ControlType.Enum,
+                title: "Style",
+                options: ["solid", "dashed", "dotted"],
+                optionTitles: ["Solid", "Dashed", "Dotted"],
+                defaultValue: "solid",
+                displaySegmentedControl: true,
+            },
+            lineOpacity: { type: ControlType.Number, title: "Opacity", defaultValue: 1, min: 0, max: 1, step: 0.05 },
+            glowEnabled: { type: ControlType.Boolean, title: "Glow", defaultValue: true },
+            glowColor: { type: ControlType.Color, title: "Glow Color", defaultValue: "#7C6BF5", hidden: (p: any) => !p.glowEnabled },
+            glowSpread: { type: ControlType.Number, title: "Glow Spread", defaultValue: 6, min: 0, max: 20, step: 1, unit: "px", hidden: (p: any) => !p.glowEnabled },
+            showDots: { type: ControlType.Boolean, title: "Junction Dots", defaultValue: true },
+            dotColor: { type: ControlType.Color, title: "Dot Fill", defaultValue: "#EFEAFD", hidden: (p: any) => !p.showDots },
+            dotSize: { type: ControlType.Number, title: "Dot Size", defaultValue: 5, min: 2, max: 12, step: 1, unit: "px", hidden: (p: any) => !p.showDots },
             pulseEnabled: { type: ControlType.Boolean, title: "Pulse", defaultValue: true },
+            pulseStyle: {
+                type: ControlType.Enum,
+                title: "Pulse Style",
+                options: ["comet", "flow"],
+                optionTitles: ["Comet", "Flow"],
+                defaultValue: "comet",
+                displaySegmentedControl: true,
+                hidden: (p: any) => !p.pulseEnabled,
+            },
             pulseColor: { type: ControlType.Color, title: "Pulse Color", defaultValue: "#7C6BF5", hidden: (p: any) => !p.pulseEnabled },
+            pulseSize: { type: ControlType.Number, title: "Pulse Size", defaultValue: 3, min: 1, max: 12, step: 0.5, unit: "px", hidden: (p: any) => !p.pulseEnabled },
             pulseSpeed: { type: ControlType.Number, title: "Pulse Speed", defaultValue: 2.4, min: 0.5, max: 8, step: 0.1, unit: "s", hidden: (p: any) => !p.pulseEnabled },
         },
     },
@@ -779,7 +1300,43 @@ addPropertyControls(HierarchyCards, {
             cardAspectRatio: { type: ControlType.Number, title: "Aspect", defaultValue: 0.78, min: 0.4, max: 1.4, step: 0.02 },
             verticalGap: { type: ControlType.Number, title: "V Gap", defaultValue: 90, min: 30, max: 240, step: 5, unit: "px" },
             horizontalGap: { type: ControlType.Number, title: "H Gap", defaultValue: 16, min: 0, max: 80, step: 2, unit: "px" },
+            equalSubCardHeights: { type: ControlType.Boolean, title: "Equal Heights", defaultValue: true, enabledTitle: "On", disabledTitle: "Off" },
             backgroundColor: { type: ControlType.Color, title: "Background", defaultValue: "rgba(0,0,0,0)" },
+        },
+    },
+    appear: {
+        type: ControlType.Object,
+        title: "Appear",
+        controls: {
+            enabled: { type: ControlType.Boolean, title: "Enabled", defaultValue: true },
+            style: {
+                type: ControlType.Enum,
+                title: "Style",
+                options: ["fanOut", "stagger"],
+                optionTitles: ["Fan out", "Stagger"],
+                defaultValue: "fanOut",
+                displaySegmentedControl: true,
+                hidden: (p: any) => !p.enabled,
+            },
+            trigger: {
+                type: ControlType.Enum,
+                title: "Trigger",
+                options: ["inView", "mount"],
+                optionTitles: ["In view", "On mount"],
+                defaultValue: "inView",
+                displaySegmentedControl: true,
+                hidden: (p: any) => !p.enabled,
+            },
+            replay: {
+                type: ControlType.Boolean,
+                title: "Replay",
+                defaultValue: false,
+                hidden: (p: any) => !p.enabled || p.trigger !== "inView",
+            },
+            duration: { type: ControlType.Number, title: "Duration", defaultValue: 0.9, min: 0.2, max: 2.5, step: 0.05, unit: "s", hidden: (p: any) => !p.enabled },
+            stagger: { type: ControlType.Number, title: "Stagger", defaultValue: 0.18, min: 0, max: 0.5, step: 0.02, unit: "s", hidden: (p: any) => !p.enabled },
+            delay: { type: ControlType.Number, title: "Delay", defaultValue: 0.05, min: 0, max: 2, step: 0.05, unit: "s", hidden: (p: any) => !p.enabled },
+            distance: { type: ControlType.Number, title: "Distance", defaultValue: 14, min: 0, max: 60, step: 2, unit: "px", hidden: (p: any) => !p.enabled || p.style === "fanOut" },
         },
     },
 })
